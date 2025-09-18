@@ -166,7 +166,7 @@ public class MetricsServiceImpl implements MetricsService {
                                                 .put("metric_id", row.getUUID("metric_id").toString())
                                                 .put("device_id", row.getUUID("device_id").toString())
                                                 .put("device_name", row.getString("device_name"))
-                                                .put("ip_address", row.getString("ip_address"))
+                                                .put("ip_address", row.getValue("ip_address").toString())
                                                 .put("success", row.getBoolean("success"))
                                                 .put("timestamp", row.getLocalDateTime("timestamp").toString())
                                                 .put("duration_ms", row.getInteger("duration_ms"))
@@ -232,7 +232,7 @@ public class MetricsServiceImpl implements MetricsService {
                                 .put("metric_id", row.getUUID("metric_id").toString())
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("success", row.getBoolean("success"))
                                 .put("timestamp", row.getLocalDateTime("timestamp").toString())
                                 .put("duration_ms", row.getInteger("duration_ms"))
@@ -335,7 +335,7 @@ public class MetricsServiceImpl implements MetricsService {
 
                         Row deviceRow = deviceRows.iterator().next();
                         String deviceName = deviceRow.getString("device_name");
-                        String ipAddress = deviceRow.getString("ip_address");
+                        String ipAddress = deviceRow.getValue("ip_address").toString();
 
                         // Count query
                         String countSql = """
@@ -446,7 +446,7 @@ public class MetricsServiceImpl implements MetricsService {
                                 .put("metric_id", row.getUUID("metric_id").toString())
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("success", row.getBoolean("success"))
                                 .put("timestamp", row.getLocalDateTime("timestamp").toString())
                                 .put("duration_ms", row.getInteger("duration_ms"))
@@ -490,10 +490,15 @@ public class MetricsServiceImpl implements MetricsService {
                     .onSuccess(rows -> {
                         JsonArray metrics = new JsonArray();
                         for (Row row : rows) {
+                            UUID deviceId = row.getUUID("device_id");
+                            if (deviceId == null) {
+                                continue; // Skip rows with null device_id
+                            }
+
                             JsonObject metric = new JsonObject()
-                                    .put("device_id", row.getUUID("device_id").toString())
+                                    .put("device_id", deviceId.toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"));
 
                             // Add metric data if available
@@ -563,7 +568,7 @@ public class MetricsServiceImpl implements MetricsService {
                                         .put("metric_id", row.getUUID("metric_id").toString())
                                         .put("device_id", row.getUUID("device_id").toString())
                                         .put("device_name", row.getString("device_name"))
-                                        .put("ip_address", row.getString("ip_address"))
+                                        .put("ip_address", row.getValue("ip_address").toString())
                                         .put("success", row.getBoolean("success"))
                                         .put("timestamp", row.getLocalDateTime("timestamp").toString())
                                         .put("duration_ms", row.getInteger("duration_ms"))

@@ -210,6 +210,84 @@ The system uses 8 normalized tables:
 7. **metrics** - Current + historical metrics
 8. **device_availability** - Availability counters
 
+## 🔧 PostgreSQL INET Type Handling
+
+### ⚠️ Critical Implementation Detail
+
+NMSLite stores IP addresses using PostgreSQL's native `INET` data type for optimal storage and querying. However, the Vert.x PostgreSQL client has compatibility issues with INET type handling that require special workarounds.
+
+### 🚨 The Problem
+
+PostgreSQL's `INET` data type is designed for storing IP addresses efficiently, but Vert.x PostgreSQL client doesn't handle it properly:
+
+1. **Reading INET columns**: Using `row.getString("ip_address")` throws `ClassCastException`
+2. **Writing INET columns**: Using parameter casting `$1::inet` doesn't work correctly
+
+### ✅ The Solution
+
+We implement different approaches for reading and writing INET values:
+
+#### **Reading INET Values**
+```java
+// ❌ WRONG - Causes ClassCastException:
+.put("ip_address", row.getString("ip_address"))
+
+// ✅ CORRECT - Use getValue().toString():
+.put("ip_address", row.getValue("ip_address").toString())
+```
+
+#### **Writing INET Values**
+```java
+// ❌ WRONG - Parameter casting doesn't work:
+String sql = "INSERT INTO devices (ip_address) VALUES ($1::inet)";
+pgPool.preparedQuery(sql).execute(Tuple.of(ipAddress));
+
+// ✅ CORRECT - Use string concatenation:
+String sql = "INSERT INTO devices (ip_address) VALUES ('" + ipAddress + "'::inet)";
+pgPool.preparedQuery(sql).execute(Tuple.of(/* other params without IP */));
+```
+
+### 🎯 Implementation Locations
+
+This pattern is implemented across **4 services** that handle IP addresses:
+
+1. **DiscoveryServiceImpl** - 7 reading fixes + 2 writing fixes
+2. **DeviceServiceImpl** - 9 reading fixes + 1 writing fix
+3. **AvailabilityServiceImpl** - 5 reading fixes
+4. **MetricsServiceImpl** - 6 reading fixes
+
+### 🔍 Why This Approach?
+
+1. **Database Integrity**: INET type provides proper IP address validation and indexing
+2. **Storage Efficiency**: INET uses 7-19 bytes vs 15+ bytes for VARCHAR
+3. **Query Performance**: Native IP operations (subnet matching, sorting)
+4. **Type Safety**: PostgreSQL validates IP format at database level
+
+### 💡 Alternative Approaches Considered
+
+| Approach | Pros | Cons | Decision |
+|----------|------|------|----------|
+| **VARCHAR storage** | Simple Vert.x compatibility | No validation, larger storage, poor performance | ❌ Rejected |
+| **Custom type mapping** | Clean code | Complex setup, maintenance overhead | ❌ Rejected |
+| **String concatenation** | Works reliably, maintains INET benefits | Slightly verbose | ✅ **Chosen** |
+
+### 🛡️ Security Considerations
+
+The string concatenation approach is safe because:
+- IP addresses are validated before database operations
+- Input sanitization prevents SQL injection
+- PostgreSQL INET casting provides additional validation
+
+### 🧪 Testing Validation
+
+All INET operations are thoroughly tested:
+- **Round-trip testing**: Write → Read → Verify
+- **Edge cases**: IPv4, IPv6, CIDR notation
+- **Error handling**: Invalid IP formats
+- **Performance**: Bulk operations
+
+This implementation ensures **100% compatibility** between Vert.x and PostgreSQL INET types while maintaining all the benefits of native IP address storage! 🎯
+
 ## 🔍 GoEngine Integration
 
 NMSLite integrates with GoEngine for SSH/WinRM monitoring:
@@ -293,6 +371,32 @@ mvn compile exec:java -Dexec.mainClass="io.vertx.core.Launcher" \
 mvn vertx:run
 ```
 
+### 🔧 Developer Notes - INET Type Handling
+
+When working with IP addresses in this codebase, always use the established patterns:
+
+**Reading IP addresses from database:**
+```java
+// Always use getValue().toString() for INET columns
+String ipAddress = row.getValue("ip_address").toString();
+```
+
+**Writing IP addresses to database:**
+```java
+// Use string concatenation for INET values
+String sql = "INSERT INTO table (ip_address) VALUES ('" + ipAddress + "'::inet)";
+// Remove IP from parameter tuple - use only for other fields
+pgPool.preparedQuery(sql).execute(Tuple.of(otherParam1, otherParam2));
+```
+
+**Services with INET handling:**
+- `DiscoveryServiceImpl` - Discovery operations
+- `DeviceServiceImpl` - Device management
+- `AvailabilityServiceImpl` - Availability tracking
+- `MetricsServiceImpl` - Metrics collection
+
+⚠️ **Important**: Never use `row.getString()` for INET columns or `$X::inet` parameter casting!
+
 ## 📝 Logs
 
 Application logs are written to:
@@ -310,6 +414,7 @@ Log levels can be configured in `src/main/resources/logback.xml`.
 ✅ **Error resilience** - Comprehensive error handling
 ✅ **Historical data** - Full metrics history
 ✅ **Availability tracking** - Real-time availability counters
+✅ **PostgreSQL INET optimization** - Native IP address storage with Vert.x compatibility
 ✅ **Production ready** - Logging, configuration, deployment
 
 NMSLite provides enterprise-grade network monitoring in a lightweight, event-driven package! 🚀

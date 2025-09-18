@@ -58,7 +58,7 @@ public class DeviceServiceImpl implements DeviceService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
                                     .put("username", row.getString("username"))
@@ -122,17 +122,18 @@ public class DeviceServiceImpl implements DeviceService {
             }
 
             String sql = """
-                    INSERT INTO devices (device_name, ip_address, device_type, port, username, password_encrypted, 
+                    INSERT INTO devices (device_name, ip_address, device_type, port, username, password_encrypted,
                                        is_monitoring_enabled, discovery_profile_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    RETURNING device_id, device_name, ip_address, device_type, port, username, is_monitoring_enabled, 
+                    VALUES ($1, '""" + ipAddress + """
+                    '::inet, $2, $3, $4, $5, $6, $7)
+                    RETURNING device_id, device_name, ip_address, device_type, port, username, is_monitoring_enabled,
                              discovery_profile_id, created_at, last_discovered_at
                     """;
 
             UUID discoveryProfileUuid = discoveryProfileId != null ? UUID.fromString(discoveryProfileId) : null;
 
             pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(deviceName, ipAddress, deviceType, port, username, finalPasswordEncrypted, 
+                    .execute(Tuple.of(deviceName, deviceType, port, username, finalPasswordEncrypted,
                                     isMonitoringEnabled, discoveryProfileUuid))
                     .onSuccess(rows -> {
                         Row row = rows.iterator().next();
@@ -140,7 +141,7 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("success", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("device_type", row.getString("device_type"))
                                 .put("port", row.getInteger("port"))
                                 .put("username", row.getString("username"))
@@ -366,7 +367,7 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("device_type", row.getString("device_type"))
                                 .put("port", row.getInteger("port"))
                                 .put("username", row.getString("username"))
@@ -420,7 +421,7 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("device_type", row.getString("device_type"))
                                 .put("port", row.getInteger("port"))
                                 .put("username", row.getString("username"))
@@ -469,7 +470,7 @@ public class DeviceServiceImpl implements DeviceService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
                                     .put("username", row.getString("username"))
@@ -496,7 +497,8 @@ public class DeviceServiceImpl implements DeviceService {
             String sql = """
                     SELECT d.device_id, d.device_name, d.ip_address, d.device_type, d.port, d.username,
                            d.is_monitoring_enabled, d.is_deleted, d.created_at,
-                           da.availability_percentage, da.uptime_hours, da.downtime_hours, da.last_check_time, da.status
+                           da.availability_percent, da.total_checks, da.successful_checks, da.failed_checks,
+                           da.last_check_time, da.current_status
                     FROM devices d
                     LEFT JOIN device_availability da ON d.device_id = da.device_id
                     """ + (includeDeleted ? "" : "WHERE d.is_deleted = false ") + """
@@ -511,19 +513,20 @@ public class DeviceServiceImpl implements DeviceService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
                                     .put("username", row.getString("username"))
                                     .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                     .put("is_deleted", row.getBoolean("is_deleted"))
                                     .put("created_at", row.getLocalDateTime("created_at").toString())
-                                    .put("availability_percentage", row.getBigDecimal("availability_percentage"))
-                                    .put("uptime_hours", row.getBigDecimal("uptime_hours"))
-                                    .put("downtime_hours", row.getBigDecimal("downtime_hours"))
+                                    .put("availability_percent", row.getBigDecimal("availability_percent"))
+                                    .put("total_checks", row.getInteger("total_checks"))
+                                    .put("successful_checks", row.getInteger("successful_checks"))
+                                    .put("failed_checks", row.getInteger("failed_checks"))
                                     .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
                                         row.getLocalDateTime("last_check_time").toString() : null)
-                                    .put("status", row.getString("status"));
+                                    .put("current_status", row.getString("current_status"));
                             devices.add(device);
                         }
                         blockingPromise.complete(devices);
@@ -542,7 +545,7 @@ public class DeviceServiceImpl implements DeviceService {
             String sql = """
                     SELECT d.device_id, d.device_name, d.ip_address, d.device_type, d.port, d.username,
                            d.is_monitoring_enabled, d.is_deleted, d.created_at, d.last_discovered_at,
-                           da.status, da.last_check_time, da.availability_percentage
+                           da.current_status, da.last_check_time, da.availability_percent
                     FROM devices d
                     LEFT JOIN device_availability da ON d.device_id = da.device_id
                     """ + (includeDeleted ? "" : "WHERE d.is_deleted = false ") + """
@@ -557,7 +560,7 @@ public class DeviceServiceImpl implements DeviceService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
                                     .put("username", row.getString("username"))
@@ -566,10 +569,10 @@ public class DeviceServiceImpl implements DeviceService {
                                     .put("created_at", row.getLocalDateTime("created_at").toString())
                                     .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ?
                                         row.getLocalDateTime("last_discovered_at").toString() : null)
-                                    .put("status", row.getString("status"))
+                                    .put("current_status", row.getString("current_status"))
                                     .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
                                         row.getLocalDateTime("last_check_time").toString() : null)
-                                    .put("availability_percentage", row.getBigDecimal("availability_percentage"));
+                                    .put("availability_percent", row.getBigDecimal("availability_percent"));
                             devices.add(device);
                         }
                         blockingPromise.complete(devices);
@@ -602,7 +605,7 @@ public class DeviceServiceImpl implements DeviceService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
                                     .put("username", row.getString("username"))
@@ -647,7 +650,7 @@ public class DeviceServiceImpl implements DeviceService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
                                     .put("username", row.getString("username"))

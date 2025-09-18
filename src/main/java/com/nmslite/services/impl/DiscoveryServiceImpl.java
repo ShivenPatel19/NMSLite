@@ -60,7 +60,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                             JsonObject profile = new JsonObject()
                                     .put("profile_id", row.getUUID("profile_id").toString())
                                     .put("discovery_name", row.getString("discovery_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("port", row.getInteger("port"))
                                     .put("timeout_seconds", row.getInteger("timeout_seconds"))
                                     .put("retry_count", row.getInteger("retry_count"))
@@ -105,14 +105,15 @@ public class DiscoveryServiceImpl implements DiscoveryService {
             }
 
             String sql = """
-                    INSERT INTO discovery_profiles (discovery_name, ip_address, device_type_id, credential_profile_id, 
+                    INSERT INTO discovery_profiles (discovery_name, ip_address, device_type_id, credential_profile_id,
                                                    port, timeout_seconds, retry_count, is_active, created_by)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    VALUES ($1, '""" + ipAddress + """
+                    '::inet, $2, $3, $4, $5, $6, $7, $8)
                     RETURNING profile_id, discovery_name, ip_address, port, timeout_seconds, retry_count, is_active, created_at, created_by
                     """;
 
             pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(discoveryName, ipAddress, UUID.fromString(deviceTypeId), 
+                    .execute(Tuple.of(discoveryName, UUID.fromString(deviceTypeId),
                                     UUID.fromString(credentialProfileId), port, timeoutSeconds, retryCount, isActive, createdBy))
                     .onSuccess(rows -> {
                         Row row = rows.iterator().next();
@@ -120,7 +121,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                                 .put("success", true)
                                 .put("profile_id", row.getUUID("profile_id").toString())
                                 .put("discovery_name", row.getString("discovery_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("port", row.getInteger("port"))
                                 .put("timeout_seconds", row.getInteger("timeout_seconds"))
                                 .put("retry_count", row.getInteger("retry_count"))
@@ -171,8 +172,8 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                 params.add(discoveryName);
             }
             if (ipAddress != null) {
-                sqlBuilder.append("ip_address = $").append(paramIndex++).append(", ");
-                params.add(ipAddress);
+                sqlBuilder.append("ip_address = '").append(ipAddress).append("'::inet, ");
+                // Note: ipAddress is not added to params since it's directly embedded in SQL
             }
             if (deviceTypeId != null) {
                 sqlBuilder.append("device_type_id = $").append(paramIndex++).append(", ");
@@ -222,7 +223,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                                 .put("success", true)
                                 .put("profile_id", row.getUUID("profile_id").toString())
                                 .put("discovery_name", row.getString("discovery_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("port", row.getInteger("port"))
                                 .put("timeout_seconds", row.getInteger("timeout_seconds"))
                                 .put("retry_count", row.getInteger("retry_count"))
@@ -311,7 +312,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                                 .put("found", true)
                                 .put("profile_id", row.getUUID("profile_id").toString())
                                 .put("discovery_name", row.getString("discovery_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("device_type_id", row.getUUID("device_type_id").toString())
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("port", row.getInteger("port"))
@@ -364,7 +365,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                                 .put("found", true)
                                 .put("profile_id", row.getUUID("profile_id").toString())
                                 .put("discovery_name", row.getString("discovery_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("device_type_id", row.getUUID("device_type_id").toString())
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("port", row.getInteger("port"))
@@ -417,7 +418,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                                 .put("found", true)
                                 .put("profile_id", row.getUUID("profile_id").toString())
                                 .put("discovery_name", row.getString("discovery_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("device_type_id", row.getUUID("device_type_id").toString())
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("port", row.getInteger("port"))
@@ -498,7 +499,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                             JsonObject profile = new JsonObject()
                                     .put("profile_id", row.getUUID("profile_id").toString())
                                     .put("discovery_name", row.getString("discovery_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("port", row.getInteger("port"))
                                     .put("device_type_name", row.getString("device_type_name"))
                                     .put("credential_profile_name", row.getString("credential_profile_name"));
@@ -541,7 +542,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         JsonObject discoveryData = new JsonObject()
                                 .put("profile_id", row.getUUID("profile_id").toString())
                                 .put("discovery_name", row.getString("discovery_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("port", row.getInteger("port"))
                                 .put("timeout_seconds", row.getInteger("timeout_seconds"))
                                 .put("retry_count", row.getInteger("retry_count"))

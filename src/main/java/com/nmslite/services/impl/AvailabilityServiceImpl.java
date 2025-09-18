@@ -60,7 +60,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                             JsonObject availability = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"))
                                     .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                     .put("total_checks", row.getInteger("total_checks"))
@@ -128,7 +128,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
                         Row deviceRow = deviceRows.iterator().next();
                         String deviceName = deviceRow.getString("device_name");
-                        String ipAddress = deviceRow.getString("ip_address");
+                        String ipAddress = deviceRow.getValue("ip_address").toString();
 
                         // Upsert availability record
                         String upsertSql = """
@@ -233,7 +233,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getString("ip_address"))
+                                .put("ip_address", row.getValue("ip_address").toString())
                                 .put("device_type", row.getString("device_type"))
                                 .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                 .put("total_checks", row.getInteger("total_checks"))
@@ -324,7 +324,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("ip_address", row.getValue("ip_address").toString())
                                     .put("device_type", row.getString("device_type"))
                                     .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                     .put("total_checks", row.getInteger("total_checks"))
@@ -386,7 +386,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
                         Row deviceRow = deviceRows.iterator().next();
                         String deviceName = deviceRow.getString("device_name");
-                        String ipAddress = deviceRow.getString("ip_address");
+                        String ipAddress = deviceRow.getValue("ip_address").toString();
 
                         LocalDateTime now = LocalDateTime.now();
                         int successfulIncrement = normalizedStatus.equals("up") ? 1 : 0;

@@ -174,7 +174,6 @@ public class NMSLiteApplication extends AbstractVerticle {
                 System.out.println("🎉 NMSLite Application started successfully!");
                 System.out.println("📡 HTTP API available at: http://localhost:8080");
                 System.out.println("🔌 WebSocket endpoint: ws://localhost:8080/ws");
-                System.out.println("📊 Health check: http://localhost:8080/api/health");
             })
             .onFailure(cause -> {
                 System.err.println("❌ Failed to start NMSLite Application: " + cause.getMessage());

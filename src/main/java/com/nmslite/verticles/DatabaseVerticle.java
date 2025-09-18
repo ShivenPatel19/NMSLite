@@ -64,9 +64,6 @@ public class DatabaseVerticle extends AbstractVerticle {
                 // Register all services with ProxyGen
                 registerAllServiceProxies();
 
-                // Setup health check endpoints
-                setupHealthChecks();
-
                 logger.info("🚀 DatabaseVerticle started successfully with all 7 services");
                 startPromise.complete();
             })
@@ -191,50 +188,7 @@ public class DatabaseVerticle extends AbstractVerticle {
         }
     }
 
-    /**
-     * Setup health check endpoints for all services
-     */
-    private void setupHealthChecks() {
-        // Register comprehensive health check consumer
-        vertx.eventBus().consumer("database.health", message -> {
-            // Test database connection
-            pgPool.getConnection()
-                .onSuccess(connection -> {
-                    connection.close();
 
-                    // Create comprehensive health status
-                    io.vertx.core.json.JsonObject healthStatus = new io.vertx.core.json.JsonObject()
-                        .put("status", "healthy")
-                        .put("timestamp", java.time.LocalDateTime.now().toString())
-                        .put("database_connection", "active")
-                        .put("services", new io.vertx.core.json.JsonObject()
-                            .put("user_service", "registered")
-                            .put("device_type_service", "registered")
-                            .put("credential_service", "registered")
-                            .put("discovery_service", "registered")
-                            .put("device_service", "registered")
-                            .put("metrics_service", "registered")
-                            .put("availability_service", "registered"))
-                        .put("total_services", 7);
-
-                    message.reply(healthStatus);
-                    logger.debug("🏥 Database health check completed: healthy");
-                })
-                .onFailure(cause -> {
-                    logger.error("❌ Database health check failed", cause);
-
-                    io.vertx.core.json.JsonObject errorStatus = new io.vertx.core.json.JsonObject()
-                        .put("status", "unhealthy")
-                        .put("timestamp", java.time.LocalDateTime.now().toString())
-                        .put("database_connection", "failed")
-                        .put("error", cause.getMessage());
-
-                    message.reply(errorStatus);
-                });
-        });
-
-        logger.info("🏥 Comprehensive database health check endpoint registered");
-    }
 
     @Override
     public void stop(Promise<Void> stopPromise) {

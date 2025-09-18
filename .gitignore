@@ -1,82 +1,65 @@
 # Maven
 target/
-!.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
+*.jar
+*.war
 
-# Compiled class files
+# Compiled files
 *.class
 
-### IntelliJ IDEA ###
+# IDE files
 .idea/
-*.iws
 *.iml
 *.ipr
-
-### Eclipse ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-### VS Code ###
 .vscode/
+.settings/
+.project
+.classpath
 
-### Mac OS ###
+# OS files
 .DS_Store
-
-### Windows ###
 Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-### Linux ###
 *~
 
 # Logs
 logs/
 *.log
-*.log.*
+
+# Test results
+test-results/
+*-test.log
 
 # Temporary files
 *.tmp
 *.temp
 *.swp
-*.swo
-*~
 *.bak
-*.backup
 
-# Database files (local development)
+# Shell scripts (testing/development)
+*.sh
+
+# Environment and config files
+*.env
+application-local.conf
+application-dev.conf
+application-prod.conf
+
+# Security files
+*.key
+*.pem
+*.jks
+credentials.json
+secrets.json
+
+# Database files (keep schema)
 *.db
 *.sqlite
-*.sqlite3
-
-# Include database schema and scripts
 !database/
-!database/**
 
-# Documentation (exclude all except README)
+# Documentation (exclude generated docs)
 API_DOCUMENTATION.md
 PROJECT_GLOBAL_MAP.md
 DATABASE_SERVICES_INTEGRATION.md
 
-### GoEngine Reference ###
+# GoEngine reference
 goengine/goengine\ referance/
 "goengine/goengine referance/"
-
-# Application specific
-# Add any application-specific files/folders here

@@ -81,6 +81,12 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                 return;
             }
 
+            // Validate port range (1-65535)
+            if (defaultPort != null && (defaultPort < 1 || defaultPort > 65535)) {
+                blockingPromise.fail(new IllegalArgumentException("Port must be between 1 and 65535"));
+                return;
+            }
+
             String sql = """
                     INSERT INTO device_types (device_type_name, default_port, is_active)
                     VALUES ($1, $2, $3)
@@ -119,6 +125,12 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
             String deviceTypeName = deviceTypeData.getString("device_type_name");
             Integer defaultPort = deviceTypeData.getInteger("default_port");
             Boolean isActive = deviceTypeData.getBoolean("is_active");
+
+            // Validate port range (1-65535)
+            if (defaultPort != null && (defaultPort < 1 || defaultPort > 65535)) {
+                blockingPromise.fail(new IllegalArgumentException("Port must be between 1 and 65535"));
+                return;
+            }
 
             StringBuilder sqlBuilder = new StringBuilder("UPDATE device_types SET ");
             JsonArray params = new JsonArray();
