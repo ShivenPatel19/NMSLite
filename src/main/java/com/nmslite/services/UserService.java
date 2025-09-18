@@ -2,7 +2,8 @@ package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
 import io.vertx.codegen.annotations.VertxGen;
-import io.vertx.core.Future;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -39,75 +40,75 @@ public interface UserService {
 
     /**
      * Get all users
-     * @return Future containing JsonArray of users
+     * @param resultHandler Handler for the async result containing JsonArray of users
      */
-    Future<JsonArray> userList();
+    void userList(Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Create a new user
      * @param userData JsonObject containing user data (username, password, is_active)
-     * @return Future containing JsonObject with creation result
+     * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
-    Future<JsonObject> userCreate(JsonObject userData);
+    void userCreate(JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Update user information
      * @param userId User ID to update
      * @param userData JsonObject containing fields to update
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> userUpdate(String userId, JsonObject userData);
+    void userUpdate(String userId, JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Delete a user
      * @param userId User ID to delete
-     * @return Future containing JsonObject with deletion result
+     * @param resultHandler Handler for the async result containing JsonObject with deletion result
      */
-    Future<JsonObject> userDelete(String userId);
+    void userDelete(String userId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Authenticate user with username and password
      * @param username Username
      * @param password Plain text password
-     * @return Future containing JsonObject with authentication result
+     * @param resultHandler Handler for the async result containing JsonObject with authentication result
      */
-    Future<JsonObject> userAuthenticate(String username, String password);
+    void userAuthenticate(String username, String password, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Update user's last login timestamp
      * @param userId User ID
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> userUpdateLastLogin(String userId);
+    void userUpdateLastLogin(String userId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get user by username
      * @param username Username to search for
-     * @return Future containing JsonObject with user data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with user data or not found
      */
-    Future<JsonObject> userGetByUsername(String username);
+    void userGetByUsername(String username, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Change user password
      * @param userId User ID
      * @param oldPassword Current password
      * @param newPassword New password
-     * @return Future containing JsonObject with change result
+     * @param resultHandler Handler for the async result containing JsonObject with change result
      */
-    Future<JsonObject> userChangePassword(String userId, String oldPassword, String newPassword);
+    void userChangePassword(String userId, String oldPassword, String newPassword, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get user by ID
      * @param userId User ID
-     * @return Future containing JsonObject with user data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with user data or not found
      */
-    Future<JsonObject> userGetById(String userId);
+    void userGetById(String userId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Activate or deactivate user
      * @param userId User ID
      * @param isActive Active status
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> userSetActive(String userId, boolean isActive);
+    void userSetActive(String userId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler);
 }

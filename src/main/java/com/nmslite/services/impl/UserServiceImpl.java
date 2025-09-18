@@ -2,7 +2,9 @@ package com.nmslite.services.impl;
 
 import com.nmslite.services.UserService;
 import com.nmslite.utils.PasswordUtil;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -35,9 +37,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Future<JsonArray> userList() {
-        Promise<JsonArray> promise = Promise.promise();
-
+    public void userList(Handler<AsyncResult<JsonArray>> resultHandler) {
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
                 SELECT user_id, username, is_active, created_at, updated_at, last_login_at
@@ -55,9 +55,9 @@ public class UserServiceImpl implements UserService {
                             .put("username", row.getString("username"))
                             .put("is_active", row.getBoolean("is_active"))
                             .put("created_at", row.getLocalDateTime("created_at").toString())
-                            .put("updated_at", row.getLocalDateTime("updated_at") != null ? 
+                            .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                 row.getLocalDateTime("updated_at").toString() : null)
-                            .put("last_login_at", row.getLocalDateTime("last_login_at") != null ? 
+                            .put("last_login_at", row.getLocalDateTime("last_login_at") != null ?
                                 row.getLocalDateTime("last_login_at").toString() : null);
                         users.add(user);
                     }
@@ -67,15 +67,11 @@ public class UserServiceImpl implements UserService {
                     logger.error("Failed to get users", cause);
                     blockingPromise.fail(cause);
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userCreate(JsonObject userData) {
-        Promise<JsonObject> promise = Promise.promise();
-
+    public void userCreate(JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler) {
         vertx.executeBlocking(blockingPromise -> {
             String username = userData.getString("username");
             String password = userData.getString("password");
@@ -116,15 +112,11 @@ public class UserServiceImpl implements UserService {
                         blockingPromise.fail(cause);
                     }
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userUpdate(String userId, JsonObject userData) {
-        Promise<JsonObject> promise = Promise.promise();
-
+    public void userUpdate(String userId, JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler) {
         vertx.executeBlocking(blockingPromise -> {
             String username = userData.getString("username");
             String password = userData.getString("password");
@@ -154,7 +146,7 @@ public class UserServiceImpl implements UserService {
             }
 
             // Remove trailing comma and space
-            String sql = sqlBuilder.substring(0, sqlBuilder.length() - 2) + 
+            String sql = sqlBuilder.substring(0, sqlBuilder.length() - 2) +
                 " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active, updated_at";
             params.add(UUID.fromString(userId));
 
@@ -183,18 +175,14 @@ public class UserServiceImpl implements UserService {
                         blockingPromise.fail(cause);
                     }
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userDelete(String userId) {
-        Promise<JsonObject> promise = Promise.promise();
-
+    public void userDelete(String userId, Handler<AsyncResult<JsonObject>> resultHandler) {
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                DELETE FROM users 
+                DELETE FROM users
                 WHERE user_id = $1
                 RETURNING user_id, username
                 """;
@@ -218,14 +206,11 @@ public class UserServiceImpl implements UserService {
                     logger.error("Failed to delete user", cause);
                     blockingPromise.fail(cause);
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userAuthenticate(String username, String password) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void userAuthenticate(String username, String password, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -265,14 +250,11 @@ public class UserServiceImpl implements UserService {
                     logger.error("Failed to authenticate user", cause);
                     blockingPromise.fail(cause);
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userUpdateLastLogin(String userId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void userUpdateLastLogin(String userId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -302,14 +284,11 @@ public class UserServiceImpl implements UserService {
                     logger.error("Failed to update last login", cause);
                     blockingPromise.fail(cause);
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userGetByUsername(String username) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void userGetByUsername(String username, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -343,14 +322,11 @@ public class UserServiceImpl implements UserService {
                     logger.error("Failed to get user by username", cause);
                     blockingPromise.fail(cause);
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userChangePassword(String userId, String oldPassword, String newPassword) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void userChangePassword(String userId, String oldPassword, String newPassword, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             // First verify the old password
@@ -407,14 +383,11 @@ public class UserServiceImpl implements UserService {
                     logger.error("Failed to verify old password", cause);
                     blockingPromise.fail(cause);
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userGetById(String userId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void userGetById(String userId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -448,14 +421,11 @@ public class UserServiceImpl implements UserService {
                     logger.error("Failed to get user by ID", cause);
                     blockingPromise.fail(cause);
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> userSetActive(String userId, boolean isActive) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void userSetActive(String userId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -485,8 +455,6 @@ public class UserServiceImpl implements UserService {
                     logger.error("Failed to update user status", cause);
                     blockingPromise.fail(cause);
                 });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 }

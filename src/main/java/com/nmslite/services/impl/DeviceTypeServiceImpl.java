@@ -1,7 +1,9 @@
 package com.nmslite.services.impl;
 
 import com.nmslite.services.DeviceTypeService;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -34,8 +36,7 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
     }
 
     @Override
-    public Future<JsonArray> deviceTypeList(boolean includeInactive) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void deviceTypeList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -64,14 +65,11 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                         logger.error("Failed to get device types", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceTypeCreate(JsonObject deviceTypeData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceTypeCreate(JsonObject deviceTypeData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String deviceTypeName = deviceTypeData.getString("device_type_name");
@@ -111,14 +109,11 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceTypeUpdate(String deviceTypeId, JsonObject deviceTypeData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceTypeUpdate(String deviceTypeId, JsonObject deviceTypeData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String deviceTypeName = deviceTypeData.getString("device_type_name");
@@ -178,14 +173,11 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceTypeDelete(String deviceTypeId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceTypeDelete(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             // Soft delete by setting is_active to false
@@ -215,14 +207,11 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                         logger.error("Failed to delete device type", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceTypeGetById(String deviceTypeId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceTypeGetById(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -253,14 +242,11 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                         logger.error("Failed to get device type by ID", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceTypeGetByName(String deviceTypeName) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceTypeGetByName(String deviceTypeName, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -291,14 +277,11 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                         logger.error("Failed to get device type by name", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceTypeSetActive(String deviceTypeId, boolean isActive) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceTypeSetActive(String deviceTypeId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -328,14 +311,11 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                         logger.error("Failed to update device type status", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> deviceTypeListActive() {
-        Promise<JsonArray> promise = Promise.promise();
+    public void deviceTypeListActive(Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -362,8 +342,6 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                         logger.error("Failed to get active device types", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 }

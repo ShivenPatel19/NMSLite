@@ -2,7 +2,8 @@ package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
 import io.vertx.codegen.annotations.VertxGen;
-import io.vertx.core.Future;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -40,57 +41,57 @@ public interface CredentialService {
     /**
      * Get all credential profiles
      * @param includeInactive Include inactive credential profiles
-     * @return Future containing JsonArray of credential profiles
+     * @param resultHandler Handler for the async result containing JsonArray of credential profiles
      */
-    Future<JsonArray> credentialList(boolean includeInactive);
+    void credentialList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Create a new credential profile
      * @param credentialData JsonObject containing credential data (profile_name, username, password, protocol, is_active, created_by)
-     * @return Future containing JsonObject with creation result
+     * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
-    Future<JsonObject> credentialCreate(JsonObject credentialData);
+    void credentialCreate(JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Update credential profile information
      * @param credentialId Credential profile ID to update
      * @param credentialData JsonObject containing fields to update
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> credentialUpdate(String credentialId, JsonObject credentialData);
+    void credentialUpdate(String credentialId, JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Delete (deactivate) a credential profile
      * @param credentialId Credential profile ID to delete
-     * @return Future containing JsonObject with deletion result
+     * @param resultHandler Handler for the async result containing JsonObject with deletion result
      */
-    Future<JsonObject> credentialDelete(String credentialId);
+    void credentialDelete(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get credential profile by ID
      * @param credentialId Credential profile ID
-     * @return Future containing JsonObject with credential profile data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with credential profile data or not found
      */
-    Future<JsonObject> credentialGetById(String credentialId);
+    void credentialGetById(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get credential profile by name
      * @param profileName Profile name to search for
-     * @return Future containing JsonObject with credential profile data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with credential profile data or not found
      */
-    Future<JsonObject> credentialGetByName(String profileName);
+    void credentialGetByName(String profileName, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Activate credential profile
      * @param credentialId Credential profile ID
      * @param isActive Active status
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> credentialSetActive(String credentialId, boolean isActive);
+    void credentialSetActive(String credentialId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get all active credential profiles (simplified list)
-     * @return Future containing JsonArray of active credential profiles
+     * @param resultHandler Handler for the async result containing JsonArray of active credential profiles
      */
-    Future<JsonArray> credentialListActive();
+    void credentialListActive(Handler<AsyncResult<JsonArray>> resultHandler);
 }

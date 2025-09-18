@@ -2,7 +2,9 @@ package com.nmslite.services.impl;
 
 import com.nmslite.services.CredentialService;
 import com.nmslite.utils.PasswordUtil;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -35,8 +37,7 @@ public class CredentialServiceImpl implements CredentialService {
     }
 
     @Override
-    public Future<JsonArray> credentialList(boolean includeInactive) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void credentialList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -69,14 +70,11 @@ public class CredentialServiceImpl implements CredentialService {
                         logger.error("Failed to get credential profiles", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> credentialCreate(JsonObject credentialData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void credentialCreate(JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String profileName = credentialData.getString("profile_name");
@@ -124,14 +122,11 @@ public class CredentialServiceImpl implements CredentialService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> credentialUpdate(String credentialId, JsonObject credentialData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void credentialUpdate(String credentialId, JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String profileName = credentialData.getString("profile_name");
@@ -203,14 +198,11 @@ public class CredentialServiceImpl implements CredentialService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> credentialDelete(String credentialId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void credentialDelete(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             // Soft delete by setting is_active to false
@@ -240,14 +232,11 @@ public class CredentialServiceImpl implements CredentialService {
                         logger.error("Failed to delete credential profile", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> credentialGetById(String credentialId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void credentialGetById(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -286,14 +275,11 @@ public class CredentialServiceImpl implements CredentialService {
                         logger.error("Failed to get credential profile by ID", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> credentialGetByName(String profileName) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void credentialGetByName(String profileName, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -332,14 +318,11 @@ public class CredentialServiceImpl implements CredentialService {
                         logger.error("Failed to get credential profile by name", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> credentialSetActive(String credentialId, boolean isActive) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void credentialSetActive(String credentialId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -369,14 +352,11 @@ public class CredentialServiceImpl implements CredentialService {
                         logger.error("Failed to update credential profile status", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> credentialListActive() {
-        Promise<JsonArray> promise = Promise.promise();
+    public void credentialListActive(Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -404,8 +384,6 @@ public class CredentialServiceImpl implements CredentialService {
                         logger.error("Failed to get active credential profiles", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 }

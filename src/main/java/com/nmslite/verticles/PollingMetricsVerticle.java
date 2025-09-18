@@ -172,17 +172,18 @@ public class PollingMetricsVerticle extends AbstractVerticle {
     private io.vertx.core.Future<List<JsonObject>> getDevicesForPolling() {
         Promise<List<JsonObject>> promise = Promise.promise();
 
-        deviceService.deviceListForPolling()
-            .onSuccess(devices -> {
+        deviceService.deviceListForPolling(ar -> {
+            if (ar.succeeded()) {
+                JsonArray devices = ar.result();
                 List<JsonObject> deviceList = devices.stream()
                     .map(obj -> (JsonObject) obj)
                     .collect(Collectors.toList());
                 promise.complete(deviceList);
-            })
-            .onFailure(cause -> {
-                logger.error("❌ Failed to get devices for polling", cause);
-                promise.fail(cause);
-            });
+            } else {
+                logger.error("❌ Failed to get devices for polling", ar.cause());
+                promise.fail(ar.cause());
+            }
+        });
 
         return promise.future();
     }
@@ -444,15 +445,15 @@ public class PollingMetricsVerticle extends AbstractVerticle {
             .put("duration_ms", 0)
             .put("error_message", "Device unreachable - ping failed");
 
-        metricsService.metricsCreate(metricsData)
-            .onSuccess(result -> {
+        metricsService.metricsCreate(metricsData, ar -> {
+            if (ar.succeeded()) {
                 logger.debug("📊 Connectivity failure metrics stored for device: {}",
                            device.getString("device_name"));
-            })
-            .onFailure(cause -> {
+            } else {
                 logger.error("❌ Failed to store connectivity failure metrics for device: {}",
-                           device.getString("device_name"), cause);
-            });
+                           device.getString("device_name"), ar.cause());
+            }
+        });
     }
 
     private void storeMetricsSuccess(String deviceId, JsonObject result) {
@@ -474,13 +475,13 @@ public class PollingMetricsVerticle extends AbstractVerticle {
             .put("disk_used_bytes", disk.getLong("used_bytes", 0L))
             .put("disk_free_bytes", disk.getLong("free_bytes", 0L));
 
-        metricsService.metricsCreate(metricsData)
-            .onSuccess(metricsResult -> {
+        metricsService.metricsCreate(metricsData, ar -> {
+            if (ar.succeeded()) {
                 logger.debug("📊 Metrics stored successfully for device: {}", deviceId);
-            })
-            .onFailure(cause -> {
-                logger.error("❌ Failed to store metrics for device: {}", deviceId, cause);
-            });
+            } else {
+                logger.error("❌ Failed to store metrics for device: {}", deviceId, ar.cause());
+            }
+        });
     }
 
     private void storeMetricsFailure(String deviceId, String error) {
@@ -490,26 +491,26 @@ public class PollingMetricsVerticle extends AbstractVerticle {
             .put("duration_ms", 0)
             .put("error_message", error);
 
-        metricsService.metricsCreate(metricsData)
-            .onSuccess(result -> {
+        metricsService.metricsCreate(metricsData, ar -> {
+            if (ar.succeeded()) {
                 logger.debug("📊 Failure metrics stored for device: {}", deviceId);
-            })
-            .onFailure(cause -> {
-                logger.error("❌ Failed to store failure metrics for device: {}", deviceId, cause);
-            });
+            } else {
+                logger.error("❌ Failed to store failure metrics for device: {}", deviceId, ar.cause());
+            }
+        });
     }
 
     private void updateDeviceAvailability(String deviceId, boolean success) {
         String status = success ? "up" : "down";
         Long responseTime = success ? System.currentTimeMillis() % 1000 : null; // Simple response time simulation
 
-        availabilityService.availabilityUpdateDeviceStatus(deviceId, status, responseTime)
-            .onSuccess(result -> {
+        availabilityService.availabilityUpdateDeviceStatus(deviceId, status, responseTime, ar -> {
+            if (ar.succeeded()) {
                 logger.debug("📊 Availability updated for device: {} - Status: {}", deviceId, status);
-            })
-            .onFailure(cause -> {
-                logger.error("❌ Failed to update availability for device: {}", deviceId, cause);
-            });
+            } else {
+                logger.error("❌ Failed to update availability for device: {}", deviceId, ar.cause());
+            }
+        });
     }
 
     private void handleProvisionStart(io.vertx.core.eventbus.Message<Object> message, JsonObject request) {

@@ -2,7 +2,8 @@ package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
 import io.vertx.codegen.annotations.VertxGen;
-import io.vertx.core.Future;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -40,57 +41,57 @@ public interface DeviceTypeService {
     /**
      * Get all device types
      * @param includeInactive Include inactive device types
-     * @return Future containing JsonArray of device types
+     * @param resultHandler Handler for the async result containing JsonArray of device types
      */
-    Future<JsonArray> deviceTypeList(boolean includeInactive);
+    void deviceTypeList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Create a new device type
      * @param deviceTypeData JsonObject containing device type data (device_type_name, default_port, is_active)
-     * @return Future containing JsonObject with creation result
+     * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
-    Future<JsonObject> deviceTypeCreate(JsonObject deviceTypeData);
+    void deviceTypeCreate(JsonObject deviceTypeData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Update device type information
      * @param deviceTypeId Device type ID to update
      * @param deviceTypeData JsonObject containing fields to update
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> deviceTypeUpdate(String deviceTypeId, JsonObject deviceTypeData);
+    void deviceTypeUpdate(String deviceTypeId, JsonObject deviceTypeData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Delete (deactivate) a device type
      * @param deviceTypeId Device type ID to delete
-     * @return Future containing JsonObject with deletion result
+     * @param resultHandler Handler for the async result containing JsonObject with deletion result
      */
-    Future<JsonObject> deviceTypeDelete(String deviceTypeId);
+    void deviceTypeDelete(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get device type by ID
      * @param deviceTypeId Device type ID
-     * @return Future containing JsonObject with device type data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with device type data or not found
      */
-    Future<JsonObject> deviceTypeGetById(String deviceTypeId);
+    void deviceTypeGetById(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get device type by name
      * @param deviceTypeName Device type name to search for
-     * @return Future containing JsonObject with device type data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with device type data or not found
      */
-    Future<JsonObject> deviceTypeGetByName(String deviceTypeName);
+    void deviceTypeGetByName(String deviceTypeName, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Activate or deactivate device type
      * @param deviceTypeId Device type ID
      * @param isActive Active status
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> deviceTypeSetActive(String deviceTypeId, boolean isActive);
+    void deviceTypeSetActive(String deviceTypeId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get all active device types (simplified list)
-     * @return Future containing JsonArray of active device types
+     * @param resultHandler Handler for the async result containing JsonArray of active device types
      */
-    Future<JsonArray> deviceTypeListActive();
+    void deviceTypeListActive(Handler<AsyncResult<JsonArray>> resultHandler);
 }

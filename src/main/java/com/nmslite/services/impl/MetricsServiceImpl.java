@@ -1,7 +1,9 @@
 package com.nmslite.services.impl;
 
 import com.nmslite.services.MetricsService;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -38,8 +40,7 @@ public class MetricsServiceImpl implements MetricsService {
     }
 
     @Override
-    public Future<JsonObject> metricsCreate(JsonObject metricsData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void metricsCreate(JsonObject metricsData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String deviceId = metricsData.getString("device_id");
@@ -103,14 +104,11 @@ public class MetricsServiceImpl implements MetricsService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> metricsList(int page, int pageSize, String deviceId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void metricsList(int page, int pageSize, String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             // Build SQL with optional device filter and ensure device is active
@@ -203,14 +201,11 @@ public class MetricsServiceImpl implements MetricsService {
                         logger.error("Failed to count metrics", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> metricsGet(String metricId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void metricsGet(String metricId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -257,14 +252,11 @@ public class MetricsServiceImpl implements MetricsService {
                         logger.error("Failed to get metric by ID", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> metricsDeleteOlderThan(int olderThanDays) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void metricsDeleteOlderThan(int olderThanDays, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             if (olderThanDays <= 0) {
@@ -292,14 +284,11 @@ public class MetricsServiceImpl implements MetricsService {
                         logger.error("Failed to delete old metrics", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> metricsDeleteAllByDevice(String deviceId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void metricsDeleteAllByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -322,14 +311,11 @@ public class MetricsServiceImpl implements MetricsService {
                         logger.error("Failed to delete metrics for device", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> metricsListByDevice(String deviceId, int page, int pageSize) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void metricsListByDevice(String deviceId, int page, int pageSize, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             // First verify device exists and is active
@@ -427,14 +413,11 @@ public class MetricsServiceImpl implements MetricsService {
                         logger.error("Failed to verify device", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> metricsGetLatestByDevice(String deviceId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void metricsGetLatestByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -483,14 +466,11 @@ public class MetricsServiceImpl implements MetricsService {
                         logger.error("Failed to get latest metric for device", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> metricsGetLatestAllDevices() {
-        Promise<JsonArray> promise = Promise.promise();
+    public void metricsGetLatestAllDevices(Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -545,14 +525,11 @@ public class MetricsServiceImpl implements MetricsService {
                         logger.error("Failed to get latest metrics for all devices", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> metricsGetByDeviceTimeRange(String deviceId, String startTime, String endTime) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void metricsGetByDeviceTimeRange(String deviceId, String startTime, String endTime, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             try {
@@ -611,8 +588,6 @@ public class MetricsServiceImpl implements MetricsService {
             } catch (Exception e) {
                 blockingPromise.fail(new IllegalArgumentException("Invalid time format. Use ISO 8601 format (yyyy-MM-ddTHH:mm:ss)"));
             }
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 }

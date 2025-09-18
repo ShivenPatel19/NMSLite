@@ -1,7 +1,9 @@
 package com.nmslite.services.impl;
 
 import com.nmslite.services.AvailabilityService;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -36,8 +38,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
     }
 
     @Override
-    public Future<JsonArray> availabilityListAll() {
-        Promise<JsonArray> promise = Promise.promise();
+    public void availabilityListAll(Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -85,14 +86,11 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                         logger.error("Failed to get all device availability statuses", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> availabilityCreateOrUpdate(JsonObject availabilityData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void availabilityCreateOrUpdate(JsonObject availabilityData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String deviceId = availabilityData.getString("device_id");
@@ -205,14 +203,11 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                         logger.error("Failed to verify device", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> availabilityGetByDevice(String deviceId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void availabilityGetByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -262,14 +257,11 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                         logger.error("Failed to get device availability", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> availabilityDeleteByDevice(String deviceId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void availabilityDeleteByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -294,14 +286,11 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                         logger.error("Failed to delete device availability", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> availabilityGetDevicesByStatus(String status) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void availabilityGetDevicesByStatus(String status, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             StringBuilder sqlBuilder = new StringBuilder("""
@@ -361,14 +350,11 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                         logger.error("Failed to get devices by status", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             if (status == null) {
@@ -467,14 +453,11 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                         logger.error("Failed to verify device", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> availabilityGetStatusCounts() {
-        Promise<JsonObject> promise = Promise.promise();
+    public void availabilityGetStatusCounts(Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -503,8 +486,6 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                         logger.error("Failed to get status counts", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 }

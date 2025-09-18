@@ -2,7 +2,8 @@ package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
 import io.vertx.codegen.annotations.VertxGen;
-import io.vertx.core.Future;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -42,50 +43,50 @@ public interface AvailabilityService {
 
     /**
      * Get all device availability statuses (only for active, non-deleted devices)
-     * @return Future containing JsonArray of current device availability statuses
+     * @param resultHandler Handler for the async result containing JsonArray of current device availability statuses
      */
-    Future<JsonArray> availabilityListAll();
+    void availabilityListAll(Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Create or update device availability status (upsert operation)
      * @param availabilityData JsonObject containing availability data (device_id, status, response_time, checked_at)
-     * @return Future containing JsonObject with upsert result
+     * @param resultHandler Handler for the async result containing JsonObject with upsert result
      */
-    Future<JsonObject> availabilityCreateOrUpdate(JsonObject availabilityData);
+    void availabilityCreateOrUpdate(JsonObject availabilityData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get current availability status for specific device (device must be active, non-deleted)
      * @param deviceId Device ID (must be active, non-deleted)
-     * @return Future containing JsonObject with current availability data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with current availability data or not found
      */
-    Future<JsonObject> availabilityGetByDevice(String deviceId);
+    void availabilityGetByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Delete availability status for specific device (when device is deleted)
      * @param deviceId Device ID whose availability status should be removed
-     * @return Future containing JsonObject with deletion result
+     * @param resultHandler Handler for the async result containing JsonObject with deletion result
      */
-    Future<JsonObject> availabilityDeleteByDevice(String deviceId);
+    void availabilityDeleteByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get active devices with current status (only active, non-deleted devices)
      * @param status Status filter ("UP", "DOWN", or null for all)
-     * @return Future containing JsonArray of active devices with their current availability status
+     * @param resultHandler Handler for the async result containing JsonArray of active devices with their current availability status
      */
-    Future<JsonArray> availabilityGetDevicesByStatus(String status);
+    void availabilityGetDevicesByStatus(String status, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Update device status based on latest check (device must be active, non-deleted)
      * @param deviceId Device ID (must be active, non-deleted)
      * @param status New status ("UP" or "DOWN")
      * @param responseTime Response time in milliseconds
-     * @return Future containing JsonObject with status update result
+     * @param resultHandler Handler for the async result containing JsonObject with status update result
      */
-    Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime);
+    void availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get count of devices by status
-     * @return Future containing JsonObject with status counts (total, up, down)
+     * @param resultHandler Handler for the async result containing JsonObject with status counts (total, up, down)
      */
-    Future<JsonObject> availabilityGetStatusCounts();
+    void availabilityGetStatusCounts(Handler<AsyncResult<JsonObject>> resultHandler);
 }

@@ -294,18 +294,18 @@ public class ServerVerticle extends AbstractVerticle {
         // Get query parameter for including deleted devices (default: false)
         boolean includeDeleted = "true".equals(ctx.request().getParam("includeDeleted"));
 
-        deviceService.deviceList(includeDeleted)
-            .onSuccess(result -> {
+        deviceService.deviceList(includeDeleted, ar -> {
+            if (ar.succeeded()) {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(result.encode());
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to get devices", cause);
+                    .end(ar.result().encode());
+            } else {
+                logger.error("Failed to get devices", ar.cause());
                 ctx.response().setStatusCode(500)
                     .putHeader("content-type", "application/json")
                     .end(new JsonObject().put("error", "Failed to get devices").encode());
-            });
+            }
+        });
     }
 
     private void getDeviceMetrics(RoutingContext ctx) {
@@ -754,19 +754,19 @@ public class ServerVerticle extends AbstractVerticle {
 
     // User Management Handlers
     private void getUsers(RoutingContext ctx) {
-        userService.userList()
-            .onSuccess(users -> {
+        userService.userList(ar -> {
+            if (ar.succeeded()) {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("users", users).encode());
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to get users", cause);
+                    .end(new JsonObject().put("users", ar.result()).encode());
+            } else {
+                logger.error("Failed to get users", ar.cause());
                 ctx.response()
                     .setStatusCode(500)
                     .putHeader("content-type", "application/json")
                     .end(new JsonObject().put("error", "Failed to get users").encode());
-            });
+            }
+        });
     }
 
     private void createUser(RoutingContext ctx) {
@@ -784,20 +784,20 @@ public class ServerVerticle extends AbstractVerticle {
             .put("password", body.getString("password"))
             .put("is_active", body.getBoolean("is_active", true));
 
-        userService.userCreate(userData)
-            .onSuccess(result -> {
+        userService.userCreate(userData, ar -> {
+            if (ar.succeeded()) {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(result.encode());
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to create user", cause);
-                int statusCode = cause.getMessage().contains("already exists") ? 409 : 500;
+                    .end(ar.result().encode());
+            } else {
+                logger.error("Failed to create user", ar.cause());
+                int statusCode = ar.cause().getMessage().contains("already exists") ? 409 : 500;
                 ctx.response()
                     .setStatusCode(statusCode)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", cause.getMessage()).encode());
-            });
+                    .end(new JsonObject().put("error", ar.cause().getMessage()).encode());
+            }
+        });
     }
 
     private void updateUser(RoutingContext ctx) {
@@ -812,28 +812,29 @@ public class ServerVerticle extends AbstractVerticle {
             return;
         }
 
-        userService.userUpdate(userId, body)
-            .onSuccess(result -> {
+        userService.userUpdate(userId, body, ar -> {
+            if (ar.succeeded()) {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(result.encode());
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to update user", cause);
-                int statusCode = cause.getMessage().contains("not found") ? 404 :
-                               cause.getMessage().contains("already exists") ? 409 : 500;
+                    .end(ar.result().encode());
+            } else {
+                logger.error("Failed to update user", ar.cause());
+                int statusCode = ar.cause().getMessage().contains("not found") ? 404 :
+                               ar.cause().getMessage().contains("already exists") ? 409 : 500;
                 ctx.response()
                     .setStatusCode(statusCode)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", cause.getMessage()).encode());
-            });
+                    .end(new JsonObject().put("error", ar.cause().getMessage()).encode());
+            }
+        });
     }
 
     private void getUserById(RoutingContext ctx) {
         String userId = ctx.pathParam("id");
 
-        userService.userGetById(userId)
-            .onSuccess(result -> {
+        userService.userGetById(userId, ar -> {
+            if (ar.succeeded()) {
+                JsonObject result = ar.result();
                 if (result.getBoolean("found", false)) {
                     ctx.response()
                         .putHeader("content-type", "application/json")
@@ -844,33 +845,33 @@ public class ServerVerticle extends AbstractVerticle {
                         .putHeader("content-type", "application/json")
                         .end(new JsonObject().put("error", "User not found").encode());
                 }
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to get user by ID", cause);
+            } else {
+                logger.error("Failed to get user by ID", ar.cause());
                 ctx.response()
                     .setStatusCode(500)
                     .putHeader("content-type", "application/json")
                     .end(new JsonObject().put("error", "Failed to get user").encode());
-            });
+            }
+        });
     }
 
     private void deleteUser(RoutingContext ctx) {
         String userId = ctx.pathParam("id");
 
-        userService.userDelete(userId)
-            .onSuccess(result -> {
+        userService.userDelete(userId, ar -> {
+            if (ar.succeeded()) {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(result.encode());
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to delete user", cause);
-                int statusCode = cause.getMessage().contains("not found") ? 404 : 500;
+                    .end(ar.result().encode());
+            } else {
+                logger.error("Failed to delete user", ar.cause());
+                int statusCode = ar.cause().getMessage().contains("not found") ? 404 : 500;
                 ctx.response()
                     .setStatusCode(statusCode)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", cause.getMessage()).encode());
-            });
+                    .end(new JsonObject().put("error", ar.cause().getMessage()).encode());
+            }
+        });
     }
 
     private void authenticateUser(RoutingContext ctx) {
@@ -886,32 +887,32 @@ public class ServerVerticle extends AbstractVerticle {
         String username = body.getString("username");
         String password = body.getString("password");
 
-        userService.userAuthenticate(username, password)
-            .onSuccess(result -> {
+        userService.userAuthenticate(username, password, ar -> {
+            if (ar.succeeded()) {
+                JsonObject result = ar.result();
                 if (result.getBoolean("authenticated", false)) {
                     // Update last login timestamp
                     String userId = result.getString("user_id");
-                    userService.userUpdateLastLogin(userId)
-                        .onComplete(ar -> {
-                            // Return authentication result regardless of last login update result
-                            ctx.response()
-                                .putHeader("content-type", "application/json")
-                                .end(result.encode());
-                        });
+                    userService.userUpdateLastLogin(userId, updateAr -> {
+                        // Return authentication result regardless of last login update result
+                        ctx.response()
+                            .putHeader("content-type", "application/json")
+                            .end(result.encode());
+                    });
                 } else {
                     ctx.response()
                         .setStatusCode(401)
                         .putHeader("content-type", "application/json")
                         .end(result.encode());
                 }
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to authenticate user", cause);
+            } else {
+                logger.error("Failed to authenticate user", ar.cause());
                 ctx.response()
                     .setStatusCode(500)
                     .putHeader("content-type", "application/json")
                     .end(new JsonObject().put("error", "Authentication failed").encode());
-            });
+            }
+        });
     }
 
     private void changeUserPassword(RoutingContext ctx) {
@@ -929,21 +930,21 @@ public class ServerVerticle extends AbstractVerticle {
         String oldPassword = body.getString("oldPassword");
         String newPassword = body.getString("newPassword");
 
-        userService.userChangePassword(userId, oldPassword, newPassword)
-            .onSuccess(result -> {
+        userService.userChangePassword(userId, oldPassword, newPassword, ar -> {
+            if (ar.succeeded()) {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(result.encode());
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to change user password", cause);
-                int statusCode = cause.getMessage().contains("not found") ? 404 :
-                               cause.getMessage().contains("incorrect") ? 400 : 500;
+                    .end(ar.result().encode());
+            } else {
+                logger.error("Failed to change user password", ar.cause());
+                int statusCode = ar.cause().getMessage().contains("not found") ? 404 :
+                               ar.cause().getMessage().contains("incorrect") ? 400 : 500;
                 ctx.response()
                     .setStatusCode(statusCode)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", cause.getMessage()).encode());
-            });
+                    .end(new JsonObject().put("error", ar.cause().getMessage()).encode());
+            }
+        });
     }
 
     private void setUserStatus(RoutingContext ctx) {
@@ -960,20 +961,20 @@ public class ServerVerticle extends AbstractVerticle {
 
         boolean isActive = body.getBoolean("is_active");
 
-        userService.userSetActive(userId, isActive)
-            .onSuccess(result -> {
+        userService.userSetActive(userId, isActive, ar -> {
+            if (ar.succeeded()) {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(result.encode());
-            })
-            .onFailure(cause -> {
-                logger.error("Failed to set user status", cause);
-                int statusCode = cause.getMessage().contains("not found") ? 404 : 500;
+                    .end(ar.result().encode());
+            } else {
+                logger.error("Failed to set user status", ar.cause());
+                int statusCode = ar.cause().getMessage().contains("not found") ? 404 : 500;
                 ctx.response()
                     .setStatusCode(statusCode)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", cause.getMessage()).encode());
-            });
+                    .end(new JsonObject().put("error", ar.cause().getMessage()).encode());
+            }
+        });
     }
 
     @Override

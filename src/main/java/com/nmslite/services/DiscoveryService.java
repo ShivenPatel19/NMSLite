@@ -2,7 +2,8 @@ package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
 import io.vertx.codegen.annotations.VertxGen;
-import io.vertx.core.Future;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -41,71 +42,71 @@ public interface DiscoveryService {
     /**
      * Get all discovery profiles with full details (including device type and credential info)
      * @param includeInactive Include inactive discovery profiles
-     * @return Future containing JsonArray of discovery profiles
+     * @param resultHandler Handler for the async result containing JsonArray of discovery profiles
      */
-    Future<JsonArray> discoveryList(boolean includeInactive);
+    void discoveryList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Create a new discovery profile
      * @param profileData JsonObject containing discovery profile data (discovery_name, ip_address, device_type_id, credential_profile_id, port, timeout_seconds, retry_count, is_active, created_by)
-     * @return Future containing JsonObject with creation result
+     * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
-    Future<JsonObject> discoveryCreate(JsonObject profileData);
+    void discoveryCreate(JsonObject profileData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Update discovery profile information
      * @param profileId Discovery profile ID to update
      * @param profileData JsonObject containing fields to update
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> discoveryUpdate(String profileId, JsonObject profileData);
+    void discoveryUpdate(String profileId, JsonObject profileData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Delete (deactivate) a discovery profile
      * @param profileId Discovery profile ID to delete
-     * @return Future containing JsonObject with deletion result
+     * @param resultHandler Handler for the async result containing JsonObject with deletion result
      */
-    Future<JsonObject> discoveryDelete(String profileId);
+    void discoveryDelete(String profileId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get discovery profile by ID
      * @param profileId Discovery profile ID
-     * @return Future containing JsonObject with discovery profile data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with discovery profile data or not found
      */
-    Future<JsonObject> discoveryGetById(String profileId);
+    void discoveryGetById(String profileId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Find discovery profile by IP address
      * @param ipAddress IP address to search for
-     * @return Future containing JsonObject with discovery profile data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with discovery profile data or not found
      */
-    Future<JsonObject> discoveryFindByIp(String ipAddress);
+    void discoveryFindByIp(String ipAddress, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get discovery profile by name
      * @param discoveryName Discovery name to search for
-     * @return Future containing JsonObject with discovery profile data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with discovery profile data or not found
      */
-    Future<JsonObject> discoveryGetByName(String discoveryName);
+    void discoveryGetByName(String discoveryName, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Activate or deactivate discovery profile
      * @param profileId Discovery profile ID
      * @param isActive Active status
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> discoverySetActive(String profileId, boolean isActive);
+    void discoverySetActive(String profileId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get all active discovery profiles (simplified list)
-     * @return Future containing JsonArray of active discovery profiles
+     * @param resultHandler Handler for the async result containing JsonArray of active discovery profiles
      */
-    Future<JsonArray> discoveryListActive();
+    void discoveryListActive(Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Execute discovery for a specific profile
      * @param profileId Discovery profile ID
-     * @return Future containing JsonObject with discovery execution result
+     * @param resultHandler Handler for the async result containing JsonObject with discovery execution result
      */
-    Future<JsonObject> discoveryExecute(String profileId);
+    void discoveryExecute(String profileId, Handler<AsyncResult<JsonObject>> resultHandler);
 }

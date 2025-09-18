@@ -1,7 +1,9 @@
 package com.nmslite.services.impl;
 
 import com.nmslite.services.DiscoveryService;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -35,8 +37,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
     }
 
     @Override
-    public Future<JsonArray> discoveryList(boolean includeInactive) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void discoveryList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -81,14 +82,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         logger.error("Failed to get discovery profiles", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> discoveryCreate(JsonObject profileData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void discoveryCreate(JsonObject profileData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String discoveryName = profileData.getString("discovery_name");
@@ -148,14 +146,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> discoveryUpdate(String profileId, JsonObject profileData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void discoveryUpdate(String profileId, JsonObject profileData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String discoveryName = profileData.getString("discovery_name");
@@ -251,14 +246,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> discoveryDelete(String profileId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void discoveryDelete(String profileId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             // Soft delete by setting is_active to false
@@ -288,14 +280,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         logger.error("Failed to delete discovery profile", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> discoveryGetById(String profileId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void discoveryGetById(String profileId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -344,14 +333,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         logger.error("Failed to get discovery profile by ID", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> discoveryFindByIp(String ipAddress) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void discoveryFindByIp(String ipAddress, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -400,14 +386,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         logger.error("Failed to find discovery profile by IP", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> discoveryGetByName(String discoveryName) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void discoveryGetByName(String discoveryName, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -456,14 +439,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         logger.error("Failed to get discovery profile by name", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> discoverySetActive(String profileId, boolean isActive) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void discoverySetActive(String profileId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -493,14 +473,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         logger.error("Failed to update discovery profile status", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> discoveryListActive() {
-        Promise<JsonArray> promise = Promise.promise();
+    public void discoveryListActive(Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -533,14 +510,11 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         logger.error("Failed to get active discovery profiles", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> discoveryExecute(String profileId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void discoveryExecute(String profileId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             // First get the discovery profile details
@@ -593,8 +567,6 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                         logger.error("Failed to get discovery profile for execution", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 }

@@ -2,7 +2,8 @@ package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
 import io.vertx.codegen.annotations.VertxGen;
-import io.vertx.core.Future;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -42,125 +43,125 @@ public interface DeviceService {
      * Get all devices
      *
      * @param includeDeleted Include soft-deleted devices
-     * @return Future containing JsonArray of devices
+     * @param resultHandler Handler for the async result containing JsonArray of devices
      */
-    Future<JsonArray> deviceList(boolean includeDeleted);
+    void deviceList(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Create a new device
      *
      * @param deviceData JsonObject containing device data (device_name, ip_address, device_type, port, username, password, is_monitoring_enabled, discovery_profile_id)
-     * @return Future containing JsonObject with creation result
+     * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
-    Future<JsonObject> deviceCreate(JsonObject deviceData);
+    void deviceCreate(JsonObject deviceData, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Update device monitoring status (only field directly editable)
      *
      * @param deviceId  Device ID
      * @param isEnabled Monitoring enabled status
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> deviceUpdateMonitoring(String deviceId, boolean isEnabled);
+    void deviceUpdateMonitoring(String deviceId, boolean isEnabled, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Update device monitoring configuration (directly editable fields)
      *
      * @param deviceId         Device ID
      * @param monitoringConfig JsonObject containing monitoring configuration (polling_interval_seconds, alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk)
-     * @return Future containing JsonObject with update result
+     * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    Future<JsonObject> deviceUpdateMonitoringConfig(String deviceId, JsonObject monitoringConfig);
+    void deviceUpdateMonitoringConfig(String deviceId, JsonObject monitoringConfig, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Soft delete a device
      *
      * @param deviceId  Device ID to delete
      * @param deletedBy User who deleted the device
-     * @return Future containing JsonObject with deletion result
+     * @param resultHandler Handler for the async result containing JsonObject with deletion result
      */
-    Future<JsonObject> deviceDelete(String deviceId, String deletedBy);
+    void deviceDelete(String deviceId, String deletedBy, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Restore a soft-deleted device
      *
      * @param deviceId Device ID to restore
-     * @return Future containing JsonObject with restoration result
+     * @param resultHandler Handler for the async result containing JsonObject with restoration result
      */
-    Future<JsonObject> deviceRestore(String deviceId);
+    void deviceRestore(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get device by ID
      *
      * @param deviceId       Device ID
      * @param includeDeleted Include soft-deleted devices
-     * @return Future containing JsonObject with device data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with device data or not found
      */
-    Future<JsonObject> deviceGetById(String deviceId, boolean includeDeleted);
+    void deviceGetById(String deviceId, boolean includeDeleted, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Find device by IP address
      *
      * @param ipAddress      IP address to search for
      * @param includeDeleted Include soft-deleted devices
-     * @return Future containing JsonObject with device data or not found
+     * @param resultHandler Handler for the async result containing JsonObject with device data or not found
      */
-    Future<JsonObject> deviceFindByIp(String ipAddress, boolean includeDeleted);
+    void deviceFindByIp(String ipAddress, boolean includeDeleted, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get devices ready for polling (active monitoring enabled devices)
      *
-     * @return Future containing JsonArray of devices ready for polling
+     * @param resultHandler Handler for the async result containing JsonArray of devices ready for polling
      */
-    Future<JsonArray> deviceListForPolling();
+    void deviceListForPolling(Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Get devices with availability statistics
      *
      * @param includeDeleted Include soft-deleted devices
-     * @return Future containing JsonArray of devices with availability data
+     * @param resultHandler Handler for the async result containing JsonArray of devices with availability data
      */
-    Future<JsonArray> deviceListWithAvailability(boolean includeDeleted);
+    void deviceListWithAvailability(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
 
 
     /**
      * Get devices with current status (includes availability status)
      *
      * @param includeDeleted Include soft-deleted devices
-     * @return Future containing JsonArray of devices with current status
+     * @param resultHandler Handler for the async result containing JsonArray of devices with current status
      */
-    Future<JsonArray> deviceListWithStatus(boolean includeDeleted);
+    void deviceListWithStatus(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Get devices by name pattern (search)
      *
      * @param namePattern    Device name pattern to search for
      * @param includeDeleted Include soft-deleted devices
-     * @return Future containing JsonArray of matching devices
+     * @param resultHandler Handler for the async result containing JsonArray of matching devices
      */
-    Future<JsonArray> deviceSearchByName(String namePattern, boolean includeDeleted);
+    void deviceSearchByName(String namePattern, boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Get devices by monitoring status
      *
      * @param isMonitoringEnabled Monitoring enabled filter
      * @param includeDeleted      Include soft-deleted devices
-     * @return Future containing JsonArray of devices
+     * @param resultHandler Handler for the async result containing JsonArray of devices
      */
-    Future<JsonArray> deviceListByMonitoringStatus(boolean isMonitoringEnabled, boolean includeDeleted);
+    void deviceListByMonitoringStatus(boolean isMonitoringEnabled, boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Get device count by status
      *
-     * @return Future containing JsonObject with device counts (total, active, deleted, monitoring_enabled, monitoring_disabled)
+     * @param resultHandler Handler for the async result containing JsonObject with device counts (total, active, deleted, monitoring_enabled, monitoring_disabled)
      */
-    Future<JsonObject> deviceGetCounts();
+    void deviceGetCounts(Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Synchronize all devices from attached tables (discovery profiles, credentials, device types)
      * This method will refresh all device data from their authoritative sources
      *
-     * @return Future containing JsonObject with synchronization result
+     * @param resultHandler Handler for the async result containing JsonObject with synchronization result
      */
-    Future<JsonObject> deviceSync();
+    void deviceSync(Handler<AsyncResult<JsonObject>> resultHandler);
 }

@@ -2,7 +2,9 @@ package com.nmslite.services.impl;
 
 import com.nmslite.services.DeviceService;
 import com.nmslite.utils.PasswordUtil;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonArray;
@@ -36,8 +38,7 @@ public class DeviceServiceImpl implements DeviceService {
     }
 
     @Override
-    public Future<JsonArray> deviceList(boolean includeDeleted) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void deviceList(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -85,14 +86,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to get devices", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceCreate(JsonObject deviceData) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceCreate(JsonObject deviceData, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String deviceName = deviceData.getString("device_name");
@@ -167,14 +165,11 @@ public class DeviceServiceImpl implements DeviceService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceUpdateMonitoring(String deviceId, boolean isEnabled) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceUpdateMonitoring(String deviceId, boolean isEnabled, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -204,14 +199,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to update device monitoring status", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceUpdateMonitoringConfig(String deviceId, JsonObject monitoringConfig) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceUpdateMonitoringConfig(String deviceId, JsonObject monitoringConfig, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             Integer pollingInterval = monitoringConfig.getInteger("polling_interval_seconds");
@@ -280,14 +272,11 @@ public class DeviceServiceImpl implements DeviceService {
                             blockingPromise.fail(cause);
                         }
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceDelete(String deviceId, String deletedBy) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceDelete(String deviceId, String deletedBy, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -316,14 +305,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to delete device", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceRestore(String deviceId) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceRestore(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -352,14 +338,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to restore device", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceGetById(String deviceId, boolean includeDeleted) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceGetById(String deviceId, boolean includeDeleted, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -409,14 +392,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to get device by ID", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceFindByIp(String ipAddress, boolean includeDeleted) {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceFindByIp(String ipAddress, boolean includeDeleted, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -466,14 +446,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to find device by IP", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> deviceListForPolling() {
-        Promise<JsonArray> promise = Promise.promise();
+    public void deviceListForPolling(Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -509,14 +486,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to get devices for polling", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> deviceListWithAvailability(boolean includeDeleted) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void deviceListWithAvailability(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -558,14 +532,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to get devices with availability", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> deviceListWithStatus(boolean includeDeleted) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void deviceListWithStatus(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -607,14 +578,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to get devices with status", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> deviceSearchByName(String namePattern, boolean includeDeleted) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void deviceSearchByName(String namePattern, boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -655,14 +623,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to search devices by name", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonArray> deviceListByMonitoringStatus(boolean isMonitoringEnabled, boolean includeDeleted) {
-        Promise<JsonArray> promise = Promise.promise();
+    public void deviceListByMonitoringStatus(boolean isMonitoringEnabled, boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -703,14 +668,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to get devices by monitoring status", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceGetCounts() {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceGetCounts(Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -739,14 +701,11 @@ public class DeviceServiceImpl implements DeviceService {
                         logger.error("Failed to get device counts", cause);
                         blockingPromise.fail(cause);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 
     @Override
-    public Future<JsonObject> deviceSync() {
-        Promise<JsonObject> promise = Promise.promise();
+    public void deviceSync(Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             // This method would synchronize devices from discovery profiles, credentials, and device types
@@ -775,8 +734,6 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("message", "Device synchronization failed: " + cause.getMessage());
                         blockingPromise.complete(result);
                     });
-        }, promise);
-
-        return promise.future();
+        }, resultHandler);
     }
 }
