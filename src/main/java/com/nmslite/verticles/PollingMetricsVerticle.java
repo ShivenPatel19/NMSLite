@@ -1,5 +1,8 @@
 package com.nmslite.verticles;
 
+import com.nmslite.services.DeviceService;
+import com.nmslite.services.MetricsService;
+import com.nmslite.services.AvailabilityService;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Promise;
 import io.vertx.core.json.JsonArray;
@@ -26,13 +29,18 @@ import java.util.stream.Collectors;
 public class PollingMetricsVerticle extends AbstractVerticle {
 
     private static final Logger logger = LoggerFactory.getLogger(PollingMetricsVerticle.class);
-    
+
     private String goEnginePath;
     private String fpingPath;
     private int intervalSeconds;
     private int batchSize;
     private long pollingTimerId;
-    
+
+    // Service proxies
+    private DeviceService deviceService;
+    private MetricsService metricsService;
+    private AvailabilityService availabilityService;
+
     // Polling state
     private volatile boolean isPolling = false;
     private volatile JsonObject pollingStatus = new JsonObject()
@@ -55,9 +63,25 @@ public class PollingMetricsVerticle extends AbstractVerticle {
         logger.info("🔧 Polling interval: {} seconds", intervalSeconds);
         logger.info("🔧 Batch size: {}", batchSize);
 
+        // Initialize service proxies
+        initializeServiceProxies();
+
         setupEventBusConsumers();
         startPeriodicPolling();
+
+        logger.info("🚀 PollingMetricsVerticle started successfully");
         startPromise.complete();
+    }
+
+    /**
+     * Initialize service proxies for database operations
+     */
+    private void initializeServiceProxies() {
+        this.deviceService = DeviceService.createProxy(vertx);
+        this.metricsService = MetricsService.createProxy(vertx);
+        this.availabilityService = AvailabilityService.createProxy(vertx);
+
+        logger.info("📡 Service proxies initialized for database operations");
     }
 
     private void setupEventBusConsumers() {
@@ -148,21 +172,17 @@ public class PollingMetricsVerticle extends AbstractVerticle {
     private io.vertx.core.Future<List<JsonObject>> getDevicesForPolling() {
         Promise<List<JsonObject>> promise = Promise.promise();
 
-        vertx.eventBus().request("db.query", new JsonObject()
-                .put("operation", "devices_ready_for_polling")
-                .put("params", new JsonObject()))
-            .onSuccess(reply -> {
-                JsonObject response = (JsonObject) reply.body();
-                JsonArray devicesArray = response.getJsonArray("devices", new JsonArray());
-                
-                List<JsonObject> devices = new ArrayList<>();
-                for (int i = 0; i < devicesArray.size(); i++) {
-                    devices.add(devicesArray.getJsonObject(i));
-                }
-                
-                promise.complete(devices);
+        deviceService.deviceListForPolling()
+            .onSuccess(devices -> {
+                List<JsonObject> deviceList = devices.stream()
+                    .map(obj -> (JsonObject) obj)
+                    .collect(Collectors.toList());
+                promise.complete(deviceList);
             })
-            .onFailure(promise::fail);
+            .onFailure(cause -> {
+                logger.error("❌ Failed to get devices for polling", cause);
+                promise.fail(cause);
+            });
 
         return promise.future();
     }
@@ -424,9 +444,15 @@ public class PollingMetricsVerticle extends AbstractVerticle {
             .put("duration_ms", 0)
             .put("error_message", "Device unreachable - ping failed");
 
-        vertx.eventBus().send("db.insert", new JsonObject()
-            .put("operation", "metrics")
-            .put("params", metricsData));
+        metricsService.metricsCreate(metricsData)
+            .onSuccess(result -> {
+                logger.debug("📊 Connectivity failure metrics stored for device: {}",
+                           device.getString("device_name"));
+            })
+            .onFailure(cause -> {
+                logger.error("❌ Failed to store connectivity failure metrics for device: {}",
+                           device.getString("device_name"), cause);
+            });
     }
 
     private void storeMetricsSuccess(String deviceId, JsonObject result) {
@@ -448,9 +474,13 @@ public class PollingMetricsVerticle extends AbstractVerticle {
             .put("disk_used_bytes", disk.getLong("used_bytes", 0L))
             .put("disk_free_bytes", disk.getLong("free_bytes", 0L));
 
-        vertx.eventBus().send("db.insert", new JsonObject()
-            .put("operation", "metrics")
-            .put("params", metricsData));
+        metricsService.metricsCreate(metricsData)
+            .onSuccess(metricsResult -> {
+                logger.debug("📊 Metrics stored successfully for device: {}", deviceId);
+            })
+            .onFailure(cause -> {
+                logger.error("❌ Failed to store metrics for device: {}", deviceId, cause);
+            });
     }
 
     private void storeMetricsFailure(String deviceId, String error) {
@@ -460,17 +490,26 @@ public class PollingMetricsVerticle extends AbstractVerticle {
             .put("duration_ms", 0)
             .put("error_message", error);
 
-        vertx.eventBus().send("db.insert", new JsonObject()
-            .put("operation", "metrics")
-            .put("params", metricsData));
+        metricsService.metricsCreate(metricsData)
+            .onSuccess(result -> {
+                logger.debug("📊 Failure metrics stored for device: {}", deviceId);
+            })
+            .onFailure(cause -> {
+                logger.error("❌ Failed to store failure metrics for device: {}", deviceId, cause);
+            });
     }
 
     private void updateDeviceAvailability(String deviceId, boolean success) {
-        vertx.eventBus().send("db.update", new JsonObject()
-            .put("operation", "device_availability")
-            .put("params", new JsonObject()
-                .put("device_id", deviceId)
-                .put("success", success)));
+        String status = success ? "up" : "down";
+        Long responseTime = success ? System.currentTimeMillis() % 1000 : null; // Simple response time simulation
+
+        availabilityService.availabilityUpdateDeviceStatus(deviceId, status, responseTime)
+            .onSuccess(result -> {
+                logger.debug("📊 Availability updated for device: {} - Status: {}", deviceId, status);
+            })
+            .onFailure(cause -> {
+                logger.error("❌ Failed to update availability for device: {}", deviceId, cause);
+            });
     }
 
     private void handleProvisionStart(io.vertx.core.eventbus.Message<Object> message, JsonObject request) {

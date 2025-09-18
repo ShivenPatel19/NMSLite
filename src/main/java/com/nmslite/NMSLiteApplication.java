@@ -2,7 +2,7 @@ package com.nmslite;
 
 import com.nmslite.verticles.DatabaseVerticle;
 import com.nmslite.verticles.DiscoveryVerticle;
-import com.nmslite.verticles.MainVerticle;
+import com.nmslite.verticles.ServerVerticle;
 import com.nmslite.verticles.PollingMetricsVerticle;
 import io.vertx.config.ConfigRetriever;
 import io.vertx.config.ConfigRetrieverOptions;
@@ -18,15 +18,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * NMSLite Application - 4-Verticle Event-Driven Architecture
- * 
+ * NMSLite Application - 5-Verticle Event-Driven Architecture with ProxyGen
+ *
  * Architecture:
- * - MainVerticle: HTTP API + WebSocket communication
- * - DatabaseVerticle: All database operations
+ * - ServerVerticle: HTTP API + WebSocket communication
+ * - DatabaseVerticle: All database operations (ProxyGen enabled)
+ * - UserServiceVerticle: User management operations (ProxyGen enabled)
  * - DiscoveryVerticle: Device discovery workflow
  * - PollingMetricsVerticle: Continuous monitoring
- * 
- * Communication: Event Bus driven with async messaging
+ *
+ * Communication: Event Bus driven with async messaging + ProxyGen services
  */
 public class NMSLiteApplication extends AbstractVerticle {
 
@@ -37,7 +38,7 @@ public class NMSLiteApplication extends AbstractVerticle {
 
     @Override
     public void start(Promise<Void> startPromise) {
-        logger.info("🚀 Starting NMSLite Application - 4-Verticle Architecture");
+        logger.info("🚀 Starting NMSLite Application - 5-Verticle Architecture");
 
         // Load configuration from application.conf
         loadConfiguration()
@@ -57,10 +58,10 @@ public class NMSLiteApplication extends AbstractVerticle {
                 CompositeFuture.all(databaseFuture, discoveryFuture, pollingFuture, mainFuture)
                     .onSuccess(result -> {
                         logger.info("✅ All verticles deployed successfully!");
-                        logger.info("📊 DatabaseVerticle: {}", databaseFuture.result());
+                        logger.info("📊 DatabaseVerticle (ProxyGen): {}", databaseFuture.result());
                         logger.info("🔍 DiscoveryVerticle: {}", discoveryFuture.result());
                         logger.info("📈 PollingMetricsVerticle: {}", pollingFuture.result());
-                        logger.info("🌐 MainVerticle: {}", mainFuture.result());
+                        logger.info("🌐 ServerVerticle: {}", mainFuture.result());
                         logger.info("🎯 NMSLite is ready for monitoring!");
                         startPromise.complete();
                     })
@@ -100,7 +101,7 @@ public class NMSLiteApplication extends AbstractVerticle {
         DeploymentOptions options = new DeploymentOptions()
             .setConfig(config.getJsonObject("main", new JsonObject()));
 
-        return vertx.deployVerticle(new MainVerticle(), options);
+        return vertx.deployVerticle(new ServerVerticle(), options);
     }
 
     private void setupWorkerExecutor(JsonObject config) {

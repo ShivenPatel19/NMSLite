@@ -1,9 +1,4 @@
 -- =====================================================
--- NMSLite Database Schema v2.0 - API Compatible
--- Enterprise Network Monitoring System
--- =====================================================
-
--- =====================================================
 -- 1. USERS TABLE - Admin users only
 -- =====================================================
 CREATE TABLE users (
@@ -26,9 +21,9 @@ CREATE TABLE device_types (
     default_port INTEGER,
     is_active BOOLEAN DEFAULT true,
 
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT chk_port_range CHECK (default_port BETWEEN 1 AND 65535),
+    CONSTRAINT chk_default_port_range CHECK (default_port BETWEEN 1 AND 65535)
 );
 
 -- =====================================================
@@ -81,7 +76,7 @@ CREATE TABLE devices (
     discovery_profile_id UUID REFERENCES discovery_profiles(profile_id) ON DELETE SET NULL,
 
     -- Monitoring configuration
-    polling_interval_seconds INTEGER
+    polling_interval_seconds INTEGER,
     alert_threshold_cpu DECIMAL(5,2),
     alert_threshold_memory DECIMAL(5,2),
     alert_threshold_disk DECIMAL(5,2),
@@ -154,21 +149,6 @@ CREATE TABLE device_availability (
     CONSTRAINT chk_checks_consistency CHECK (total_checks = successful_checks + failed_checks)
 );
 
-
--- =====================================================
--- 8. ALERTS TABLE - System alerts and notifications
--- =====================================================
-CREATE TABLE alerts (
-    alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    device_id UUID NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
-    alert_type VARCHAR(20) NOT NULL CHECK (alert_type IN ('cpu', 'memory', 'disk', 'connectivity')),
-    severity VARCHAR(10) NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
-    message TEXT NOT NULL,
-    threshold_value DECIMAL(5,2),
-    current_value DECIMAL(5,2),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- =====================================================
 -- PERFORMANCE INDEXES
 -- =====================================================
@@ -184,11 +164,6 @@ CREATE UNIQUE INDEX idx_devices_ip_active ON devices(ip_address) WHERE is_delete
 -- Metrics table (time series heavy)
 CREATE INDEX idx_metrics_device_timestamp ON metrics(device_id, timestamp DESC);
 CREATE INDEX idx_metrics_device_success ON metrics(device_id, success, timestamp DESC);
-
--- Alerts table
-CREATE INDEX idx_alerts_device ON alerts(device_id, created_at DESC);
-CREATE INDEX idx_alerts_severity ON alerts(severity, created_at DESC);
-
 
 -- =====================================================
 -- TRIGGERS FOR AUTOMATIC UPDATES

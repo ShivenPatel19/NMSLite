@@ -72,6 +72,7 @@ logs/
 # Documentation (exclude all except README)
 API_DOCUMENTATION.md
 PROJECT_GLOBAL_MAP.md
+DATABASE_SERVICES_INTEGRATION.md
 
 ### GoEngine Reference ###
 goengine/goengine\ referance/

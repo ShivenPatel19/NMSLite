@@ -1,5 +1,7 @@
 package com.nmslite.verticles;
 
+import com.nmslite.services.*;
+import com.nmslite.services.UserService;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Promise;
 import io.vertx.core.http.HttpServer;
@@ -16,30 +18,44 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * MainVerticle - HTTP API and WebSocket Communication
- * 
+ * ServerVerticle - HTTP API and WebSocket Communication with ProxyGen
+ *
  * Responsibilities:
  * - HTTP REST API endpoints
  * - WebSocket real-time updates
  * - Event bus message forwarding to UI
  * - Request validation and response formatting
+ * - ProxyGen database service integration
  */
-public class MainVerticle extends AbstractVerticle {
+public class ServerVerticle extends AbstractVerticle {
 
-    private static final Logger logger = LoggerFactory.getLogger(MainVerticle.class);
-    
+    private static final Logger logger = LoggerFactory.getLogger(ServerVerticle.class);
+
     // WebSocket connections for real-time updates
     private final Set<ServerWebSocket> webSocketConnections = ConcurrentHashMap.newKeySet();
-    
+
     private HttpServer httpServer;
     private int httpPort;
 
+    // Service proxies
+    private UserService userService;
+    private DeviceService deviceService;
+    private DeviceTypeService deviceTypeService;
+    private CredentialService credentialService;
+    private DiscoveryService discoveryService;
+    private MetricsService metricsService;
+    private AvailabilityService availabilityService;
+
     @Override
     public void start(Promise<Void> startPromise) {
-        logger.info("🌐 Starting MainVerticle - HTTP API & WebSocket");
+        logger.info("🌐 Starting ServerVerticle - HTTP API & WebSocket with ProxyGen");
 
         httpPort = config().getInteger("http.port", 8080);
         String websocketPath = config().getString("websocket.path", "/ws");
+
+        // Initialize all service proxies
+        initializeServiceProxies();
+        logger.info("🔧 All service proxies initialized");
 
         // Setup HTTP server with routing
         httpServer = vertx.createHttpServer();
@@ -70,6 +86,19 @@ public class MainVerticle extends AbstractVerticle {
             });
     }
 
+    /**
+     * Initialize all service proxies
+     */
+    private void initializeServiceProxies() {
+        this.userService = UserService.createProxy(vertx);
+        this.deviceService = DeviceService.createProxy(vertx);
+        this.deviceTypeService = DeviceTypeService.createProxy(vertx);
+        this.credentialService = CredentialService.createProxy(vertx);
+        this.discoveryService = DiscoveryService.createProxy(vertx);
+        this.metricsService = MetricsService.createProxy(vertx);
+        this.availabilityService = AvailabilityService.createProxy(vertx);
+    }
+
     private Router createRouter() {
         Router router = Router.router(vertx);
 
@@ -88,8 +117,12 @@ public class MainVerticle extends AbstractVerticle {
         // User Management APIs
         router.get("/api/users").handler(this::getUsers);
         router.post("/api/users").handler(this::createUser);
+        router.get("/api/users/:id").handler(this::getUserById);
         router.put("/api/users/:id").handler(this::updateUser);
         router.delete("/api/users/:id").handler(this::deleteUser);
+        router.post("/api/users/authenticate").handler(this::authenticateUser);
+        router.put("/api/users/:id/password").handler(this::changeUserPassword);
+        router.put("/api/users/:id/status").handler(this::setUserStatus);
 
         // Configuration API
         router.get("/api/device-types").handler(this::getDeviceTypes);
@@ -258,15 +291,17 @@ public class MainVerticle extends AbstractVerticle {
     }
 
     private void getDevices(RoutingContext ctx) {
-        vertx.eventBus().request("db.query", new JsonObject()
-                .put("operation", "get_devices")
-                .put("params", new JsonObject()))
-            .onSuccess(reply -> {
+        // Get query parameter for including deleted devices (default: false)
+        boolean includeDeleted = "true".equals(ctx.request().getParam("includeDeleted"));
+
+        deviceService.deviceList(includeDeleted)
+            .onSuccess(result -> {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(((JsonObject) reply.body()).encode());
+                    .end(result.encode());
             })
             .onFailure(cause -> {
+                logger.error("Failed to get devices", cause);
                 ctx.response().setStatusCode(500)
                     .putHeader("content-type", "application/json")
                     .end(new JsonObject().put("error", "Failed to get devices").encode());
@@ -719,11 +754,11 @@ public class MainVerticle extends AbstractVerticle {
 
     // User Management Handlers
     private void getUsers(RoutingContext ctx) {
-        vertx.eventBus().<JsonObject>request("db.query", new JsonObject().put("operation", "get_users").put("params", new JsonObject()))
-            .onSuccess(reply -> {
+        userService.userList()
+            .onSuccess(users -> {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(reply.body().encode());
+                    .end(new JsonObject().put("users", users).encode());
             })
             .onFailure(cause -> {
                 logger.error("Failed to get users", cause);
@@ -744,24 +779,24 @@ public class MainVerticle extends AbstractVerticle {
             return;
         }
 
-        JsonObject message = new JsonObject()
-            .put("operation", "create_user")
-            .put("params", new JsonObject()
-                .put("username", body.getString("username"))
-                .put("password", body.getString("password")));
+        JsonObject userData = new JsonObject()
+            .put("username", body.getString("username"))
+            .put("password", body.getString("password"))
+            .put("is_active", body.getBoolean("is_active", true));
 
-        vertx.eventBus().<JsonObject>request("db.query", message)
-            .onSuccess(reply -> {
+        userService.userCreate(userData)
+            .onSuccess(result -> {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(reply.body().encode());
+                    .end(result.encode());
             })
             .onFailure(cause -> {
                 logger.error("Failed to create user", cause);
+                int statusCode = cause.getMessage().contains("already exists") ? 409 : 500;
                 ctx.response()
-                    .setStatusCode(500)
+                    .setStatusCode(statusCode)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", "Failed to create user").encode());
+                    .end(new JsonObject().put("error", cause.getMessage()).encode());
             });
     }
 
@@ -777,47 +812,167 @@ public class MainVerticle extends AbstractVerticle {
             return;
         }
 
-        JsonObject message = new JsonObject()
-            .put("operation", "update_user")
-            .put("params", new JsonObject()
-                .put("user_id", userId)
-                .put("data", body));
-
-        vertx.eventBus().<JsonObject>request("db.query", message)
-            .onSuccess(reply -> {
+        userService.userUpdate(userId, body)
+            .onSuccess(result -> {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(reply.body().encode());
+                    .end(result.encode());
             })
             .onFailure(cause -> {
                 logger.error("Failed to update user", cause);
+                int statusCode = cause.getMessage().contains("not found") ? 404 :
+                               cause.getMessage().contains("already exists") ? 409 : 500;
+                ctx.response()
+                    .setStatusCode(statusCode)
+                    .putHeader("content-type", "application/json")
+                    .end(new JsonObject().put("error", cause.getMessage()).encode());
+            });
+    }
+
+    private void getUserById(RoutingContext ctx) {
+        String userId = ctx.pathParam("id");
+
+        userService.userGetById(userId)
+            .onSuccess(result -> {
+                if (result.getBoolean("found", false)) {
+                    ctx.response()
+                        .putHeader("content-type", "application/json")
+                        .end(result.encode());
+                } else {
+                    ctx.response()
+                        .setStatusCode(404)
+                        .putHeader("content-type", "application/json")
+                        .end(new JsonObject().put("error", "User not found").encode());
+                }
+            })
+            .onFailure(cause -> {
+                logger.error("Failed to get user by ID", cause);
                 ctx.response()
                     .setStatusCode(500)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", "Failed to update user").encode());
+                    .end(new JsonObject().put("error", "Failed to get user").encode());
             });
     }
 
     private void deleteUser(RoutingContext ctx) {
         String userId = ctx.pathParam("id");
 
-        JsonObject message = new JsonObject()
-            .put("operation", "delete_user")
-            .put("params", new JsonObject()
-                .put("user_id", userId));
-
-        vertx.eventBus().<JsonObject>request("db.query", message)
-            .onSuccess(reply -> {
+        userService.userDelete(userId)
+            .onSuccess(result -> {
                 ctx.response()
                     .putHeader("content-type", "application/json")
-                    .end(reply.body().encode());
+                    .end(result.encode());
             })
             .onFailure(cause -> {
                 logger.error("Failed to delete user", cause);
+                int statusCode = cause.getMessage().contains("not found") ? 404 : 500;
+                ctx.response()
+                    .setStatusCode(statusCode)
+                    .putHeader("content-type", "application/json")
+                    .end(new JsonObject().put("error", cause.getMessage()).encode());
+            });
+    }
+
+    private void authenticateUser(RoutingContext ctx) {
+        JsonObject body = ctx.body().asJsonObject();
+        if (body == null || !body.containsKey("username") || !body.containsKey("password")) {
+            ctx.response()
+                .setStatusCode(400)
+                .putHeader("content-type", "application/json")
+                .end(new JsonObject().put("error", "Missing required fields: username, password").encode());
+            return;
+        }
+
+        String username = body.getString("username");
+        String password = body.getString("password");
+
+        userService.userAuthenticate(username, password)
+            .onSuccess(result -> {
+                if (result.getBoolean("authenticated", false)) {
+                    // Update last login timestamp
+                    String userId = result.getString("user_id");
+                    userService.userUpdateLastLogin(userId)
+                        .onComplete(ar -> {
+                            // Return authentication result regardless of last login update result
+                            ctx.response()
+                                .putHeader("content-type", "application/json")
+                                .end(result.encode());
+                        });
+                } else {
+                    ctx.response()
+                        .setStatusCode(401)
+                        .putHeader("content-type", "application/json")
+                        .end(result.encode());
+                }
+            })
+            .onFailure(cause -> {
+                logger.error("Failed to authenticate user", cause);
                 ctx.response()
                     .setStatusCode(500)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", "Failed to delete user").encode());
+                    .end(new JsonObject().put("error", "Authentication failed").encode());
+            });
+    }
+
+    private void changeUserPassword(RoutingContext ctx) {
+        String userId = ctx.pathParam("id");
+        JsonObject body = ctx.body().asJsonObject();
+
+        if (body == null || !body.containsKey("oldPassword") || !body.containsKey("newPassword")) {
+            ctx.response()
+                .setStatusCode(400)
+                .putHeader("content-type", "application/json")
+                .end(new JsonObject().put("error", "Missing required fields: oldPassword, newPassword").encode());
+            return;
+        }
+
+        String oldPassword = body.getString("oldPassword");
+        String newPassword = body.getString("newPassword");
+
+        userService.userChangePassword(userId, oldPassword, newPassword)
+            .onSuccess(result -> {
+                ctx.response()
+                    .putHeader("content-type", "application/json")
+                    .end(result.encode());
+            })
+            .onFailure(cause -> {
+                logger.error("Failed to change user password", cause);
+                int statusCode = cause.getMessage().contains("not found") ? 404 :
+                               cause.getMessage().contains("incorrect") ? 400 : 500;
+                ctx.response()
+                    .setStatusCode(statusCode)
+                    .putHeader("content-type", "application/json")
+                    .end(new JsonObject().put("error", cause.getMessage()).encode());
+            });
+    }
+
+    private void setUserStatus(RoutingContext ctx) {
+        String userId = ctx.pathParam("id");
+        JsonObject body = ctx.body().asJsonObject();
+
+        if (body == null || !body.containsKey("is_active")) {
+            ctx.response()
+                .setStatusCode(400)
+                .putHeader("content-type", "application/json")
+                .end(new JsonObject().put("error", "Missing required field: is_active").encode());
+            return;
+        }
+
+        boolean isActive = body.getBoolean("is_active");
+
+        userService.userSetActive(userId, isActive)
+            .onSuccess(result -> {
+                ctx.response()
+                    .putHeader("content-type", "application/json")
+                    .end(result.encode());
+            })
+            .onFailure(cause -> {
+                logger.error("Failed to set user status", cause);
+                int statusCode = cause.getMessage().contains("not found") ? 404 : 500;
+                ctx.response()
+                    .setStatusCode(statusCode)
+                    .putHeader("content-type", "application/json")
+                    .end(new JsonObject().put("error", cause.getMessage()).encode());
             });
     }
 
