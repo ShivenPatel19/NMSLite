@@ -289,7 +289,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                    SELECT dp.profile_id, dp.discovery_name, dp.ip_address, dp.device_type_id, dp.credential_profile_id,
+                    SELECT dp.profile_id, dp.discovery_name, dp.ip_address::text as ip_address, dp.device_type_id, dp.credential_profile_id,
                            dp.port, dp.timeout_seconds, dp.retry_count, dp.is_active, dp.created_at, dp.updated_at, dp.created_by,
                            dt.device_type_name, dt.default_port,
                            cp.profile_name as credential_profile_name, cp.username, cp.protocol
@@ -312,7 +312,7 @@ public class DiscoveryServiceImpl implements DiscoveryService {
                                 .put("found", true)
                                 .put("profile_id", row.getUUID("profile_id").toString())
                                 .put("discovery_name", row.getString("discovery_name"))
-                                .put("ip_address", row.getValue("ip_address").toString())
+                                .put("ip_address", row.getString("ip_address"))
                                 .put("device_type_id", row.getUUID("device_type_id").toString())
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("port", row.getInteger("port"))

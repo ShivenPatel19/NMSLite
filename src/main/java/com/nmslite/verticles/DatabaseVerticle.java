@@ -188,8 +188,6 @@ public class DatabaseVerticle extends AbstractVerticle {
         }
     }
 
-
-
     @Override
     public void stop(Promise<Void> stopPromise) {
         logger.info("🛑 Stopping DatabaseVerticle");

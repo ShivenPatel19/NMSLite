@@ -19,11 +19,13 @@ CREATE TABLE device_types (
     device_type_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_type_name VARCHAR(50) UNIQUE NOT NULL,
     default_port INTEGER,
+    default_polling_interval_seconds INTEGER DEFAULT 300, -- Default 5 minutes
     is_active BOOLEAN DEFAULT true,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT chk_default_port_range CHECK (default_port BETWEEN 1 AND 65535)
+    CONSTRAINT chk_default_port_range CHECK (default_port BETWEEN 1 AND 65535),
+    CONSTRAINT chk_default_polling_interval CHECK (default_polling_interval_seconds BETWEEN 30 AND 3600) -- 30 seconds to 1 hour
 );
 
 -- =====================================================
@@ -77,9 +79,9 @@ CREATE TABLE devices (
 
     -- Monitoring configuration
     polling_interval_seconds INTEGER,
-    alert_threshold_cpu DECIMAL(5,2),
-    alert_threshold_memory DECIMAL(5,2),
-    alert_threshold_disk DECIMAL(5,2),
+    alert_threshold_cpu DECIMAL(5,2) DEFAULT 0.0,
+    alert_threshold_memory DECIMAL(5,2) DEFAULT 0.0,
+    alert_threshold_disk DECIMAL(5,2) DEFAULT 0.0,
 
     -- Soft delete fields
     is_deleted BOOLEAN DEFAULT false,

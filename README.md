@@ -207,7 +207,7 @@ The system uses 8 normalized tables:
 4. **discovery_profiles** - Discovery form data
 5. **devices** - Provisioned devices for monitoring
 6. **discovery_attempts** - Discovery polling results
-7. **metrics** - Current + historical metrics
+7. **metrics** - Current + historical metricscreateDiscoveryProfileInDatabase
 8. **device_availability** - Availability counters
 
 ## 🔧 PostgreSQL INET Type Handling

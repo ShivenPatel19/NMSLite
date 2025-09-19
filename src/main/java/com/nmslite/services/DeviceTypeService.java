@@ -10,14 +10,16 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
- * DeviceTypeService - Device type management operations with ProxyGen
- * 
- * This interface provides:
- * - Device type CRUD operations
- * - Device type validation
- * - Default port management
+ * DeviceTypeService - Device type READ-ONLY operations with ProxyGen
+ *
+ * This interface provides READ-ONLY operations:
+ * - Device type listing and retrieval
+ * - Device type lookup by ID/name
+ * - Active device types filtering
  * - Type-safe method calls
  * - Automatic event bus communication
+ *
+ * NOTE: Users cannot create, update, or delete device types for security reasons
  */
 @ProxyGen
 @VertxGen
@@ -35,37 +37,15 @@ public interface DeviceTypeService {
     }
 
     // ========================================
-    // DEVICE TYPE MANAGEMENT OPERATIONS
+    // DEVICE TYPE READ-ONLY OPERATIONS
     // ========================================
 
     /**
-     * Get all device types
-     * @param includeInactive Include inactive device types
+     * Get all device types (active by default)
+     * @param includeInactive Include inactive device types (false = active only, true = all)
      * @param resultHandler Handler for the async result containing JsonArray of device types
      */
     void deviceTypeList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler);
-
-    /**
-     * Create a new device type
-     * @param deviceTypeData JsonObject containing device type data (device_type_name, default_port, is_active)
-     * @param resultHandler Handler for the async result containing JsonObject with creation result
-     */
-    void deviceTypeCreate(JsonObject deviceTypeData, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
-     * Update device type information
-     * @param deviceTypeId Device type ID to update
-     * @param deviceTypeData JsonObject containing fields to update
-     * @param resultHandler Handler for the async result containing JsonObject with update result
-     */
-    void deviceTypeUpdate(String deviceTypeId, JsonObject deviceTypeData, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
-     * Delete (deactivate) a device type
-     * @param deviceTypeId Device type ID to delete
-     * @param resultHandler Handler for the async result containing JsonObject with deletion result
-     */
-    void deviceTypeDelete(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Get device type by ID
@@ -80,18 +60,4 @@ public interface DeviceTypeService {
      * @param resultHandler Handler for the async result containing JsonObject with device type data or not found
      */
     void deviceTypeGetByName(String deviceTypeName, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
-     * Activate or deactivate device type
-     * @param deviceTypeId Device type ID
-     * @param isActive Active status
-     * @param resultHandler Handler for the async result containing JsonObject with update result
-     */
-    void deviceTypeSetActive(String deviceTypeId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
-     * Get all active device types (simplified list)
-     * @param resultHandler Handler for the async result containing JsonArray of active device types
-     */
-    void deviceTypeListActive(Handler<AsyncResult<JsonArray>> resultHandler);
 }

@@ -48,21 +48,21 @@ public class NMSLiteApplication extends AbstractVerticle {
                 // Create shared worker executor for blocking operations
                 setupWorkerExecutor(config);
 
-                // Deploy all verticles in parallel
+                // Deploy all verticles in parallel (PollingMetricsVerticle commented out for discovery testing)
                 Future<String> databaseFuture = deployDatabaseVerticle(config);
                 Future<String> discoveryFuture = deployDiscoveryVerticle(config);
-                Future<String> pollingFuture = deployPollingVerticle(config);
+                // Future<String> pollingFuture = deployPollingVerticle(config); // COMMENTED OUT FOR DISCOVERY TESTING
                 Future<String> mainFuture = deployMainVerticle(config);
 
                 // Wait for all verticles to deploy successfully
-                CompositeFuture.all(databaseFuture, discoveryFuture, pollingFuture, mainFuture)
+                CompositeFuture.all(databaseFuture, discoveryFuture, mainFuture)
                     .onSuccess(result -> {
                         logger.info("✅ All verticles deployed successfully!");
                         logger.info("📊 DatabaseVerticle (ProxyGen): {}", databaseFuture.result());
                         logger.info("🔍 DiscoveryVerticle: {}", discoveryFuture.result());
-                        logger.info("📈 PollingMetricsVerticle: {}", pollingFuture.result());
+                        // logger.info("📈 PollingMetricsVerticle: {}", pollingFuture.result()); // COMMENTED OUT FOR DISCOVERY TESTING
                         logger.info("🌐 ServerVerticle: {}", mainFuture.result());
-                        logger.info("🎯 NMSLite is ready for monitoring!");
+                        logger.info("🎯 NMSLite is ready for discovery testing!");
                         startPromise.complete();
                     })
                     .onFailure(cause -> {

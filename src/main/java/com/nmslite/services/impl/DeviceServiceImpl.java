@@ -42,8 +42,8 @@ public class DeviceServiceImpl implements DeviceService {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                    SELECT device_id, device_name, ip_address, device_type, port, username, is_monitoring_enabled,
-                           discovery_profile_id, polling_interval_seconds, alert_threshold_cpu, alert_threshold_memory, 
+                    SELECT device_id, device_name, ip_address::text as ip_address, device_type, port, username, is_monitoring_enabled,
+                           discovery_profile_id, polling_interval_seconds, alert_threshold_cpu, alert_threshold_memory,
                            alert_threshold_disk, is_deleted, deleted_at, deleted_by, created_at, updated_at, last_discovered_at
                     FROM devices
                     """ + (includeDeleted ? "" : "WHERE is_deleted = false ") + """
@@ -58,7 +58,7 @@ public class DeviceServiceImpl implements DeviceService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getValue("ip_address").toString())
+                                    .put("ip_address", row.getString("ip_address"))
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
                                     .put("username", row.getString("username"))
@@ -102,9 +102,16 @@ public class DeviceServiceImpl implements DeviceService {
             String passwordEncrypted = deviceData.getString("password_encrypted");
             Boolean isMonitoringEnabled = deviceData.getBoolean("is_monitoring_enabled", true);
             String discoveryProfileId = deviceData.getString("discovery_profile_id");
+            Integer pollingIntervalSeconds = deviceData.getInteger("polling_interval_seconds");
 
             if (deviceName == null || ipAddress == null || deviceType == null || port == null || username == null) {
                 blockingPromise.fail(new IllegalArgumentException("Device name, IP address, device type, port, and username are required"));
+                return;
+            }
+
+            // Validate discovery_profile_id if provided (should not be null when provisioning from discovery profile)
+            if (discoveryProfileId != null && discoveryProfileId.trim().isEmpty()) {
+                blockingPromise.fail(new IllegalArgumentException("Discovery profile ID cannot be empty"));
                 return;
             }
 
@@ -123,33 +130,34 @@ public class DeviceServiceImpl implements DeviceService {
 
             String sql = """
                     INSERT INTO devices (device_name, ip_address, device_type, port, username, password_encrypted,
-                                       is_monitoring_enabled, discovery_profile_id)
+                                       is_monitoring_enabled, discovery_profile_id, polling_interval_seconds)
                     VALUES ($1, '""" + ipAddress + """
-                    '::inet, $2, $3, $4, $5, $6, $7)
-                    RETURNING device_id, device_name, ip_address, device_type, port, username, is_monitoring_enabled,
-                             discovery_profile_id, created_at, last_discovered_at
+                    '::inet, $2, $3, $4, $5, $6, $7, $8)
+                    RETURNING device_id, device_name, ip_address::text as ip_address, device_type, port, username, is_monitoring_enabled,
+                             discovery_profile_id, polling_interval_seconds, created_at, last_discovered_at
                     """;
 
             UUID discoveryProfileUuid = discoveryProfileId != null ? UUID.fromString(discoveryProfileId) : null;
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(deviceName, deviceType, port, username, finalPasswordEncrypted,
-                                    isMonitoringEnabled, discoveryProfileUuid))
+                                    isMonitoringEnabled, discoveryProfileUuid, pollingIntervalSeconds))
                     .onSuccess(rows -> {
                         Row row = rows.iterator().next();
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getValue("ip_address").toString())
+                                .put("ip_address", row.getString("ip_address"))
                                 .put("device_type", row.getString("device_type"))
                                 .put("port", row.getInteger("port"))
                                 .put("username", row.getString("username"))
                                 .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ? 
+                                .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ?
                                     row.getUUID("discovery_profile_id").toString() : null)
+                                .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
-                                .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ? 
+                                .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ?
                                     row.getLocalDateTime("last_discovered_at").toString() : null)
                                 .put("message", "Device created successfully");
                         blockingPromise.complete(result);
