@@ -37,11 +37,12 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void userList(Handler<AsyncResult<JsonArray>> resultHandler) {
+    public void userList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler) {
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
                 SELECT user_id, username, is_active, created_at, updated_at, last_login_at
                 FROM users
+                """ + (includeInactive ? "" : "WHERE is_active = true ") + """
                 ORDER BY created_at DESC
                 """;
 
@@ -68,6 +69,13 @@ public class UserServiceImpl implements UserService {
                     blockingPromise.fail(cause);
                 });
         }, resultHandler);
+    }
+
+    /**
+     * Get all users (default: active users only)
+     */
+    public void userList(Handler<AsyncResult<JsonArray>> resultHandler) {
+        userList(false, resultHandler);
     }
 
     @Override
@@ -282,44 +290,6 @@ public class UserServiceImpl implements UserService {
                 })
                 .onFailure(cause -> {
                     logger.error("Failed to update last login", cause);
-                    blockingPromise.fail(cause);
-                });
-        }, resultHandler);
-    }
-
-    @Override
-    public void userGetByUsername(String username, Handler<AsyncResult<JsonObject>> resultHandler) {
-
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                SELECT user_id, username, is_active, created_at, updated_at, last_login_at
-                FROM users
-                WHERE username = $1
-                """;
-
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(username))
-                .onSuccess(rows -> {
-                    if (rows.size() == 0) {
-                        blockingPromise.complete(new JsonObject().put("found", false));
-                        return;
-                    }
-
-                    Row row = rows.iterator().next();
-                    JsonObject result = new JsonObject()
-                        .put("found", true)
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("is_active", row.getBoolean("is_active"))
-                        .put("created_at", row.getLocalDateTime("created_at").toString())
-                        .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                            row.getLocalDateTime("updated_at").toString() : null)
-                        .put("last_login_at", row.getLocalDateTime("last_login_at") != null ?
-                            row.getLocalDateTime("last_login_at").toString() : null);
-                    blockingPromise.complete(result);
-                })
-                .onFailure(cause -> {
-                    logger.error("Failed to get user by username", cause);
                     blockingPromise.fail(cause);
                 });
         }, resultHandler);

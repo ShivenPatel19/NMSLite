@@ -40,9 +40,10 @@ public interface UserService {
 
     /**
      * Get all users
+     * @param includeInactive Include inactive users (false = active users only, true = all users)
      * @param resultHandler Handler for the async result containing JsonArray of users
      */
-    void userList(Handler<AsyncResult<JsonArray>> resultHandler);
+    void userList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Create a new user
@@ -80,13 +81,6 @@ public interface UserService {
      * @param resultHandler Handler for the async result containing JsonObject with update result
      */
     void userUpdateLastLogin(String userId, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
-     * Get user by username
-     * @param username Username to search for
-     * @param resultHandler Handler for the async result containing JsonObject with user data or not found
-     */
-    void userGetByUsername(String username, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Change user password

@@ -69,13 +69,6 @@ public interface AvailabilityService {
     void availabilityDeleteByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
-     * Get active devices with current status (only active, non-deleted devices)
-     * @param status Status filter ("UP", "DOWN", or null for all)
-     * @param resultHandler Handler for the async result containing JsonArray of active devices with their current availability status
-     */
-    void availabilityGetDevicesByStatus(String status, Handler<AsyncResult<JsonArray>> resultHandler);
-
-    /**
      * Update device status based on latest check (device must be active, non-deleted)
      * @param deviceId Device ID (must be active, non-deleted)
      * @param status New status ("UP" or "DOWN")
@@ -84,9 +77,4 @@ public interface AvailabilityService {
      */
     void availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime, Handler<AsyncResult<JsonObject>> resultHandler);
 
-    /**
-     * Get count of devices by status
-     * @param resultHandler Handler for the async result containing JsonObject with status counts (total, up, down)
-     */
-    void availabilityGetStatusCounts(Handler<AsyncResult<JsonObject>> resultHandler);
 }

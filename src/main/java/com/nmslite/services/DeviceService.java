@@ -50,7 +50,7 @@ public interface DeviceService {
     /**
      * Create a new device
      *
-     * @param deviceData JsonObject containing device data (device_name, ip_address, device_type, port, username, password, is_monitoring_enabled, discovery_profile_id)
+     * @param deviceData JsonObject containing device data (device_name, ip_address, device_type, port, username, password, is_monitoring_enabled, discovery_profile_id, polling_interval_seconds, timeout_seconds, retry_count)
      * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
     void deviceCreate(JsonObject deviceData, Handler<AsyncResult<JsonObject>> resultHandler);
@@ -62,7 +62,7 @@ public interface DeviceService {
      * @param isEnabled Monitoring enabled status
      * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    void deviceUpdateMonitoring(String deviceId, boolean isEnabled, Handler<AsyncResult<JsonObject>> resultHandler);
+    void deviceUpdateIsMonitoringStatus(String deviceId, boolean isEnabled, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Update device monitoring configuration (directly editable fields)
@@ -94,10 +94,9 @@ public interface DeviceService {
      * Get device by ID
      *
      * @param deviceId       Device ID
-     * @param includeDeleted Include soft-deleted devices
      * @param resultHandler Handler for the async result containing JsonObject with device data or not found
      */
-    void deviceGetById(String deviceId, boolean includeDeleted, Handler<AsyncResult<JsonObject>> resultHandler);
+    void deviceGetById(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Find device by IP address
@@ -114,48 +113,6 @@ public interface DeviceService {
      * @param resultHandler Handler for the async result containing JsonArray of devices ready for polling
      */
     void deviceListForPolling(Handler<AsyncResult<JsonArray>> resultHandler);
-
-    /**
-     * Get devices with availability statistics
-     *
-     * @param includeDeleted Include soft-deleted devices
-     * @param resultHandler Handler for the async result containing JsonArray of devices with availability data
-     */
-    void deviceListWithAvailability(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
-
-
-    /**
-     * Get devices with current status (includes availability status)
-     *
-     * @param includeDeleted Include soft-deleted devices
-     * @param resultHandler Handler for the async result containing JsonArray of devices with current status
-     */
-    void deviceListWithStatus(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
-
-    /**
-     * Get devices by name pattern (search)
-     *
-     * @param namePattern    Device name pattern to search for
-     * @param includeDeleted Include soft-deleted devices
-     * @param resultHandler Handler for the async result containing JsonArray of matching devices
-     */
-    void deviceSearchByName(String namePattern, boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
-
-    /**
-     * Get devices by monitoring status
-     *
-     * @param isMonitoringEnabled Monitoring enabled filter
-     * @param includeDeleted      Include soft-deleted devices
-     * @param resultHandler Handler for the async result containing JsonArray of devices
-     */
-    void deviceListByMonitoringStatus(boolean isMonitoringEnabled, boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
-
-    /**
-     * Get device count by status
-     *
-     * @param resultHandler Handler for the async result containing JsonObject with device counts (total, active, deleted, monitoring_enabled, monitoring_disabled)
-     */
-    void deviceGetCounts(Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Synchronize all devices from attached tables (discovery profiles, credentials, device types)

@@ -289,69 +289,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
         }, resultHandler);
     }
 
-    @Override
-    public void availabilityGetDevicesByStatus(String status, Handler<AsyncResult<JsonArray>> resultHandler) {
 
-        vertx.executeBlocking(blockingPromise -> {
-            StringBuilder sqlBuilder = new StringBuilder("""
-                    SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
-                           da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
-                           da.current_status, da.status_since, da.updated_at,
-                           d.device_name, d.ip_address, d.device_type, d.is_monitoring_enabled
-                    FROM device_availability da
-                    JOIN devices d ON da.device_id = d.device_id
-                    WHERE d.is_deleted = false
-                    """);
-
-            JsonArray params = new JsonArray();
-            if (status != null) {
-                String normalizedStatus = status.toLowerCase();
-                if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down") && !normalizedStatus.equals("unknown")) {
-                    blockingPromise.fail(new IllegalArgumentException("Status must be 'up', 'down', or 'unknown'"));
-                    return;
-                }
-                sqlBuilder.append(" AND da.current_status = $1");
-                params.add(normalizedStatus);
-            }
-
-            sqlBuilder.append(" ORDER BY d.device_name");
-
-            pgPool.preparedQuery(sqlBuilder.toString())
-                    .execute(params.size() > 0 ? Tuple.from(params.getList()) : Tuple.tuple())
-                    .onSuccess(rows -> {
-                        JsonArray devices = new JsonArray();
-                        for (Row row : rows) {
-                            JsonObject device = new JsonObject()
-                                    .put("device_id", row.getUUID("device_id").toString())
-                                    .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getValue("ip_address").toString())
-                                    .put("device_type", row.getString("device_type"))
-                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                    .put("total_checks", row.getInteger("total_checks"))
-                                    .put("successful_checks", row.getInteger("successful_checks"))
-                                    .put("failed_checks", row.getInteger("failed_checks"))
-                                    .put("availability_percent", row.getBigDecimal("availability_percent"))
-                                    .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
-                                        row.getLocalDateTime("last_check_time").toString() : null)
-                                    .put("last_success_time", row.getLocalDateTime("last_success_time") != null ?
-                                        row.getLocalDateTime("last_success_time").toString() : null)
-                                    .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ?
-                                        row.getLocalDateTime("last_failure_time").toString() : null)
-                                    .put("current_status", row.getString("current_status"))
-                                    .put("status_since", row.getLocalDateTime("status_since") != null ?
-                                        row.getLocalDateTime("status_since").toString() : null)
-                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                        row.getLocalDateTime("updated_at").toString() : null);
-                            devices.add(device);
-                        }
-                        blockingPromise.complete(devices);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to get devices by status", cause);
-                        blockingPromise.fail(cause);
-                    });
-        }, resultHandler);
-    }
 
     @Override
     public void availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime, Handler<AsyncResult<JsonObject>> resultHandler) {
@@ -456,36 +394,5 @@ public class AvailabilityServiceImpl implements AvailabilityService {
         }, resultHandler);
     }
 
-    @Override
-    public void availabilityGetStatusCounts(Handler<AsyncResult<JsonObject>> resultHandler) {
 
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                    SELECT
-                        COUNT(*) as total,
-                        COUNT(CASE WHEN da.current_status = 'up' THEN 1 END) as up,
-                        COUNT(CASE WHEN da.current_status = 'down' THEN 1 END) as down,
-                        COUNT(CASE WHEN da.current_status = 'unknown' THEN 1 END) as unknown
-                    FROM device_availability da
-                    JOIN devices d ON da.device_id = d.device_id
-                    WHERE d.is_deleted = false
-                    """;
-
-            pgPool.query(sql)
-                    .execute()
-                    .onSuccess(rows -> {
-                        Row row = rows.iterator().next();
-                        JsonObject result = new JsonObject()
-                                .put("total", row.getLong("total"))
-                                .put("up", row.getLong("up"))
-                                .put("down", row.getLong("down"))
-                                .put("unknown", row.getLong("unknown"));
-                        blockingPromise.complete(result);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to get status counts", cause);
-                        blockingPromise.fail(cause);
-                    });
-        }, resultHandler);
-    }
 }

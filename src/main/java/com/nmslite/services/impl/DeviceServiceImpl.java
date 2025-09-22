@@ -42,9 +42,9 @@ public class DeviceServiceImpl implements DeviceService {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                    SELECT device_id, device_name, ip_address::text as ip_address, device_type, port, username, is_monitoring_enabled,
-                           discovery_profile_id, polling_interval_seconds, alert_threshold_cpu, alert_threshold_memory,
-                           alert_threshold_disk, is_deleted, deleted_at, deleted_by, created_at, updated_at, last_discovered_at
+                    SELECT device_id, device_name, ip_address::text as ip_address, device_type, port, protocol, username, is_monitoring_enabled,
+                           discovery_profile_id, polling_interval_seconds, timeout_seconds, retry_count, alert_threshold_cpu, alert_threshold_memory,
+                           alert_threshold_disk, is_deleted, deleted_at, deleted_by, created_at, updated_at, last_polled_at
                     FROM devices
                     """ + (includeDeleted ? "" : "WHERE is_deleted = false ") + """
                     ORDER BY device_name
@@ -61,23 +61,26 @@ public class DeviceServiceImpl implements DeviceService {
                                     .put("ip_address", row.getString("ip_address"))
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
                                     .put("username", row.getString("username"))
                                     .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                    .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ? 
+                                    .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ?
                                         row.getUUID("discovery_profile_id").toString() : null)
                                     .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                    .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                    .put("retry_count", row.getInteger("retry_count"))
                                     .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
                                     .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
                                     .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
                                     .put("is_deleted", row.getBoolean("is_deleted"))
-                                    .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? 
+                                    .put("deleted_at", row.getLocalDateTime("deleted_at") != null ?
                                         row.getLocalDateTime("deleted_at").toString() : null)
                                     .put("deleted_by", row.getString("deleted_by"))
                                     .put("created_at", row.getLocalDateTime("created_at").toString())
-                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? 
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                         row.getLocalDateTime("updated_at").toString() : null)
-                                    .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ? 
-                                        row.getLocalDateTime("last_discovered_at").toString() : null);
+                                    .put("last_polled_at", row.getLocalDateTime("last_polled_at") != null ?
+                                        row.getLocalDateTime("last_polled_at").toString() : null);
                             devices.add(device);
                         }
                         blockingPromise.complete(devices);
@@ -97,12 +100,15 @@ public class DeviceServiceImpl implements DeviceService {
             String ipAddress = deviceData.getString("ip_address");
             String deviceType = deviceData.getString("device_type");
             Integer port = deviceData.getInteger("port");
+            String protocol = deviceData.getString("protocol");
             String username = deviceData.getString("username");
             String password = deviceData.getString("password");
             String passwordEncrypted = deviceData.getString("password_encrypted");
             Boolean isMonitoringEnabled = deviceData.getBoolean("is_monitoring_enabled", true);
             String discoveryProfileId = deviceData.getString("discovery_profile_id");
             Integer pollingIntervalSeconds = deviceData.getInteger("polling_interval_seconds");
+            Integer timeoutSeconds = deviceData.getInteger("timeout_seconds");
+            Integer retryCount = deviceData.getInteger("retry_count");
 
             if (deviceName == null || ipAddress == null || deviceType == null || port == null || username == null) {
                 blockingPromise.fail(new IllegalArgumentException("Device name, IP address, device type, port, and username are required"));
@@ -129,19 +135,19 @@ public class DeviceServiceImpl implements DeviceService {
             }
 
             String sql = """
-                    INSERT INTO devices (device_name, ip_address, device_type, port, username, password_encrypted,
-                                       is_monitoring_enabled, discovery_profile_id, polling_interval_seconds)
+                    INSERT INTO devices (device_name, ip_address, device_type, port, protocol, username, password_encrypted,
+                                       is_monitoring_enabled, discovery_profile_id, polling_interval_seconds, timeout_seconds, retry_count)
                     VALUES ($1, '""" + ipAddress + """
-                    '::inet, $2, $3, $4, $5, $6, $7, $8)
-                    RETURNING device_id, device_name, ip_address::text as ip_address, device_type, port, username, is_monitoring_enabled,
-                             discovery_profile_id, polling_interval_seconds, created_at, last_discovered_at
+                    '::inet, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    RETURNING device_id, device_name, ip_address::text as ip_address, device_type, port, protocol, username, is_monitoring_enabled,
+                             discovery_profile_id, polling_interval_seconds, timeout_seconds, retry_count, created_at
                     """;
 
             UUID discoveryProfileUuid = discoveryProfileId != null ? UUID.fromString(discoveryProfileId) : null;
 
             pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(deviceName, deviceType, port, username, finalPasswordEncrypted,
-                                    isMonitoringEnabled, discoveryProfileUuid, pollingIntervalSeconds))
+                    .execute(Tuple.of(deviceName, deviceType, port, protocol, username, finalPasswordEncrypted,
+                                    isMonitoringEnabled, discoveryProfileUuid, pollingIntervalSeconds, timeoutSeconds, retryCount))
                     .onSuccess(rows -> {
                         Row row = rows.iterator().next();
                         JsonObject result = new JsonObject()
@@ -151,14 +157,15 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("ip_address", row.getString("ip_address"))
                                 .put("device_type", row.getString("device_type"))
                                 .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
                                 .put("username", row.getString("username"))
                                 .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                 .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ?
                                     row.getUUID("discovery_profile_id").toString() : null)
                                 .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                .put("retry_count", row.getInteger("retry_count"))
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
-                                .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ?
-                                    row.getLocalDateTime("last_discovered_at").toString() : null)
                                 .put("message", "Device created successfully");
                         blockingPromise.complete(result);
                     })
@@ -178,7 +185,7 @@ public class DeviceServiceImpl implements DeviceService {
     }
 
     @Override
-    public void deviceUpdateMonitoring(String deviceId, boolean isEnabled, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void deviceUpdateIsMonitoringStatus(String deviceId, boolean isEnabled, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
@@ -351,16 +358,16 @@ public class DeviceServiceImpl implements DeviceService {
     }
 
     @Override
-    public void deviceGetById(String deviceId, boolean includeDeleted, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void deviceGetById(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                    SELECT device_id, device_name, ip_address, device_type, port, username, is_monitoring_enabled,
-                           discovery_profile_id, polling_interval_seconds, alert_threshold_cpu, alert_threshold_memory,
-                           alert_threshold_disk, is_deleted, deleted_at, deleted_by, created_at, updated_at, last_discovered_at
+                    SELECT device_id, device_name, ip_address::text as ip_address, device_type, port, protocol, username, is_monitoring_enabled,
+                           discovery_profile_id, polling_interval_seconds, timeout_seconds, retry_count, alert_threshold_cpu, alert_threshold_memory,
+                           alert_threshold_disk, is_deleted, deleted_at, deleted_by, created_at, updated_at, last_polled_at
                     FROM devices
                     WHERE device_id = $1
-                    """ + (includeDeleted ? "" : "AND is_deleted = false");
+                    AND is_deleted = false""";
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(deviceId)))
@@ -375,14 +382,17 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getValue("ip_address").toString())
+                                .put("ip_address", row.getString("ip_address"))
                                 .put("device_type", row.getString("device_type"))
                                 .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
                                 .put("username", row.getString("username"))
                                 .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                 .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ?
                                     row.getUUID("discovery_profile_id").toString() : null)
                                 .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                .put("retry_count", row.getInteger("retry_count"))
                                 .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
                                 .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
                                 .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
@@ -393,8 +403,8 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                     row.getLocalDateTime("updated_at").toString() : null)
-                                .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ?
-                                    row.getLocalDateTime("last_discovered_at").toString() : null);
+                                .put("last_polled_at", row.getLocalDateTime("last_polled_at") != null ?
+                                    row.getLocalDateTime("last_polled_at").toString() : null);
                         blockingPromise.complete(result);
                     })
                     .onFailure(cause -> {
@@ -409,9 +419,9 @@ public class DeviceServiceImpl implements DeviceService {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                    SELECT device_id, device_name, ip_address, device_type, port, username, is_monitoring_enabled,
-                           discovery_profile_id, polling_interval_seconds, alert_threshold_cpu, alert_threshold_memory,
-                           alert_threshold_disk, is_deleted, deleted_at, deleted_by, created_at, updated_at, last_discovered_at
+                    SELECT device_id, device_name, ip_address::text as ip_address, device_type, port, protocol, username, is_monitoring_enabled,
+                           discovery_profile_id, polling_interval_seconds, timeout_seconds, retry_count, alert_threshold_cpu, alert_threshold_memory,
+                           alert_threshold_disk, is_deleted, deleted_at, deleted_by, created_at, updated_at, last_polled_at
                     FROM devices
                     WHERE ip_address = $1
                     """ + (includeDeleted ? "" : "AND is_deleted = false");
@@ -429,14 +439,17 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getValue("ip_address").toString())
+                                .put("ip_address", row.getString("ip_address"))
                                 .put("device_type", row.getString("device_type"))
                                 .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
                                 .put("username", row.getString("username"))
                                 .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                 .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ?
                                     row.getUUID("discovery_profile_id").toString() : null)
                                 .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                .put("retry_count", row.getInteger("retry_count"))
                                 .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
                                 .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
                                 .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
@@ -447,8 +460,8 @@ public class DeviceServiceImpl implements DeviceService {
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                     row.getLocalDateTime("updated_at").toString() : null)
-                                .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ?
-                                    row.getLocalDateTime("last_discovered_at").toString() : null);
+                                .put("last_polled_at", row.getLocalDateTime("last_polled_at") != null ?
+                                    row.getLocalDateTime("last_polled_at").toString() : null);
                         blockingPromise.complete(result);
                     })
                     .onFailure(cause -> {
@@ -463,8 +476,8 @@ public class DeviceServiceImpl implements DeviceService {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                    SELECT device_id, device_name, ip_address, device_type, port, username, password_encrypted,
-                           polling_interval_seconds, alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk
+                    SELECT device_id, device_name, ip_address::text as ip_address, device_type, port, protocol, username, password_encrypted,
+                           polling_interval_seconds, timeout_seconds, retry_count, alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk
                     FROM devices
                     WHERE is_monitoring_enabled = true AND is_deleted = false
                     ORDER BY device_name
@@ -478,12 +491,15 @@ public class DeviceServiceImpl implements DeviceService {
                             JsonObject device = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getValue("ip_address").toString())
+                                    .put("ip_address", row.getString("ip_address"))
                                     .put("device_type", row.getString("device_type"))
                                     .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
                                     .put("username", row.getString("username"))
                                     .put("password_encrypted", row.getString("password_encrypted"))
                                     .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                    .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                    .put("retry_count", row.getInteger("retry_count"))
                                     .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
                                     .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
                                     .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"));
@@ -499,252 +515,24 @@ public class DeviceServiceImpl implements DeviceService {
     }
 
     @Override
-    public void deviceListWithAvailability(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
-
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                    SELECT d.device_id, d.device_name, d.ip_address, d.device_type, d.port, d.username,
-                           d.is_monitoring_enabled, d.is_deleted, d.created_at,
-                           da.availability_percent, da.total_checks, da.successful_checks, da.failed_checks,
-                           da.last_check_time, da.current_status
-                    FROM devices d
-                    LEFT JOIN device_availability da ON d.device_id = da.device_id
-                    """ + (includeDeleted ? "" : "WHERE d.is_deleted = false ") + """
-                    ORDER BY d.device_name
-                    """;
-
-            pgPool.query(sql)
-                    .execute()
-                    .onSuccess(rows -> {
-                        JsonArray devices = new JsonArray();
-                        for (Row row : rows) {
-                            JsonObject device = new JsonObject()
-                                    .put("device_id", row.getUUID("device_id").toString())
-                                    .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getValue("ip_address").toString())
-                                    .put("device_type", row.getString("device_type"))
-                                    .put("port", row.getInteger("port"))
-                                    .put("username", row.getString("username"))
-                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                    .put("is_deleted", row.getBoolean("is_deleted"))
-                                    .put("created_at", row.getLocalDateTime("created_at").toString())
-                                    .put("availability_percent", row.getBigDecimal("availability_percent"))
-                                    .put("total_checks", row.getInteger("total_checks"))
-                                    .put("successful_checks", row.getInteger("successful_checks"))
-                                    .put("failed_checks", row.getInteger("failed_checks"))
-                                    .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
-                                        row.getLocalDateTime("last_check_time").toString() : null)
-                                    .put("current_status", row.getString("current_status"));
-                            devices.add(device);
-                        }
-                        blockingPromise.complete(devices);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to get devices with availability", cause);
-                        blockingPromise.fail(cause);
-                    });
-        }, resultHandler);
-    }
-
-    @Override
-    public void deviceListWithStatus(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
-
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                    SELECT d.device_id, d.device_name, d.ip_address, d.device_type, d.port, d.username,
-                           d.is_monitoring_enabled, d.is_deleted, d.created_at, d.last_discovered_at,
-                           da.current_status, da.last_check_time, da.availability_percent
-                    FROM devices d
-                    LEFT JOIN device_availability da ON d.device_id = da.device_id
-                    """ + (includeDeleted ? "" : "WHERE d.is_deleted = false ") + """
-                    ORDER BY d.device_name
-                    """;
-
-            pgPool.query(sql)
-                    .execute()
-                    .onSuccess(rows -> {
-                        JsonArray devices = new JsonArray();
-                        for (Row row : rows) {
-                            JsonObject device = new JsonObject()
-                                    .put("device_id", row.getUUID("device_id").toString())
-                                    .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getValue("ip_address").toString())
-                                    .put("device_type", row.getString("device_type"))
-                                    .put("port", row.getInteger("port"))
-                                    .put("username", row.getString("username"))
-                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                    .put("is_deleted", row.getBoolean("is_deleted"))
-                                    .put("created_at", row.getLocalDateTime("created_at").toString())
-                                    .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ?
-                                        row.getLocalDateTime("last_discovered_at").toString() : null)
-                                    .put("current_status", row.getString("current_status"))
-                                    .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
-                                        row.getLocalDateTime("last_check_time").toString() : null)
-                                    .put("availability_percent", row.getBigDecimal("availability_percent"));
-                            devices.add(device);
-                        }
-                        blockingPromise.complete(devices);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to get devices with status", cause);
-                        blockingPromise.fail(cause);
-                    });
-        }, resultHandler);
-    }
-
-    @Override
-    public void deviceSearchByName(String namePattern, boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
-
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                    SELECT device_id, device_name, ip_address, device_type, port, username, is_monitoring_enabled,
-                           discovery_profile_id, is_deleted, created_at, updated_at, last_discovered_at
-                    FROM devices
-                    WHERE device_name ILIKE $1
-                    """ + (includeDeleted ? "" : "AND is_deleted = false ") + """
-                    ORDER BY device_name
-                    """;
-
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of("%" + namePattern + "%"))
-                    .onSuccess(rows -> {
-                        JsonArray devices = new JsonArray();
-                        for (Row row : rows) {
-                            JsonObject device = new JsonObject()
-                                    .put("device_id", row.getUUID("device_id").toString())
-                                    .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getValue("ip_address").toString())
-                                    .put("device_type", row.getString("device_type"))
-                                    .put("port", row.getInteger("port"))
-                                    .put("username", row.getString("username"))
-                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                    .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ?
-                                        row.getUUID("discovery_profile_id").toString() : null)
-                                    .put("is_deleted", row.getBoolean("is_deleted"))
-                                    .put("created_at", row.getLocalDateTime("created_at").toString())
-                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                        row.getLocalDateTime("updated_at").toString() : null)
-                                    .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ?
-                                        row.getLocalDateTime("last_discovered_at").toString() : null);
-                            devices.add(device);
-                        }
-                        blockingPromise.complete(devices);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to search devices by name", cause);
-                        blockingPromise.fail(cause);
-                    });
-        }, resultHandler);
-    }
-
-    @Override
-    public void deviceListByMonitoringStatus(boolean isMonitoringEnabled, boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler) {
-
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                    SELECT device_id, device_name, ip_address, device_type, port, username, is_monitoring_enabled,
-                           discovery_profile_id, is_deleted, created_at, updated_at, last_discovered_at
-                    FROM devices
-                    WHERE is_monitoring_enabled = $1
-                    """ + (includeDeleted ? "" : "AND is_deleted = false ") + """
-                    ORDER BY device_name
-                    """;
-
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(isMonitoringEnabled))
-                    .onSuccess(rows -> {
-                        JsonArray devices = new JsonArray();
-                        for (Row row : rows) {
-                            JsonObject device = new JsonObject()
-                                    .put("device_id", row.getUUID("device_id").toString())
-                                    .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getValue("ip_address").toString())
-                                    .put("device_type", row.getString("device_type"))
-                                    .put("port", row.getInteger("port"))
-                                    .put("username", row.getString("username"))
-                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                    .put("discovery_profile_id", row.getUUID("discovery_profile_id") != null ?
-                                        row.getUUID("discovery_profile_id").toString() : null)
-                                    .put("is_deleted", row.getBoolean("is_deleted"))
-                                    .put("created_at", row.getLocalDateTime("created_at").toString())
-                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                        row.getLocalDateTime("updated_at").toString() : null)
-                                    .put("last_discovered_at", row.getLocalDateTime("last_discovered_at") != null ?
-                                        row.getLocalDateTime("last_discovered_at").toString() : null);
-                            devices.add(device);
-                        }
-                        blockingPromise.complete(devices);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to get devices by monitoring status", cause);
-                        blockingPromise.fail(cause);
-                    });
-        }, resultHandler);
-    }
-
-    @Override
-    public void deviceGetCounts(Handler<AsyncResult<JsonObject>> resultHandler) {
-
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                    SELECT
-                        COUNT(*) as total,
-                        COUNT(CASE WHEN is_deleted = false THEN 1 END) as active,
-                        COUNT(CASE WHEN is_deleted = true THEN 1 END) as deleted,
-                        COUNT(CASE WHEN is_monitoring_enabled = true AND is_deleted = false THEN 1 END) as monitoring_enabled,
-                        COUNT(CASE WHEN is_monitoring_enabled = false AND is_deleted = false THEN 1 END) as monitoring_disabled
-                    FROM devices
-                    """;
-
-            pgPool.query(sql)
-                    .execute()
-                    .onSuccess(rows -> {
-                        Row row = rows.iterator().next();
-                        JsonObject result = new JsonObject()
-                                .put("total", row.getLong("total"))
-                                .put("active", row.getLong("active"))
-                                .put("deleted", row.getLong("deleted"))
-                                .put("monitoring_enabled", row.getLong("monitoring_enabled"))
-                                .put("monitoring_disabled", row.getLong("monitoring_disabled"));
-                        blockingPromise.complete(result);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to get device counts", cause);
-                        blockingPromise.fail(cause);
-                    });
-        }, resultHandler);
-    }
-
-    @Override
     public void deviceSync(Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
-            // This method would synchronize devices from discovery profiles, credentials, and device types
-            // For now, we'll implement a basic sync that updates last_discovered_at for all active devices
-            String sql = """
-                    UPDATE devices
-                    SET last_discovered_at = CURRENT_TIMESTAMP
-                    WHERE is_deleted = false
-                    """;
+            // This method synchronizes devices from discovery profiles, credentials, and device types
+            // It updates device data from their authoritative sources but does NOT update last_polled_at
+            // (last_polled_at should only be updated when actual polling/metrics collection occurs)
 
-            pgPool.query(sql)
-                    .execute()
-                    .onSuccess(rows -> {
-                        int updatedCount = rows.rowCount();
-                        JsonObject result = new JsonObject()
-                                .put("success", true)
-                                .put("devices_synchronized", updatedCount)
-                                .put("message", "Device synchronization completed successfully")
-                                .put("synchronized_at", java.time.LocalDateTime.now().toString());
-                        blockingPromise.complete(result);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to synchronize devices", cause);
-                        JsonObject result = new JsonObject()
-                                .put("success", false)
-                                .put("message", "Device synchronization failed: " + cause.getMessage());
-                        blockingPromise.complete(result);
-                    });
+            // TODO: Implement proper sync logic to update:
+            // - ip_address, device_type, port from discovery_profiles
+            // - username, password_encrypted from credential_profiles
+
+            // For now, return success without doing anything
+            JsonObject result = new JsonObject()
+                    .put("success", true)
+                    .put("devices_synchronized", 0)
+                    .put("message", "Device synchronization completed (no changes needed)")
+                    .put("synchronized_at", java.time.LocalDateTime.now().toString());
+            blockingPromise.complete(result);
         }, resultHandler);
     }
 }

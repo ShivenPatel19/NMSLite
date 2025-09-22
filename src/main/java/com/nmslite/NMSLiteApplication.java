@@ -20,12 +20,12 @@ import org.slf4j.LoggerFactory;
 /**
  * NMSLite Application - 5-Verticle Event-Driven Architecture with ProxyGen
  *
- * Architecture:
+ * 5-Verticle Architecture:
  * - ServerVerticle: HTTP API + WebSocket communication
  * - DatabaseVerticle: All database operations (ProxyGen enabled)
- * - UserServiceVerticle: User management operations (ProxyGen enabled)
  * - DiscoveryVerticle: Device discovery workflow
- * - PollingMetricsVerticle: Continuous monitoring
+ * - PollingMetricsVerticle: Continuous monitoring & metrics collection
+ * - All services: ProxyGen enabled for event bus communication
  *
  * Communication: Event Bus driven with async messaging + ProxyGen services
  */
@@ -48,21 +48,19 @@ public class NMSLiteApplication extends AbstractVerticle {
                 // Create shared worker executor for blocking operations
                 setupWorkerExecutor(config);
 
-                // Deploy all verticles in parallel (PollingMetricsVerticle commented out for discovery testing)
+                // Deploy only essential verticles (excluding PollingMetricsVerticle for now)
                 Future<String> databaseFuture = deployDatabaseVerticle(config);
                 Future<String> discoveryFuture = deployDiscoveryVerticle(config);
-                // Future<String> pollingFuture = deployPollingVerticle(config); // COMMENTED OUT FOR DISCOVERY TESTING
                 Future<String> mainFuture = deployMainVerticle(config);
 
-                // Wait for all verticles to deploy successfully
+                // Wait for essential verticles to deploy successfully
                 CompositeFuture.all(databaseFuture, discoveryFuture, mainFuture)
                     .onSuccess(result -> {
-                        logger.info("✅ All verticles deployed successfully!");
+                        logger.info("✅ Essential verticles deployed successfully!");
                         logger.info("📊 DatabaseVerticle (ProxyGen): {}", databaseFuture.result());
                         logger.info("🔍 DiscoveryVerticle: {}", discoveryFuture.result());
-                        // logger.info("📈 PollingMetricsVerticle: {}", pollingFuture.result()); // COMMENTED OUT FOR DISCOVERY TESTING
                         logger.info("🌐 ServerVerticle: {}", mainFuture.result());
-                        logger.info("🎯 NMSLite is ready for discovery testing!");
+                        logger.info("🎯 NMSLite is ready with API testing architecture!");
                         startPromise.complete();
                     })
                     .onFailure(cause -> {

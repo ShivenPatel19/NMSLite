@@ -53,11 +53,4 @@ public interface DeviceTypeService {
      * @param resultHandler Handler for the async result containing JsonObject with device type data or not found
      */
     void deviceTypeGetById(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
-     * Get device type by name
-     * @param deviceTypeName Device type name to search for
-     * @param resultHandler Handler for the async result containing JsonObject with device type data or not found
-     */
-    void deviceTypeGetByName(String deviceTypeName, Handler<AsyncResult<JsonObject>> resultHandler);
 }

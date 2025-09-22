@@ -1,5 +1,5 @@
 -- =====================================================
--- 1. USERS TABLE - Admin users only
+-- 1. USERS TABLE - Admin users only, with soft delete
 -- =====================================================
 CREATE TABLE users (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -13,31 +13,27 @@ CREATE TABLE users (
 );
 
 -- =====================================================
--- 2. DEVICE TYPES TABLE - supported device types
+-- 2. DEVICE TYPES TABLE - supported device types, with soft delete
 -- =====================================================
 CREATE TABLE device_types (
     device_type_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_type_name VARCHAR(50) UNIQUE NOT NULL,
     default_port INTEGER,
-    default_polling_interval_seconds INTEGER DEFAULT 300, -- Default 5 minutes
     is_active BOOLEAN DEFAULT true,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT chk_default_port_range CHECK (default_port BETWEEN 1 AND 65535),
-    CONSTRAINT chk_default_polling_interval CHECK (default_polling_interval_seconds BETWEEN 30 AND 3600) -- 30 seconds to 1 hour
+    CONSTRAINT chk_default_port_range CHECK (default_port BETWEEN 1 AND 65535)
 );
 
 -- =====================================================
--- 3. CREDENTIAL PROFILES TABLE - Simple credentials
+-- 3. CREDENTIAL PROFILES TABLE
 -- =====================================================
 CREATE TABLE credential_profiles (
     credential_profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     profile_name VARCHAR(100) UNIQUE NOT NULL,
     username VARCHAR(100) NOT NULL,
     password_encrypted VARCHAR(500) NOT NULL,
-    protocol VARCHAR(10),
-    is_active BOOLEAN DEFAULT true,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -45,7 +41,7 @@ CREATE TABLE credential_profiles (
 );
 
 -- =====================================================
--- 4. DISCOVERY PROFILES TABLE - Enhanced configuration
+-- 4. DISCOVERY PROFILES TABLE
 -- =====================================================
 CREATE TABLE discovery_profiles (
     profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -54,9 +50,7 @@ CREATE TABLE discovery_profiles (
     device_type_id UUID NOT NULL REFERENCES device_types(device_type_id) ON DELETE RESTRICT,
     credential_profile_id UUID NOT NULL REFERENCES credential_profiles(credential_profile_id) ON DELETE RESTRICT,
     port INTEGER,
-    timeout_seconds INTEGER,
-    retry_count INTEGER,
-    is_active BOOLEAN DEFAULT true,
+    protocol VARCHAR(10),
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -69,19 +63,22 @@ CREATE TABLE discovery_profiles (
 CREATE TABLE devices (
     device_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_name VARCHAR(100) NOT NULL,
-    ip_address INET NOT NULL,
-    device_type VARCHAR(50) NOT NULL,
-    port INTEGER NOT NULL,
-    username VARCHAR(100) NOT NULL,
-    password_encrypted VARCHAR(500) NOT NULL,
+    ip_address INET NOT NULL,                                           -- for following deviceSync() is required.
+    device_type VARCHAR(50) NOT NULL,                                   -- need to sync if device type changes
+    port INTEGER NOT NULL,                                              -- need to sync if device type/discovery profile changes
+    protocol VARCHAR(10),                                               -- need to sync if discovery profile changes
+    username VARCHAR(100) NOT NULL,                                     -- need to sync if credentials profile changes
+    password_encrypted VARCHAR(500) NOT NULL,                           -- need to sync if credentials profile changes
     is_monitoring_enabled BOOLEAN DEFAULT true,
     discovery_profile_id UUID REFERENCES discovery_profiles(profile_id) ON DELETE SET NULL,
 
     -- Monitoring configuration
     polling_interval_seconds INTEGER,
-    alert_threshold_cpu DECIMAL(5,2) DEFAULT 0.0,
-    alert_threshold_memory DECIMAL(5,2) DEFAULT 0.0,
-    alert_threshold_disk DECIMAL(5,2) DEFAULT 0.0,
+    timeout_seconds INTEGER DEFAULT 300,   -- 5 minutes default timeout
+    retry_count INTEGER DEFAULT 2,         -- Default retry count of 2
+    alert_threshold_cpu DECIMAL(5,2) DEFAULT 80.0,
+    alert_threshold_memory DECIMAL(5,2) DEFAULT 80.0,
+    alert_threshold_disk DECIMAL(5,2) DEFAULT 80.0,
 
     -- Soft delete fields
     is_deleted BOOLEAN DEFAULT false,
@@ -91,10 +88,12 @@ CREATE TABLE devices (
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_polled_at TIMESTAMP,
 
     -- Constraints
     CONSTRAINT chk_port_range CHECK (port BETWEEN 1 AND 65535),
+    CONSTRAINT chk_timeout_range CHECK (timeout_seconds BETWEEN 0 AND 600),   -- 0 seconds to 10 minutes
+    CONSTRAINT chk_retry_range CHECK (retry_count BETWEEN 0 AND 5),           -- 0 to 5 retries
     CONSTRAINT chk_cpu_threshold CHECK (alert_threshold_cpu BETWEEN 0 AND 100),
     CONSTRAINT chk_memory_threshold CHECK (alert_threshold_memory BETWEEN 0 AND 100),
     CONSTRAINT chk_disk_threshold CHECK (alert_threshold_disk BETWEEN 0 AND 100)
@@ -150,22 +149,6 @@ CREATE TABLE device_availability (
     CONSTRAINT chk_availability_range CHECK (availability_percent BETWEEN 0 AND 100),
     CONSTRAINT chk_checks_consistency CHECK (total_checks = successful_checks + failed_checks)
 );
-
--- =====================================================
--- PERFORMANCE INDEXES
--- =====================================================
-
--- Devices table
-CREATE INDEX idx_devices_ip_address ON devices(ip_address);
-CREATE INDEX idx_devices_monitoring ON devices(is_monitoring_enabled) WHERE is_deleted = false;
-CREATE INDEX idx_devices_deleted ON devices(is_deleted, deleted_at);
-CREATE INDEX idx_devices_discovery_profile ON devices(discovery_profile_id);
-CREATE INDEX idx_devices_device_type ON devices(device_type);
-CREATE UNIQUE INDEX idx_devices_ip_active ON devices(ip_address) WHERE is_deleted = false;
-
--- Metrics table (time series heavy)
-CREATE INDEX idx_metrics_device_timestamp ON metrics(device_id, timestamp DESC);
-CREATE INDEX idx_metrics_device_success ON metrics(device_id, success, timestamp DESC);
 
 -- =====================================================
 -- TRIGGERS FOR AUTOMATIC UPDATES

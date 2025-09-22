@@ -42,8 +42,8 @@ public class DatabaseVerticle extends AbstractVerticle {
     // Service implementations
     private UserServiceImpl userService;
     private DeviceTypeServiceImpl deviceTypeService;
-    private CredentialServiceImpl credentialService;
-    private DiscoveryServiceImpl discoveryService;
+    private CredentialProfileServiceImpl credentialService;
+    private DiscoveryProfileServiceImpl discoveryService;
     private DeviceServiceImpl deviceService;
     private MetricsServiceImpl metricsService;
     private AvailabilityServiceImpl availabilityService;
@@ -121,8 +121,8 @@ public class DatabaseVerticle extends AbstractVerticle {
 
         this.userService = new UserServiceImpl(vertx, pool);
         this.deviceTypeService = new DeviceTypeServiceImpl(vertx, pool);
-        this.credentialService = new CredentialServiceImpl(vertx, pool);
-        this.discoveryService = new DiscoveryServiceImpl(vertx, pool);
+        this.credentialService = new CredentialProfileServiceImpl(vertx, pool);
+        this.discoveryService = new DiscoveryProfileServiceImpl(vertx, pool);
         this.deviceService = new DeviceServiceImpl(vertx, pool);
         this.metricsService = new MetricsServiceImpl(vertx, pool);
         this.availabilityService = new AvailabilityServiceImpl(vertx, pool);
@@ -152,15 +152,15 @@ public class DatabaseVerticle extends AbstractVerticle {
 
             // Register CredentialService
             serviceBinder
-                .setAddress(CredentialService.SERVICE_ADDRESS)
-                .register(CredentialService.class, credentialService);
-            logger.info("📡 CredentialService registered at: {}", CredentialService.SERVICE_ADDRESS);
+                .setAddress(CredentialProfileService.SERVICE_ADDRESS)
+                .register(CredentialProfileService.class, credentialService);
+            logger.info("📡 CredentialService registered at: {}", CredentialProfileService.SERVICE_ADDRESS);
 
             // Register DiscoveryService
             serviceBinder
-                .setAddress(DiscoveryService.SERVICE_ADDRESS)
-                .register(DiscoveryService.class, discoveryService);
-            logger.info("📡 DiscoveryService registered at: {}", DiscoveryService.SERVICE_ADDRESS);
+                .setAddress(DiscoveryProfileService.SERVICE_ADDRESS)
+                .register(DiscoveryProfileService.class, discoveryService);
+            logger.info("📡 DiscoveryService registered at: {}", DiscoveryProfileService.SERVICE_ADDRESS);
 
             // Register DeviceService
             serviceBinder
@@ -256,11 +256,11 @@ public class DatabaseVerticle extends AbstractVerticle {
         return deviceTypeService;
     }
 
-    public CredentialServiceImpl getCredentialService() {
+    public CredentialProfileServiceImpl getCredentialService() {
         return credentialService;
     }
 
-    public DiscoveryServiceImpl getDiscoveryService() {
+    public DiscoveryProfileServiceImpl getDiscoveryService() {
         return discoveryService;
     }
 

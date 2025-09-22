@@ -105,38 +105,5 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
         }, resultHandler);
     }
 
-    @Override
-    public void deviceTypeGetByName(String deviceTypeName, Handler<AsyncResult<JsonObject>> resultHandler) {
 
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                    SELECT device_type_id, device_type_name, default_port, is_active, created_at
-                    FROM device_types
-                    WHERE device_type_name = $1
-                    """;
-
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(deviceTypeName))
-                    .onSuccess(rows -> {
-                        if (rows.size() == 0) {
-                            blockingPromise.complete(new JsonObject().put("found", false));
-                            return;
-                        }
-
-                        Row row = rows.iterator().next();
-                        JsonObject result = new JsonObject()
-                                .put("found", true)
-                                .put("device_type_id", row.getUUID("device_type_id").toString())
-                                .put("device_type_name", row.getString("device_type_name"))
-                                .put("default_port", row.getInteger("default_port"))
-                                .put("is_active", row.getBoolean("is_active"))
-                                .put("created_at", row.getLocalDateTime("created_at").toString());
-                        blockingPromise.complete(result);
-                    })
-                    .onFailure(cause -> {
-                        logger.error("Failed to get device type by name", cause);
-                        blockingPromise.fail(cause);
-                    });
-        }, resultHandler);
-    }
 }
