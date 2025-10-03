@@ -2,6 +2,7 @@ package com.nmslite.handlers;
 
 import com.nmslite.services.CredentialProfileService;
 import com.nmslite.utils.ExceptionUtil;
+import com.nmslite.utils.CredentialValidationUtil;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.RoutingContext;
 import org.slf4j.Logger;
@@ -44,11 +45,11 @@ public class CredentialHandler {
 
     public void createCredentials(RoutingContext ctx) {
         JsonObject requestBody = ctx.body().asJsonObject();
-        
-        // Validate required fields
-        if (!ExceptionUtil.validateRequiredFields(ctx, requestBody,
-            "profile_name", "username", "password")) {
-            return; // Response already sent by validateRequiredFields
+
+        // ===== COMPREHENSIVE HANDLER VALIDATION =====
+        // Using common validation methods to reduce code redundancy
+        if (!CredentialValidationUtil.validateCredentialBasicFields(ctx, requestBody)) {
+            return; // Validation failed, response already sent
         }
         
         credentialProfileService.credentialCreate(requestBody, ar -> {
@@ -64,9 +65,27 @@ public class CredentialHandler {
         String credentialId = ctx.pathParam("id");
         JsonObject requestBody = ctx.body().asJsonObject();
 
-        // Validate update fields - at least one field must be provided
-        if (!ExceptionUtil.validateUpdateFields(ctx, requestBody, "profile_name", "username", "password")) {
-            return; // Response already sent by validateUpdateFields
+        // ===== COMPREHENSIVE HANDLER VALIDATION =====
+        // Using common validation methods to reduce code redundancy
+
+        // 1. Validate path parameter
+        if (credentialId == null || credentialId.trim().isEmpty()) {
+            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Credential ID is required"),
+                "Credential ID path parameter is required");
+            return;
+        }
+
+        try {
+            java.util.UUID.fromString(credentialId);
+        } catch (IllegalArgumentException e) {
+            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
+                "Credential ID must be a valid UUID");
+            return;
+        }
+
+        // 2. Validate credential update fields
+        if (!CredentialValidationUtil.validateCredentialUpdate(ctx, requestBody)) {
+            return; // Validation failed, response already sent
         }
 
         credentialProfileService.credentialUpdate(credentialId, requestBody, ar -> {
@@ -80,6 +99,21 @@ public class CredentialHandler {
 
     public void deleteCredentials(RoutingContext ctx) {
         String credentialId = ctx.pathParam("id");
+
+        // ===== PATH PARAMETER VALIDATION =====
+        if (credentialId == null || credentialId.trim().isEmpty()) {
+            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Credential ID is required"),
+                "Credential ID path parameter is required");
+            return;
+        }
+
+        try {
+            java.util.UUID.fromString(credentialId);
+        } catch (IllegalArgumentException e) {
+            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
+                "Credential ID must be a valid UUID");
+            return;
+        }
 
         credentialProfileService.credentialDelete(credentialId, ar -> {
             if (ar.succeeded()) {

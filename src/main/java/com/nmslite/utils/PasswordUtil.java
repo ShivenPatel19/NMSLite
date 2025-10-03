@@ -18,12 +18,12 @@ public class PasswordUtil {
     
     private static final String HASH_ALGORITHM = "SHA-256";
     private static final String ENCRYPTION_ALGORITHM = "AES";
-    private static final String ENCRYPTION_KEY = "NMSLite2024SecretKey123456789012"; // Exactly 32 bytes for AES-256
+    private static final String ENCRYPTION_KEY = "NMSLite2025SecretKey123456789012"; // Exactly 32 bytes for AES-256
     
     /**
-     * Hash a password using SHA-256 for user authentication
+     * Hash a password using SHA-256 for user authentication (ONE-WAY hashing)
      * @param password Plain text password
-     * @return Hashed password
+     * @return Hashed password (irreversible)
      */
     public static String hashPassword(String password) {
         try {
@@ -36,7 +36,7 @@ public class PasswordUtil {
     }
     
     /**
-     * Verify a password against its hash
+     * Verify a password against its hash (ONE-WAY verification)
      * @param password Plain text password
      * @param hashedPassword Stored hashed password
      * @return true if password matches
@@ -47,9 +47,9 @@ public class PasswordUtil {
     }
     
     /**
-     * Encrypt a password for storage in credential profiles
+     * Encrypt a password for storage in credential profiles (TWO-WAY encryption)
      * @param password Plain text password
-     * @return Encrypted password
+     * @return Encrypted password (reversible)
      */
     public static String encryptPassword(String password) {
         try {
@@ -70,9 +70,9 @@ public class PasswordUtil {
     }
     
     /**
-     * Decrypt a password from credential profiles
+     * Decrypt a password from credential profiles (TWO-WAY decryption)
      * @param encryptedPassword Encrypted password
-     * @return Plain text password
+     * @return Plain text password (original password)
      */
     public static String decryptPassword(String encryptedPassword) {
         try {
@@ -90,45 +90,5 @@ public class PasswordUtil {
         } catch (Exception e) {
             throw new RuntimeException("Failed to decrypt password", e);
         }
-    }
-    
-    /**
-     * Generate a random salt for enhanced security
-     * @return Base64 encoded salt
-     */
-    public static String generateSalt() {
-        SecureRandom random = new SecureRandom();
-        byte[] salt = new byte[16];
-        random.nextBytes(salt);
-        return Base64.getEncoder().encodeToString(salt);
-    }
-    
-    /**
-     * Hash password with salt for enhanced security
-     * @param password Plain text password
-     * @param salt Salt value
-     * @return Salted hash
-     */
-    public static String hashPasswordWithSalt(String password, String salt) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
-            String saltedPassword = password + salt;
-            byte[] hash = digest.digest(saltedPassword.getBytes(StandardCharsets.UTF_8));
-            return Base64.getEncoder().encodeToString(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("Failed to hash password with salt", e);
-        }
-    }
-    
-    /**
-     * Verify salted password
-     * @param password Plain text password
-     * @param salt Salt value
-     * @param hashedPassword Stored hashed password
-     * @return true if password matches
-     */
-    public static boolean verifySaltedPassword(String password, String salt, String hashedPassword) {
-        String newHash = hashPasswordWithSalt(password, salt);
-        return newHash.equals(hashedPassword);
     }
 }

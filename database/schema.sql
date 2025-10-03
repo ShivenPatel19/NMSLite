@@ -3,24 +3,19 @@
 -- =====================================================
 CREATE TABLE users (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    username VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(100) NOT NULL,
     is_active BOOLEAN DEFAULT true,
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_login_at TIMESTAMP
 );
 
--- =====================================================
+-- =================================================================
 -- 2. DEVICE TYPES TABLE - supported device types, with soft delete
--- =====================================================
+-- =================================================================
 CREATE TABLE device_types (
     device_type_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    device_type_name VARCHAR(50) UNIQUE NOT NULL,
+    device_type_name VARCHAR(100) UNIQUE NOT NULL,
     default_port INTEGER,
     is_active BOOLEAN DEFAULT true,
-
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT chk_default_port_range CHECK (default_port BETWEEN 1 AND 65535)
@@ -37,63 +32,75 @@ CREATE TABLE credential_profiles (
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by VARCHAR(50)
 );
 
 -- =====================================================
 -- 4. DISCOVERY PROFILES TABLE
 -- =====================================================
+-- Stores discovery configurations for network device discovery
+-- Supports both single IP addresses and IP ranges for bulk device provisioning
+-- Examples:
+--   Single IP: ip_address='192.168.1.100', is_range=false
+--   IP Range:   ip_address='192.168.1.1-50', is_range=true
+--
+-- MULTIPLE CREDENTIALS SUPPORT:
+-- credential_profile_ids stores array of UUIDs for brute-force credential testing
+-- During discovery, each credential is tried until one succeeds for each IP
 CREATE TABLE discovery_profiles (
     profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     discovery_name VARCHAR(100) UNIQUE NOT NULL,
-    ip_address INET UNIQUE NOT NULL,
+    ip_address TEXT NOT NULL,
+    is_range BOOLEAN NOT NULL DEFAULT false,                                                      -- Flag: false=single IP, true=IP range
     device_type_id UUID NOT NULL REFERENCES device_types(device_type_id) ON DELETE RESTRICT,
-    credential_profile_id UUID NOT NULL REFERENCES credential_profiles(credential_profile_id) ON DELETE RESTRICT,
+    credential_profile_ids UUID[] NOT NULL,                                                       -- Array of credential profile UUIDs for brute-force testing
     port INTEGER,
-    protocol VARCHAR(10),
+    protocol VARCHAR(50),
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by VARCHAR(50)
 );
 
--- =====================================================
+-- ========================================================
 -- 5. DEVICES TABLE - Provisioned devices with soft delete
--- =====================================================
+-- ========================================================
+-- Stores individual network devices (always single IP addresses)
+-- Devices can be provisioned from discovery profiles (including IP ranges)
+-- Each device in a range gets its own row with individual IP address
 CREATE TABLE devices (
     device_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_name VARCHAR(100) NOT NULL,
-    ip_address INET NOT NULL,                                           -- for following deviceSync() is required.
-    device_type VARCHAR(50) NOT NULL,                                   -- need to sync if device type changes
-    port INTEGER NOT NULL,                                              -- need to sync if device type/discovery profile changes
-    protocol VARCHAR(10),                                               -- need to sync if discovery profile changes
-    username VARCHAR(100) NOT NULL,                                     -- need to sync if credentials profile changes
-    password_encrypted VARCHAR(500) NOT NULL,                           -- need to sync if credentials profile changes
+    ip_address INET NOT NULL UNIQUE,                                                                               -- Always single IP address (e.g., '192.168.1.100')
+    device_type VARCHAR(100) NOT NULL,
+    port INTEGER NOT NULL,
+    protocol VARCHAR(50),
+    credential_profile_id UUID NOT NULL REFERENCES credential_profiles(credential_profile_id) ON DELETE RESTRICT,  -- Reference to the successful credential
     is_monitoring_enabled BOOLEAN DEFAULT true,
-    discovery_profile_id UUID REFERENCES discovery_profiles(profile_id) ON DELETE SET NULL,
 
     -- Monitoring configuration
     polling_interval_seconds INTEGER,
-    timeout_seconds INTEGER DEFAULT 300,   -- 5 minutes default timeout
-    retry_count INTEGER DEFAULT 2,         -- Default retry count of 2
-    alert_threshold_cpu DECIMAL(5,2) DEFAULT 80.0,
-    alert_threshold_memory DECIMAL(5,2) DEFAULT 80.0,
-    alert_threshold_disk DECIMAL(5,2) DEFAULT 80.0,
+    timeout_seconds INTEGER,
+    retry_count INTEGER,
+    alert_threshold_cpu DECIMAL(5,2),
+    alert_threshold_memory DECIMAL(5,2),
+    alert_threshold_disk DECIMAL(5,2),
+
+    host_name VARCHAR(100),
+    is_provisioned BOOLEAN DEFAULT false,
 
     -- Soft delete fields
     is_deleted BOOLEAN DEFAULT false,
     deleted_at TIMESTAMP,
-    deleted_by VARCHAR(50),
-    
+
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_polled_at TIMESTAMP,
+    monitoring_enabled_at TIMESTAMP,
 
     -- Constraints
     CONSTRAINT chk_port_range CHECK (port BETWEEN 1 AND 65535),
-    CONSTRAINT chk_timeout_range CHECK (timeout_seconds BETWEEN 0 AND 600),   -- 0 seconds to 10 minutes
-    CONSTRAINT chk_retry_range CHECK (retry_count BETWEEN 0 AND 5),           -- 0 to 5 retries
+    CONSTRAINT chk_timeout_range CHECK (timeout_seconds BETWEEN 0 AND 600),              -- 0 seconds to 10 minutes
+    CONSTRAINT chk_retry_range CHECK (retry_count BETWEEN 0 AND 5),                      -- 0 to 5 retries
     CONSTRAINT chk_cpu_threshold CHECK (alert_threshold_cpu BETWEEN 0 AND 100),
     CONSTRAINT chk_memory_threshold CHECK (alert_threshold_memory BETWEEN 0 AND 100),
     CONSTRAINT chk_disk_threshold CHECK (alert_threshold_disk BETWEEN 0 AND 100)
@@ -105,23 +112,20 @@ CREATE TABLE devices (
 CREATE TABLE metrics (
     metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id UUID NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
-    success BOOLEAN NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     duration_ms INTEGER,
-    
-    -- System metrics
-    cpu_usage_percent DECIMAL(5,2),
-    memory_usage_percent DECIMAL(5,2),
-    memory_total_bytes BIGINT,
-    memory_used_bytes BIGINT,
-    memory_free_bytes BIGINT,
-    disk_usage_percent DECIMAL(5,2),
-    disk_total_bytes BIGINT,
-    disk_used_bytes BIGINT,
-    disk_free_bytes BIGINT,
 
-    error_message TEXT,
-    
+    -- System metrics (only successful metrics stored)
+    cpu_usage_percent DECIMAL(5,2) NOT NULL,
+    memory_usage_percent DECIMAL(5,2) NOT NULL,
+    memory_total_bytes BIGINT NOT NULL,
+    memory_used_bytes BIGINT NOT NULL,
+    memory_free_bytes BIGINT NOT NULL,
+    disk_usage_percent DECIMAL(5,2) NOT NULL,
+    disk_total_bytes BIGINT NOT NULL,
+    disk_used_bytes BIGINT NOT NULL,
+    disk_free_bytes BIGINT NOT NULL,
+
     -- Constraints
     CONSTRAINT chk_duration_positive CHECK (duration_ms >= 0),
     CONSTRAINT chk_cpu_range CHECK (cpu_usage_percent BETWEEN 0 AND 100),
@@ -129,9 +133,9 @@ CREATE TABLE metrics (
     CONSTRAINT chk_disk_range CHECK (disk_usage_percent BETWEEN 0 AND 100)
 );
 
--- =====================================================
+-- ========================================================
 -- 7. DEVICE AVAILABILITY TABLE - Enhanced uptime tracking
--- =====================================================
+-- ========================================================
 CREATE TABLE device_availability (
     device_id UUID PRIMARY KEY REFERENCES devices(device_id) ON DELETE CASCADE,
     total_checks INTEGER DEFAULT 0,

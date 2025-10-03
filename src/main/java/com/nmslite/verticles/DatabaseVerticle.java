@@ -48,6 +48,12 @@ public class DatabaseVerticle extends AbstractVerticle {
     private MetricsServiceImpl metricsService;
     private AvailabilityServiceImpl availabilityService;
 
+/**
+ * Start the database verticle: create PostgreSQL pool, instantiate service implementations,
+ * and register all ProxyGen services on the event bus.
+ *
+ * @param startPromise completed when all services are registered
+ */
     @Override
     public void start(Promise<Void> startPromise) {
         logger.info("🔧 Starting DatabaseVerticle - Comprehensive Database Services");
@@ -74,7 +80,11 @@ public class DatabaseVerticle extends AbstractVerticle {
     }
 
     /**
-     * Setup PostgreSQL connection pool
+     * Setup PostgreSQL connection pool and validate connectivity.
+     * Reads host, port, database, user, password, and pool size from verticle config and
+     * returns a shared Vert.x SQL Pool on success.
+     *
+     * @return Future resolving to an initialized Pool when the test connection succeeds
      */
     private Future<Pool> setupDatabaseConnection() {
         Promise<Pool> promise = Promise.promise();
@@ -114,7 +124,9 @@ public class DatabaseVerticle extends AbstractVerticle {
     }
 
     /**
-     * Create all service implementations
+     * Instantiate all database service implementations backed by the shared PgPool.
+     * This wires Vert.x and PgPool into each service (User, DeviceType, CredentialProfile,
+     * DiscoveryProfile, Device, Metrics, Availability).
      */
     private void setupAllServices() {
         PgPool pool = (PgPool) pgPool;
@@ -131,7 +143,9 @@ public class DatabaseVerticle extends AbstractVerticle {
     }
 
     /**
-     * Register all services with ProxyGen
+     * Register all service implementations with Vert.x ProxyGen on the event bus.
+     * Binds each service to its SERVICE_ADDRESS via ServiceBinder so clients can use
+     * generated proxies (e.g., UserService.createProxy(vertx)).
      */
     private void registerAllServiceProxies() {
         try {
@@ -188,6 +202,12 @@ public class DatabaseVerticle extends AbstractVerticle {
         }
     }
 
+/**
+ * Stop the database verticle: close the PgPool and ensure services are unbound.
+ * Uses Future.all to await pool close and (implicit) unregistration completion.
+ *
+ * @param stopPromise completed when shutdown is finished
+ */
     @Override
     public void stop(Promise<Void> stopPromise) {
         logger.info("🛑 Stopping DatabaseVerticle");
@@ -213,7 +233,7 @@ public class DatabaseVerticle extends AbstractVerticle {
         // Unregister all services
         if (serviceBinder != null) {
             try {
-                // Note: ServiceBinder doesn't have unregister method in newer versions
+                // Note: ServiceBinder doesn't have unregistered method in newer versions
                 // The services will be automatically unregistered when verticle stops
                 logger.info("✅ All 7 database services will be unregistered automatically");
                 unregisterServicePromise.complete();
@@ -236,43 +256,5 @@ public class DatabaseVerticle extends AbstractVerticle {
                     stopPromise.fail(result.cause());
                 }
             });
-    }
-
-    /**
-     * Get database pool (for testing or direct access)
-     */
-    public Pool getDatabasePool() {
-        return pgPool;
-    }
-
-    /**
-     * Get service implementations (for testing or direct access)
-     */
-    public UserServiceImpl getUserService() {
-        return userService;
-    }
-
-    public DeviceTypeServiceImpl getDeviceTypeService() {
-        return deviceTypeService;
-    }
-
-    public CredentialProfileServiceImpl getCredentialService() {
-        return credentialService;
-    }
-
-    public DiscoveryProfileServiceImpl getDiscoveryService() {
-        return discoveryService;
-    }
-
-    public DeviceServiceImpl getDeviceService() {
-        return deviceService;
-    }
-
-    public MetricsServiceImpl getMetricsService() {
-        return metricsService;
-    }
-
-    public AvailabilityServiceImpl getAvailabilityService() {
-        return availabilityService;
     }
 }

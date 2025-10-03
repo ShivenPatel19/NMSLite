@@ -47,18 +47,12 @@ public interface DiscoveryProfileService {
 
     /**
      * Create a new discovery profile
-     * @param profileData JsonObject containing discovery profile data (discovery_name, ip_address, device_type_id, credential_profile_id, port, created_by)
+     * @param profileData JsonObject containing discovery profile data (discovery_name, ip_address, is_range, device_type_id, credential_profile_ids, port, protocol)
      * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
     void discoveryCreate(JsonObject profileData, Handler<AsyncResult<JsonObject>> resultHandler);
 
-    /**
-     * Update discovery profile information
-     * @param profileId Discovery profile ID to update
-     * @param profileData JsonObject containing fields to update
-     * @param resultHandler Handler for the async result containing JsonObject with update result
-     */
-    void discoveryUpdate(String profileId, JsonObject profileData, Handler<AsyncResult<JsonObject>> resultHandler);
+
 
     /**
      * Delete a discovery profile (hard delete)

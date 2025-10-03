@@ -1,31 +1,35 @@
 package com.nmslite.verticles;
 
 import com.nmslite.services.DeviceService;
+import com.nmslite.services.DeviceTypeService;
+import com.nmslite.services.CredentialProfileService;
+import com.nmslite.services.DiscoveryProfileService;
+import com.nmslite.utils.IPRangeUtil;
+import com.nmslite.utils.NetworkConnectivityUtil;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
+import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
  * DiscoveryVerticle - Device Discovery Workflow
- * 
+ *
  * Responsibilities:
  * - Single device discovery and validation
  * - Port scanning for device connectivity
  * - GoEngine integration for SSH/WinRM discovery
  * - Device provisioning to database
- * - Real-time status updates via WebSocket
+ * - Discovery results via API responses
  */
 public class DiscoveryVerticle extends AbstractVerticle {
 
@@ -34,346 +38,1133 @@ public class DiscoveryVerticle extends AbstractVerticle {
     private String goEnginePath;
     private String fpingPath;
     private int timeoutSeconds;
+    private int connectionTimeoutSeconds;
+    private int retryCount;
     private int fpingTimeoutSeconds;
-    private int goengineTimeoutSeconds;
+    private int discoveryBatchSize;
+    private int blockingTimeoutGoEngine;
+    private int goEngineProcessTimeout;
 
     // Service proxies
     private DeviceService deviceService;
+    private DeviceTypeService deviceTypeService;
+    private CredentialProfileService credentialProfileService;
+    private DiscoveryProfileService discoveryProfileService;
 
-
-
+/**
+ * Start the verticle: load configuration, initialize service proxies, and register event bus consumers.
+ * Loads GoEngine v6.0.0 and fping settings from config, then calls setupEventBusConsumers().
+ *
+ * @param startPromise promise completed once the verticle is ready
+ */
     @Override
     public void start(Promise<Void> startPromise) {
         logger.info("🔍 Starting DiscoveryVerticle - Device Discovery");
 
-        // Load configuration
-        goEnginePath = config().getString("goengine.path", "./goengine/goengine");
-        fpingPath = config().getString("fping.path", "fping");
-        timeoutSeconds = config().getInteger("timeout.seconds", 30);
-        fpingTimeoutSeconds = config().getInteger("blocking.timeout.fping", 60);
-        goengineTimeoutSeconds = config().getInteger("blocking.timeout.goengine", 120);
+        // Load configuration from tools and discovery sections
+        JsonObject toolsConfig = config().getJsonObject("tools", new JsonObject());
+        JsonObject discoveryConfig = config().getJsonObject("discovery", new JsonObject());
+        JsonObject goEngineConfig = discoveryConfig.getJsonObject("goengine", new JsonObject());
+
+        goEnginePath = toolsConfig.getString("goengine.path", "./goengine/goengine");
+        fpingPath = toolsConfig.getString("fping.path", "fping");
+
+        // GoEngine v6.0.0 configuration parameters
+        timeoutSeconds = goEngineConfig.getInteger("timeout.seconds", 30);
+        connectionTimeoutSeconds = goEngineConfig.getInteger("connection.timeout.seconds", 10);
+        retryCount = goEngineConfig.getInteger("retry.count", 2);
+
+        fpingTimeoutSeconds = toolsConfig.getInteger("fping.blocking.timeout.seconds", 15);
+        discoveryBatchSize = discoveryConfig.getInteger("batch.size", 100);
+        blockingTimeoutGoEngine = discoveryConfig.getInteger("blocking.timeout.goengine", 120);
+        goEngineProcessTimeout = goEngineConfig.getInteger("process.timeout.seconds", 90);
 
         logger.info("🔧 GoEngine path: {}", goEnginePath);
         logger.info("🔧 fping path: {}", fpingPath);
-        logger.info("🔧 Timeout: {} seconds", timeoutSeconds);
+        logger.info("🔧 GoEngine v6.0.0 - Timeout per IP: {} seconds", timeoutSeconds);
+        logger.info("🔧 GoEngine v6.0.0 - Connection timeout: {} seconds", connectionTimeoutSeconds);
+        logger.info("🔧 GoEngine v6.0.0 - Retry count: {}", retryCount);
+        logger.info("🔧 GoEngine v6.0.0 - Process timeout: {} seconds", goEngineProcessTimeout);
         logger.info("🕐 fping blocking timeout: {} seconds", fpingTimeoutSeconds);
-        logger.info("🕐 GoEngine blocking timeout: {} seconds", goengineTimeoutSeconds);
+        logger.info("📦 Discovery batch size: {} IPs", discoveryBatchSize);
+        logger.info("⏱️ GoEngine blocking timeout: {} seconds", blockingTimeoutGoEngine);
 
         // Initialize service proxies
         this.deviceService = DeviceService.createProxy(vertx);
+        this.deviceTypeService = DeviceTypeService.createProxy(vertx);
+        this.credentialProfileService = CredentialProfileService.createProxy(vertx);
+        this.discoveryProfileService = DiscoveryProfileService.createProxy(vertx);
+
         logger.info("🔧 Service proxies initialized");
 
         setupEventBusConsumers();
         startPromise.complete();
     }
 
+/**
+ * Register discovery-related event bus consumers.
+ * Currently subscribes to "discovery.test_profile" to run a test discovery for a profile.
+ */
     private void setupEventBusConsumers() {
-        // Handle validation-only (no provisioning)
-        vertx.eventBus().consumer("discovery.validate_only", message -> {
+        // Handle test discovery from profile
+        vertx.eventBus().consumer("discovery.test_profile", message -> {
+
             JsonObject request = (JsonObject) message.body();
-            handleValidationOnly(message, request);
+            handleTestDiscoveryFromProfile(message, request);
         });
-
-
 
         logger.info("📡 Discovery event bus consumers setup complete");
     }
 
+    /**
+     * Handles test discovery from an existing discovery profile.
+     *
+     * This method orchestrates the complete discovery workflow:
+     * 1. Fetches discovery profile and associated credentials from database
+     * 2. Parses IP targets (single IP or IP range) from profile configuration
+     * 3. Filters out already discovered devices to avoid duplicates
+     * 4. Executes GoEngine discovery in sequential batches for network efficiency
+     * 5. Processes results and creates device entries in database
+     *
+     * @param message Event bus message to reply with discovery results
+     * @param request JsonObject containing profile_id field
+     *
+     * Expected request format:
+     * {
+     *   "profile_id": "uuid-of-discovery-profile"
+     * }
+     *
+     * Response format:
+     * {
+     *   "success": true,
+     *   "devices_discovered": 2,
+     *   "devices_failed": 1,
+     *   "devices_existing": 0,
+     *   "created_devices": [...],
+     *   "failed_devices": [...],
+     *   "existing_devices": [...]
+     * }
+     */
+    private void handleTestDiscoveryFromProfile(Message<Object> message, JsonObject request) {
+        String profileId = request.getString("profile_id");
+        logger.info("🧪 Starting test discovery for profile: {}", profileId);
 
-
-
-
-
-
-    private JsonObject validateSingleDevice(String address, String deviceType, String username, String password, int port) {
-        long startTime = System.currentTimeMillis();
-
-        try {
-            logger.info("🔍 Validating device: {}:{} with user: {}", address, port, username);
-
-            // Step 1: Check if device is reachable (ping)
-            if (!isDeviceReachable(address)) {
-                return new JsonObject()
-                    .put("success", false)
-                    .put("address", address)
-                    .put("error", "Device unreachable - ping failed")
-                    .put("duration_ms", System.currentTimeMillis() - startTime)
-                    .put("timestamp", System.currentTimeMillis());
-            }
-
-            // Step 2: Check if port is open
-            if (!executePortCheck(address, port)) {
-                return new JsonObject()
-                    .put("success", false)
-                    .put("address", address)
-                    .put("error", "Port " + port + " is closed or filtered")
-                    .put("duration_ms", System.currentTimeMillis() - startTime)
-                    .put("timestamp", System.currentTimeMillis());
-            }
-
-            // Step 3: Test credentials with GoEngine
-            JsonObject goEngineDevice = new JsonObject()
-                .put("address", address)
-                .put("device_type", deviceType)
-                .put("username", username)
-                .put("password", password)
-                .put("port", port)
-                .put("timeout", timeoutSeconds + "s");
-
-            JsonObject result = executeGoEngineSingle(goEngineDevice);
-            if (result != null) {
-                // Add validation metadata
-                result.put("duration_ms", System.currentTimeMillis() - startTime);
-                result.put("validation_type", "credential_test");
-                return result;
-            } else {
-                return new JsonObject()
-                    .put("success", false)
-                    .put("address", address)
-                    .put("error", "GoEngine validation failed - no result returned")
-                    .put("duration_ms", System.currentTimeMillis() - startTime)
-                    .put("timestamp", System.currentTimeMillis());
-            }
-
-        } catch (Exception e) {
-            logger.error("Device validation exception", e);
-            return new JsonObject()
-                .put("success", false)
-                .put("address", address)
-                .put("error", "Validation exception: " + e.getMessage())
-                .put("duration_ms", System.currentTimeMillis() - startTime)
-                .put("timestamp", System.currentTimeMillis());
-        }
-    }
-
-    private boolean isDeviceReachable(String address) {
-        try {
-            // Simple ping check using fping
-            ProcessBuilder pb = new ProcessBuilder(fpingPath, "-c", "1", "-t", "3000", address);
-            Process process = pb.start();
-            int exitCode = process.waitFor();
-            return exitCode == 0;
-        } catch (Exception e) {
-            logger.warn("Ping check failed for {}: {}", address, e.getMessage());
-            return false;
-        }
-    }
-
-    private boolean executePortCheck(String ip, int port) {
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(ip, port), 3000); // 3 second timeout
-            return true;
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    private JsonObject executeGoEngineSingle(JsonObject device) {
-        try {
-            // Prepare GoEngine v5.0.0 command for single device discovery
-            JsonArray targetsArray = new JsonArray().add(device);
-            String requestId = "DISC_" + System.currentTimeMillis();
-
-            List<String> command = Arrays.asList(
-                goEnginePath,
-                "--mode", "discovery",
-                "--targets", targetsArray.encode(),  // v5.0.0: Use --targets for discovery
-                "--request-id", requestId,
-                "--timeout", "5m" // 5 minute timeout for discovery
-            );
-
-            ProcessBuilder pb = new ProcessBuilder(command);
-            Process process = pb.start();
-
-            // Read results from stdout
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    try {
-                        JsonObject result = new JsonObject(line);
-                        String deviceAddress = result.getString("device_address");
-                        if (deviceAddress.equals(device.getString("address"))) {
-                            return result;
-                        }
-                    } catch (Exception e) {
-                        logger.warn("Failed to parse GoEngine result: {}", line);
-                    }
-                }
-            }
-
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                logger.warn("GoEngine exited with code: {}", exitCode);
-            }
-
-        } catch (Exception e) {
-            logger.error("GoEngine execution failed", e);
-            return new JsonObject()
-                .put("success", false)
-                .put("device_address", device.getString("address"))
-                .put("error", "GoEngine execution failed: " + e.getMessage())
-                .put("timestamp", System.currentTimeMillis());
-        }
-
-        // If no result found, return failure
-        return new JsonObject()
-            .put("success", false)
-            .put("device_address", device.getString("address"))
-            .put("error", "No result returned from GoEngine")
-            .put("timestamp", System.currentTimeMillis());
-    }
-
-
-
-
-
-
-
-
-
-    // ========================================
-    // VALIDATION-ONLY OPERATION
-    // ========================================
-
-    private void handleValidationOnly(io.vertx.core.eventbus.Message<Object> message, JsonObject request) {
-        String address = request.getString("address");
-        String deviceType = request.getString("device_type");
-        String username = request.getString("username");
-        String password = request.getString("password");
-        Integer port = request.getInteger("port", 22);
-
-        logger.info("🔍 Starting validation-only for device: {} ({}:{})", address, deviceType, port);
-
-        // Step 1: Network connectivity check
-        checkNetworkConnectivity(address, port)
-            .compose(connectivityResult -> {
-                if (!connectivityResult.getBoolean("success")) {
-                    return Future.succeededFuture(new JsonObject()
-                        .put("success", false)
-                        .put("stage", "connectivity")
-                        .put("error", "Network connectivity failed")
-                        .put("details", connectivityResult));
-                }
-
-                // Step 2: Credential validation using GoEngine
-                return validateCredentialsWithGoEngine(address, deviceType, username, password, port);
-            })
+        // Get discovery profile data
+        getDiscoveryProfileWithCredentials(profileId)
+            .compose(this::parseDiscoveryTargetsForTest)
+            .compose(this::checkExistingDevicesAndFilter)
+            .compose(this::executeSequentialBatchDiscovery)
+            .compose(this::processTestDiscoveryResults)
             .onSuccess(result -> {
-                logger.info("✅ Validation-only completed for {}: {}", address, result.getBoolean("success"));
+                logger.info("✅ Test discovery completed for profile {}: {} discovered, {} failed, {} existing",
+                           profileId,
+                           result.getInteger("devices_discovered", 0),
+                           result.getInteger("devices_failed", 0),
+                           result.getInteger("devices_existing", 0));
                 message.reply(result);
             })
             .onFailure(cause -> {
-                logger.error("❌ Validation-only failed for {}: {}", address, cause.getMessage());
+                logger.error("❌ Test discovery failed for profile {}: {}", profileId, cause.getMessage());
                 message.reply(new JsonObject()
                     .put("success", false)
-                    .put("stage", "validation")
                     .put("error", cause.getMessage()));
             });
     }
 
-    private Future<JsonObject> validateCredentialsWithGoEngine(String address, String deviceType,
-                                                              String username, String password, Integer port) {
+    /**
+     * Retrieves discovery profile data along with associated credential profiles.
+     *
+     * Fetches the discovery profile by ID and enriches it with credential profile data
+     * needed for device authentication during discovery. This creates a complete
+     * profile object containing all information required for GoEngine execution.
+     *
+     * @param profileId UUID of the discovery profile to retrieve
+     * @return Future<JsonObject> containing complete profile data with credentials
+     *
+     * Returned JsonObject structure:
+     * {
+     *   "profile_id": "uuid",
+     *   "discovery_name": "Profile Name",
+     *   "ip_address": "192.168.1.1" or "192.168.1.1-50",
+     *   "is_range": true/false,
+     *   "device_type_name": "server linux",
+     *   "port": 22,
+     *   "protocol": "ssh",
+     *   "credentials": [
+     *     {
+     *       "credential_profile_id": "uuid",
+     *       "username": "admin",
+     *       "password_encrypted": "encrypted_password"
+     *     }
+     *   ]
+     * }
+     */
+    private Future<JsonObject> getDiscoveryProfileWithCredentials(String profileId) {
         Promise<JsonObject> promise = Promise.promise();
 
-        String requestId = "validate-" + System.currentTimeMillis();
+        // Get discovery profile using DiscoveryProfileService
+        discoveryProfileService.discoveryGetById(profileId, profileResult -> {
+            if (profileResult.failed()) {
+                promise.fail("Failed to get discovery profile: " + profileResult.cause().getMessage());
+                return;
+            }
 
-        // Create target JSON for GoEngine (v5.0.0 format)
-        JsonArray targets = new JsonArray()
-            .add(new JsonObject()
-                .put("address", address)
-                .put("device_type", deviceType)
-                .put("username", username)
-                .put("password", password)
-                .put("port", port));
+            JsonObject profileResponse = profileResult.result();
+            if (!profileResponse.getBoolean("found", false)) {
+                promise.fail("Discovery profile not found: " + profileId);
+                return;
+            }
 
-        // Create GoEngine command for validation (correct v5.0.0 format)
-        List<String> command = new ArrayList<>();
-        command.add(goEnginePath);
-        command.add("--mode");
-        command.add("discovery");
-        command.add("--targets");
-        command.add(targets.encode());  // JSON array as string
-        command.add("--request-id");
-        command.add(requestId);
+            JsonObject profileData = profileResponse;
+            JsonArray credentialIds = profileData.getJsonArray("credential_profile_ids");
 
-        logger.info("🚀 Executing GoEngine validation: {}", String.join(" ", command));
-        logger.info("📋 Targets JSON: {}", targets.encode());
-
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.redirectErrorStream(true);
-
-        try {
-            Process process = processBuilder.start();
-
-            // No stdin input needed for GoEngine v5.0.0 - everything is in command line
-
-            // Read GoEngine output
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-
-                    // Try to parse each line as JSON
-                    try {
-                        JsonObject result = new JsonObject(line);
-                        if (result.containsKey("success")) {
-                            promise.complete(result);
-                            return promise.future();
-                        }
-                    } catch (Exception ignored) {
-                        // Not JSON, continue reading
-                    }
+            // Get credential profiles using CredentialProfileService
+            credentialProfileService.credentialGetByIds(credentialIds, credentialResult -> {
+                if (credentialResult.failed()) {
+                    promise.fail("Failed to get credentials: " + credentialResult.cause().getMessage());
+                    return;
                 }
-            }
 
-            // Wait for process completion
-            int exitCode = process.waitFor();
+                JsonObject credentialResponse = credentialResult.result();
+                if (!credentialResponse.getBoolean("success", false)) {
+                    promise.fail("Failed to get credential profiles");
+                    return;
+                }
 
-            if (exitCode == 0) {
-                promise.complete(new JsonObject()
-                    .put("success", true)
-                    .put("message", "Validation completed successfully")
-                    .put("output", output.toString()));
-            } else {
-                promise.fail("GoEngine validation failed with exit code: " + exitCode);
-            }
-
-        } catch (Exception e) {
-            logger.error("Failed to execute GoEngine validation", e);
-            promise.fail("GoEngine execution failed: " + e.getMessage());
-        }
+                JsonObject dataObject = credentialResponse.getJsonObject("data");
+                JsonArray credentials = dataObject.getJsonArray("credentials");
+                profileData.put("credentials", credentials);
+                promise.complete(profileData);
+            });
+        });
 
         return promise.future();
     }
 
     /**
-     * Check network connectivity to a device using socket connection
+     * Parses IP targets from discovery profile configuration.
+     *
+     * Converts the IP address specification from the profile into a list of individual
+     * IP addresses for discovery. Handles both single IP addresses and IP ranges using
+     * the IPRangeUtil utility. Adds target IP list and count to the profile data.
+     *
+     * @param profile JsonObject containing discovery profile data with ip_address and is_range fields
+     * @return Future<JsonObject> profile data enriched with target_ips array and total_targets count
+     *
+     * Input profile must contain:
+     * - ip_address: "192.168.1.10" (single) or "192.168.1.1-50" (range)
+     * - is_range: boolean indicating if ip_address is a range specification
+     *
+     * Output adds:
+     * - target_ips: ["192.168.1.1", "192.168.1.2", ...] array of individual IPs
+     * - total_targets: integer count of IPs to discover
      */
-    private Future<JsonObject> checkNetworkConnectivity(String address, Integer port) {
+    private Future<JsonObject> parseDiscoveryTargetsForTest(JsonObject profile) {
         Promise<JsonObject> promise = Promise.promise();
 
-        vertx.executeBlocking(blockingPromise -> {
-            try {
-                Socket socket = new Socket();
-                socket.connect(new InetSocketAddress(address, port), 5000); // 5 second timeout
-                socket.close();
+        try {
+            String ipAddress = profile.getString("ip_address");
+            boolean isRange = profile.getBoolean("is_range", false);
+            JsonArray targetIps = new JsonArray();
 
-                blockingPromise.complete(new JsonObject()
-                    .put("success", true)
-                    .put("message", "Network connectivity successful"));
-
-            } catch (Exception e) {
-                blockingPromise.complete(new JsonObject()
-                    .put("success", false)
-                    .put("error", "Network connectivity failed: " + e.getMessage()));
+            // Use IPRangeUtil for parsing both single IP and ranges
+            List<String> ipList = IPRangeUtil.parseIPRange(ipAddress, isRange);
+            for (String ip : ipList) {
+                targetIps.add(ip);
             }
-        }, promise);
+
+            logger.info("📋 Discovery targets: {} ({} {})", ipAddress, targetIps.size(),
+                       isRange ? "IPs from range" : "single IP");
+
+            // Create result with profile data and target IPs
+            JsonObject result = profile.copy()
+                .put("target_ips", targetIps)
+                .put("total_targets", targetIps.size());
+
+            promise.complete(result);
+
+        } catch (Exception e) {
+            promise.fail("Failed to parse discovery targets: " + e.getMessage());
+        }
 
         return promise.future();
     }
 
+
+
+    /**
+     * Filters out IP addresses that already have devices in the database.
+     *
+     * Checks each target IP against the device table to identify which IPs already
+     * have discovered devices. This prevents duplicate device creation and optimizes
+     * discovery by only processing new IPs. Separates IPs into existing and new
+     * target lists for efficient processing.
+     *
+     * @param profileData JsonObject containing target_ips array from previous step
+     * @return Future<JsonObject> profile data with existing_devices and new_targets arrays
+     *
+     * Input requires:
+     * - target_ips: array of IP addresses to check
+     *
+     * Output adds:
+     * - existing_devices: array of JsonObjects for IPs that already have devices
+     * - new_targets: array of IP strings that need discovery
+     * - existing_count: integer count of existing devices found
+     * - new_count: integer count of new IPs to discover
+     */
+    private Future<JsonObject> checkExistingDevicesAndFilter(JsonObject profileData) {
+        Promise<JsonObject> promise = Promise.promise();
+
+        JsonArray targetIps = profileData.getJsonArray("target_ips");
+        JsonArray existingDevices = new JsonArray();
+        JsonArray newTargets = new JsonArray();
+
+        if (targetIps.isEmpty()) {
+            promise.complete(profileData.put("existing_devices", existingDevices).put("new_targets", newTargets));
+            return promise.future();
+        }
+
+        // Check which IPs already exist in devices table using DeviceService
+        // We'll check each IP individually since we don't have a bulk check method
+        List<Future<JsonObject>> deviceCheckFutures = new ArrayList<>();
+
+        for (Object ipObj : targetIps) {
+            String ip = (String) ipObj;
+            Promise<JsonObject> devicePromise = Promise.promise();
+
+            // Check with includeDeleted = true to get all devices including soft deleted ones
+            deviceService.deviceFindByIp(ip, true, result -> {
+                if (result.succeeded()) {
+                    JsonObject deviceResult = result.result();
+                    logger.info("🔍 Device lookup for IP {}: {}", ip, deviceResult.encodePrettily());
+                    if (deviceResult.getBoolean("found", false)) {
+                        // Device exists - deviceResult contains the device data directly
+                        boolean isProvisioned = deviceResult.getBoolean("is_provisioned", false);
+                        boolean isMonitoring = deviceResult.getBoolean("is_monitoring_enabled", false);
+                        boolean isDeleted = deviceResult.getBoolean("is_deleted", false);
+
+                        String status;
+                        String message;
+                        boolean proceedWithDiscovery = false;
+
+                        if (isDeleted) {
+                            // isDeleted = true, create a new entry for the same IP as old same IP is soft deleted
+                            status = "soft_deleted";
+                            message = "Device was soft deleted, proceeding with new discovery";
+                            proceedWithDiscovery = true;
+                        } else if (!isProvisioned && !isMonitoring) {
+                            // isProvisioned = false, isMonitored = false, isDeleted = false
+                            status = "available_for_provision";
+                            message = "Device already exists and is available for provision";
+                            proceedWithDiscovery = false;
+                        } else if (isProvisioned && isMonitoring) {
+                            // isProvisioned = true, isMonitored = true, isDeleted = false
+                            status = "being_monitored";
+                            message = "Device already available and is being monitored";
+                            proceedWithDiscovery = false;
+                        } else if (isProvisioned && !isMonitoring) {
+                            // isProvisioned = true, isMonitored = false, isDeleted = false
+                            status = "monitoring_disabled";
+                            message = "Device already available, and monitoring is disabled";
+                            proceedWithDiscovery = false;
+                        } else {
+                            status = "unknown_state";
+                            message = "Device in unknown state";
+                            proceedWithDiscovery = false;
+                        }
+
+                        devicePromise.complete(new JsonObject()
+                            .put("ip_address", ip)
+                            .put("exists", true)
+                            .put("status", status)
+                            .put("message", message)
+                            .put("proceed_with_discovery", proceedWithDiscovery)
+                            .put("is_provisioned", isProvisioned)
+                            .put("is_monitoring_enabled", isMonitoring)
+                            .put("is_deleted", isDeleted));
+                    } else {
+                        // Device doesn't exist
+                        devicePromise.complete(new JsonObject()
+                            .put("ip_address", ip)
+                            .put("exists", false)
+                            .put("proceed_with_discovery", true));
+                    }
+                } else {
+                    // Error checking device, assume it doesn't exist
+                    devicePromise.complete(new JsonObject()
+                        .put("ip_address", ip)
+                        .put("exists", false)
+                        .put("proceed_with_discovery", true));
+                }
+            });
+
+            deviceCheckFutures.add(devicePromise.future());
+        }
+
+        // Wait for all device checks to complete
+        Future.all(deviceCheckFutures)
+            .onSuccess(compositeFuture -> {
+                Set<String> existingIps = new HashSet<>();
+
+                // Process results
+                for (int i = 0; i < compositeFuture.size(); i++) {
+                    JsonObject deviceCheck = compositeFuture.resultAt(i);
+                    String ip = deviceCheck.getString("ip_address");
+
+                    if (deviceCheck.getBoolean("exists", false)) {
+                        // Device exists - check if we should proceed with discovery
+                        if (deviceCheck.getBoolean("proceed_with_discovery", false)) {
+                            // Soft deleted device - proceed with discovery
+                            newTargets.add(ip);
+                            logger.info("📋 IP {} has soft deleted device, proceeding with new discovery", ip);
+                        } else {
+                            // Device exists and should not be rediscovered
+                            existingIps.add(ip);
+                            existingDevices.add(new JsonObject()
+                                .put("ip_address", ip)
+                                .put("status", deviceCheck.getString("status"))
+                                .put("message", deviceCheck.getString("message"))
+                                .put("is_provisioned", deviceCheck.getBoolean("is_provisioned"))
+                                .put("is_monitoring_enabled", deviceCheck.getBoolean("is_monitoring_enabled"))
+                                .put("is_deleted", deviceCheck.getBoolean("is_deleted", false)));
+
+                            logger.info("📋 IP {} already exists: {}", ip, deviceCheck.getString("message"));
+                        }
+                    } else {
+                        // Device doesn't exist - proceed with discovery
+                        newTargets.add(ip);
+                    }
+                }
+
+                logger.info("📊 Device check: {} existing (skipped), {} new targets for discovery",
+                           existingDevices.size(), newTargets.size());
+
+                promise.complete(profileData
+                    .put("existing_devices", existingDevices)
+                    .put("new_targets", newTargets));
+            })
+            .onFailure(promise::fail);
+
+        return promise.future();
+    }
+
+    /**
+     * Executes discovery in sequential batches for network efficiency and reliability.
+     *
+     * Processes new target IPs in configurable batch sizes to avoid overwhelming the
+     * network and GoEngine. Uses sequential processing to maintain system stability
+     * and provide better error handling. Each batch is processed completely before
+     * moving to the next batch. Accumulates results from all batches.
+     *
+     * @param profileData JsonObject containing new_targets array and profile configuration
+     * @return Future<JsonObject> profile data with discovery_results array containing all batch results
+     *
+     * Input requires:
+     * - new_targets: array of IP strings to discover
+     * - All profile data (credentials, device_type, port, protocol)
+     *
+     * Output adds:
+     * - discovery_results: array of discovery result objects from GoEngine
+     * - total_processed: integer count of IPs processed
+     * - batches_completed: integer count of batches processed
+     *
+     * Batch processing configuration:
+     * - Default batch size: 50 IPs per batch
+     * - Sequential execution: waits for each batch to complete
+     * - Error handling: continues with next batch if one fails
+     */
+    private Future<JsonObject> executeSequentialBatchDiscovery(JsonObject profileData) {
+        Promise<JsonObject> promise = Promise.promise();
+
+        JsonArray newTargets = profileData.getJsonArray("new_targets");
+        if (newTargets.isEmpty()) {
+            logger.info("📋 No new targets for discovery, skipping GoEngine execution");
+            promise.complete(profileData.put("discovery_results", new JsonArray()));
+            return promise.future();
+        }
+
+        logger.info("🚀 Starting sequential batch discovery for {} targets", newTargets.size());
+
+        int totalTargets = newTargets.size();
+        int totalBatches = (int) Math.ceil((double) totalTargets / discoveryBatchSize);
+
+        logger.info("📦 Will process {} targets in {} batches of max {} IPs (GoEngine v6.0.0 credential iteration)",
+                   totalTargets, totalBatches, discoveryBatchSize);
+
+        // NEW GoEngine v6.0.0: Use credential iteration processor
+        CredentialIterationProcessor processor = new CredentialIterationProcessor(profileData, newTargets);
+
+        Promise<JsonArray> arrayPromise = Promise.promise();
+        processor.processNextBatch(arrayPromise);
+
+        return arrayPromise.future().map(results -> profileData.put("discovery_results", results));
+    }
+
+    /**
+     * Optimized queue-based batch processor
+     * Stores profile template ONCE + queue of IPs (avoids duplicating credentials/device_type for each IP)
+     */
+    private class QueueBasedDiscoveryProcessor {
+        private final JsonObject profileData;
+        private final JsonObject profileTemplate;
+        private final Queue<String> remainingIPs;
+        private final JsonArray allResults;
+        private final int totalTargets;
+        private int processedBatches;
+
+        public QueueBasedDiscoveryProcessor(JsonObject profileData, JsonArray allTargetIPs) {
+            this.profileData = profileData;
+            this.remainingIPs = new ConcurrentLinkedQueue<>();
+            this.allResults = new JsonArray();
+            this.totalTargets = allTargetIPs.size();
+            this.processedBatches = 0;
+
+            // Store profile template ONCE (credentials, device_type, port are same for all IPs)
+            this.profileTemplate = new JsonObject()
+                .put("device_type", profileData.getString("device_type_name"))
+                .put("username", profileData.getString("username"))
+                .put("password", profileData.getString("password_encrypted"))
+                .put("port", profileData.getInteger("port"))
+                .put("timeout", timeoutSeconds + "s");
+
+            // Fill queue with ONLY IPs (no duplication of profile data)
+            for (Object obj : allTargetIPs) {
+                remainingIPs.offer((String) obj);
+            }
+
+            logger.info("📋 Optimized queue initialized: 1 profile template + {} IPs (memory efficient)", remainingIPs.size());
+        }
+
+/**
+ * Process the next batch from the queue and append results; recurses until queue is empty.
+ *
+ * @param promise completes with accumulated results when all batches have been processed
+ */
+        public void processNextBatch(Promise<JsonArray> promise) {
+            if (remainingIPs.isEmpty()) {
+                // All IPs processed
+                logger.info("🎉 All batches completed, total results: {}", allResults.size());
+                promise.complete(allResults);
+                return;
+            }
+
+            // Create current batch by combining profile template with IPs from queue
+            JsonArray currentBatch = createBatchFromQueue();
+
+            if (currentBatch.isEmpty()) {
+                // No more IPs to process
+                promise.complete(allResults);
+                return;
+            }
+
+            processedBatches++;
+            int remainingCount = remainingIPs.size();
+
+            logger.info("🔄 Processing batch {} with {} devices, {} IPs remaining in queue",
+                       processedBatches, currentBatch.size(), remainingCount);
+
+            executeGoEngineDiscovery(profileData, currentBatch)
+                .onSuccess(batchResults -> {
+                    // Add results to accumulated results
+                    for (Object obj : batchResults) {
+                        allResults.add(obj);
+
+                    }
+
+                    logger.info("✅ Batch {} completed: {} results, {} total results, {} IPs remaining",
+                               processedBatches, batchResults.size(), allResults.size(), remainingIPs.size());
+
+                    // Clear current batch from memory
+                    currentBatch.clear();
+
+                    // Process next batch (queue automatically provides next IPs)
+                    processNextBatch(promise);
+                })
+
+                .onFailure(cause -> {
+                    logger.error("❌ Batch {} failed: {}", processedBatches, cause.getMessage());
+                    promise.fail(cause);
+                });
+        }
+
+/**
+ * Build a batch of up to discoveryBatchSize IPs from the remaining queue for GoEngine.
+ *
+ * @return JsonArray of IP addresses for the current batch
+ */
+        private JsonArray createBatchFromQueue() {
+            JsonArray batch = new JsonArray();
+
+            // Poll up to discoveryBatchSize IPs for GoEngine v6.0.0 format
+
+            for (int i = 0; i < discoveryBatchSize && !remainingIPs.isEmpty(); i++) {
+                String ip = remainingIPs.poll();
+                if (ip != null) {
+                    batch.add(ip);  // GoEngine v6.0.0 expects just IP addresses
+                }
+            }
+
+            return batch;
+        }
+    }
+
+    /**
+     * Executes GoEngine v6.0.0 discovery with pre-connectivity checks and credential iteration.
+     *
+     * Performs a two-stage discovery process:
+     * 1. Connectivity checks using fping and port scanning to identify reachable targets
+     * 2. GoEngine discovery execution only on reachable IPs for efficiency
+     *
+     * This method optimizes discovery by filtering unreachable IPs early, reducing
+     * GoEngine execution time and improving overall discovery performance. Uses
+     * NetworkConnectivityUtil for fast connectivity validation.
+     *
+     * @param profileData JsonObject containing discovery profile with credentials and configuration
+     * @param targetIps JsonArray of IP address strings to discover
+     * @return Future<JsonArray> containing discovery results for all IPs (successful and failed)
+     *
+     * Input profileData requires:
+     * - credentials: array of credential objects with username/password
+     * - device_type_name: string device type for GoEngine
+     * - port: integer port number for connectivity checks
+     * - protocol: string protocol (ssh/winrm)
+     *
+     * Output JsonArray contains:
+     * - Successful discoveries: full device information from GoEngine
+     * - Failed discoveries: error objects with ip_address, success=false, error message
+     * - Unreachable IPs: connectivity failure objects with appropriate error messages
+     */
+    private Future<JsonArray> executeGoEngineDiscovery(JsonObject profileData, JsonArray targetIps) {
+        Promise<JsonArray> promise = Promise.promise();
+
+        if (targetIps.isEmpty()) {
+            promise.complete(new JsonArray());
+            return promise.future();
+        }
+
+        String requestId = "DISC_" + System.currentTimeMillis();
+        String batchId = "batch-" + System.currentTimeMillis();
+        logger.info("🚀 Starting discovery for {} IPs with connectivity pre-check", targetIps.size());
+
+        // Step 1: Perform connectivity checks first
+        performConnectivityChecks(targetIps, profileData)
+            .compose(connectivityResults -> {
+                JsonArray reachableIPs = connectivityResults.getJsonArray("reachable");
+                JsonArray unreachableIPs = connectivityResults.getJsonArray("unreachable");
+
+                logger.info("🏓 Connectivity check completed: {}/{} IPs reachable",
+                           reachableIPs.size(), targetIps.size());
+
+                if (reachableIPs.isEmpty()) {
+                    logger.info("❌ No reachable IPs found, skipping GoEngine discovery");
+                    // Create failed results inline
+                    JsonArray failedResults = new JsonArray();
+                    for (int i = 0; i < targetIps.size(); i++) {
+                        String ipAddress = targetIps.getString(i);
+                        JsonObject failedResult = new JsonObject()
+                            .put("ip_address", ipAddress)
+                            .put("success", false)
+                            .put("error", "No connectivity")
+                            .put("timestamp", System.currentTimeMillis());
+                        failedResults.add(failedResult);
+                    }
+                    return Future.succeededFuture(failedResults);
+                }
+
+                // Step 2: Proceed with GoEngine discovery for reachable IPs only
+                logger.info("🚀 Executing GoEngine v6.0.0 discovery for {} reachable IPs with request ID: {}",
+                           reachableIPs.size(), requestId);
+
+                return executeGoEngineForReachableIPs(profileData, reachableIPs, unreachableIPs, batchId, requestId);
+            })
+            .onSuccess(promise::complete)
+            .onFailure(promise::fail);
+
+        return promise.future();
+    }
+
+    /**
+     * Performs fast connectivity checks on all target IPs using fping and port scanning.
+     *
+     * Executes parallel connectivity validation to quickly identify which IPs are
+     * reachable before attempting GoEngine discovery. Uses NetworkConnectivityUtil
+     * for efficient fping and port connectivity checks. This pre-filtering step
+     * significantly improves discovery performance by avoiding timeouts on unreachable IPs.
+     *
+     * @param targetIps JsonArray of IP address strings to check
+     * @param profileData JsonObject containing port number for port connectivity checks
+     * @return Future<JsonObject> containing reachable and unreachable IP arrays
+     *
+     * Input requirements:
+     * - targetIps: array of IP address strings
+     * - profileData.port: integer port number to check (e.g., 22 for SSH, 5985 for WinRM)
+     *
+     * Output JsonObject structure:
+     * {
+     *   "reachable": ["192.168.1.10", "192.168.1.15"],
+     *   "unreachable": ["192.168.1.11", "192.168.1.12"]
+     * }
+     *
+     * Connectivity check process:
+     * 1. fping check for basic IP reachability
+     * 2. Port connectivity check for service availability
+     * 3. IP is considered reachable only if both checks pass
+     */
+    private Future<JsonObject> performConnectivityChecks(JsonArray targetIps, JsonObject profileData) {
+        Promise<JsonObject> promise = Promise.promise();
+
+        JsonArray reachableIPs = new JsonArray();
+        JsonArray unreachableIPs = new JsonArray();
+        List<Future<Void>> connectivityFutures = new ArrayList<>();
+
+        for (int i = 0; i < targetIps.size(); i++) {
+            String ipAddress = targetIps.getString(i);
+            Integer port = profileData.getInteger("port", 22);
+
+            // Create connectivity check future for each IP
+            Future<Void> connectivityFuture = NetworkConnectivityUtil.fpingCheck(vertx, ipAddress, config())
+                .compose(pingResult -> {
+                    if (pingResult) {
+                        // If ping succeeds, check port connectivity
+                        return NetworkConnectivityUtil.portCheck(vertx, ipAddress, port, config())
+                            .compose(portResult -> {
+                                if (portResult) {
+                                    reachableIPs.add(ipAddress);
+                                } else {
+                                    unreachableIPs.add(ipAddress);
+                                }
+                                return Future.<Void>succeededFuture();
+                            });
+                    } else {
+                        unreachableIPs.add(ipAddress);
+                        return Future.<Void>succeededFuture();
+                    }
+                })
+                .recover(throwable -> {
+                    unreachableIPs.add(ipAddress);
+                    return Future.<Void>succeededFuture();
+                });
+
+            connectivityFutures.add(connectivityFuture);
+        }
+
+        // Wait for all connectivity checks to complete
+        Future.all(connectivityFutures)
+            .onSuccess(v -> {
+                JsonObject result = new JsonObject()
+                    .put("reachable", reachableIPs)
+                    .put("unreachable", unreachableIPs)
+                    .put("total_checked", targetIps.size());
+                promise.complete(result);
+            })
+            .onFailure(promise::fail);
+
+        return promise.future();
+    }
+
+    /**
+     * Execute GoEngine discovery for reachable IPs and create results including unreachable ones
+     */
+    private Future<JsonArray> executeGoEngineForReachableIPs(JsonObject profileData, JsonArray reachableIPs,
+                                                             JsonArray unreachableIPs, String batchId, String requestId) {
+        Promise<JsonArray> promise = Promise.promise();
+
+        vertx.executeBlocking(blockingPromise -> {
+            try {
+                // Create GoEngine v6.0.0 discovery_request format for reachable IPs only
+                JsonObject discoveryRequest = createDiscoveryRequest(profileData, reachableIPs, batchId);
+
+                // Prepare GoEngine v6.0.0 command
+                List<String> command = Arrays.asList(
+                    goEnginePath,
+                    "--mode", "discovery",
+                    "--targets", discoveryRequest.encode(),
+                    "--request-id", requestId
+                );
+
+                logger.info("📋 GoEngine v6.0.0 discovery request: {}", discoveryRequest.encodePrettily());
+
+                ProcessBuilder pb = new ProcessBuilder(command);
+                Process process = pb.start();
+
+                JsonArray results = new JsonArray();
+
+                // Read results from stdout line by line
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        try {
+                            JsonObject result = new JsonObject(line);
+                            if (result.containsKey("ip_address")) {  // v6.0.0 uses ip_address instead of device_address
+                                results.add(result);
+                            }
+                        } catch (Exception e) {
+                            logger.warn("Failed to parse GoEngine result line: {}", line);
+                        }
+                    }
+                }
+
+                // Add process timeout
+                boolean finished = process.waitFor(goEngineProcessTimeout, TimeUnit.SECONDS);
+                if (!finished) {
+                    process.destroyForcibly();
+                    throw new RuntimeException("GoEngine discovery process timed out after " + goEngineProcessTimeout + " seconds");
+                }
+
+                int exitCode = process.exitValue();
+                logger.info("🏁 GoEngine v6.0.0 discovery completed with exit code: {}, {} results", exitCode, results.size());
+
+                // Combine GoEngine results with unreachable IPs
+                JsonArray finalResults = new JsonArray();
+
+                // Add GoEngine results
+                for (Object obj : results) {
+                    finalResults.add(obj);
+                }
+
+                // Add failed results for unreachable IPs
+                for (int i = 0; i < unreachableIPs.size(); i++) {
+                    String unreachableIP = unreachableIPs.getString(i);
+                    JsonObject failedResult = new JsonObject()
+                        .put("ip_address", unreachableIP)
+                        .put("success", false)
+                        .put("error", "Device unreachable - connectivity check failed")
+                        .put("timestamp", System.currentTimeMillis());
+                    finalResults.add(failedResult);
+                }
+
+                blockingPromise.complete(finalResults);
+
+            } catch (Exception e) {
+                logger.error("GoEngine v6.0.0 discovery execution failed", e);
+                blockingPromise.fail(e);
+            }
+        }, false, promise);
+
+        return promise.future();
+    }
+
+    /**
+     * Create GoEngine v6.0.0 discovery_request format with credential iteration
+     */
+    private JsonObject createDiscoveryRequest(JsonObject profileData, JsonArray targetIps, String batchId) {
+        // Convert target IPs to string array
+        JsonArray targetIpArray = new JsonArray();
+        for (Object ip : targetIps) {
+            targetIpArray.add(ip.toString());
+        }
+
+        // Convert credentials to GoEngine format
+        JsonArray credentials = new JsonArray();
+        JsonArray profileCredentials = profileData.getJsonArray("credentials");
+        for (Object credObj : profileCredentials) {
+            JsonObject credential = (JsonObject) credObj;
+            JsonObject goEngineCredential = new JsonObject()
+                .put("credential_id", credential.getString("credential_profile_id"))
+                .put("username", credential.getString("username"))
+                .put("password", credential.getString("password_encrypted")); // Password is stored encrypted
+            credentials.add(goEngineCredential);
+        }
+
+        // Map device type from database format to GoEngine format
+        String deviceTypeName = profileData.getString("device_type_name");
+        String goEngineDeviceType = mapDeviceTypeToGoEngine(deviceTypeName);
+
+        // Create discovery_config
+        JsonObject discoveryConfig = new JsonObject()
+            .put("device_type", goEngineDeviceType)
+            .put("port", profileData.getInteger("port"))
+            .put("protocol", profileData.getString("protocol"))
+            .put("timeout_seconds", timeoutSeconds)
+            .put("connection_timeout", connectionTimeoutSeconds)
+            .put("retry_count", retryCount);
+
+        // Create the complete discovery_request
+        JsonObject discoveryRequest = new JsonObject()
+            .put("discovery_request", new JsonObject()
+                .put("batch_id", batchId)
+                .put("target_ips", targetIpArray)
+                .put("credentials", credentials)
+                .put("discovery_config", discoveryConfig)
+            );
+
+        return discoveryRequest;
+    }
+
+    /**
+     * Map database device type to GoEngine device type format
+     */
+    private String mapDeviceTypeToGoEngine(String dbDeviceType) {
+        if (dbDeviceType == null) {
+            return "server linux"; // Default fallback
+        }
+
+        // Convert database format (server_linux) to GoEngine format (server linux)
+        return dbDeviceType.replace("_", " ");
+    }
+
+    /**
+     * Determine protocol based on device type and port
+     */
+    private String determineProtocol(String deviceType, Integer port) {
+        if (deviceType.contains("windows")) {
+            return "WinRM";
+        } else {
+            return "SSH";
+        }
+    }
+
+/**
+ * Post-process discovery results: split success/failure, create devices for successes,
+ * and build the final API response including existing devices.
+ *
+ * @param profileData profile and discovery context containing discovery_results and existing_devices
+ * @return Future resolving to API response JSON summarizing created, failed, and existing devices
+ */
+    private Future<JsonObject> processTestDiscoveryResults(JsonObject profileData) {
+        Promise<JsonObject> promise = Promise.promise();
+
+        JsonArray discoveryResults = profileData.getJsonArray("discovery_results", new JsonArray());
+        JsonArray existingDevices = profileData.getJsonArray("existing_devices", new JsonArray());
+
+        JsonArray successfulDevices = new JsonArray();
+        JsonArray failedDevices = new JsonArray();
+
+        // Separate successful and failed discoveries
+        for (Object obj : discoveryResults) {
+            JsonObject result = (JsonObject) obj;
+            if (result.getBoolean("success", false)) {
+                successfulDevices.add(result);
+            } else {
+                failedDevices.add(result);
+            }
+        }
+
+        logger.info("📊 Discovery results: {} successful, {} failed, {} existing",
+                   successfulDevices.size(), failedDevices.size(), existingDevices.size());
+
+        if (successfulDevices.isEmpty()) {
+            // No successful discoveries to create devices
+            promise.complete(createTestDiscoveryResponse(profileData, 0, failedDevices.size(), existingDevices.size(),
+                new JsonArray(), failedDevices, existingDevices));
+            return promise.future();
+        }
+
+        // Create devices from successful discoveries
+        createDevicesFromTestDiscoveries(successfulDevices)
+            .onSuccess(createdDevices -> {
+                promise.complete(createTestDiscoveryResponse(profileData, createdDevices.size(), failedDevices.size(),
+                    existingDevices.size(), createdDevices, failedDevices, existingDevices));
+            })
+            .onFailure(promise::fail);
+
+        return promise.future();
+    }
+
+/**
+ * Create device records for each successful discovery result.
+ *
+ * @param successfulDiscoveries array of successful GoEngine results
+ * @return Future resolving to a JsonArray of created device summaries
+ */
+    private Future<JsonArray> createDevicesFromTestDiscoveries(JsonArray successfulDiscoveries) {
+        Promise<JsonArray> promise = Promise.promise();
+
+        if (successfulDiscoveries.isEmpty()) {
+            promise.complete(new JsonArray());
+            return promise.future();
+        }
+
+        JsonArray createdDevices = new JsonArray();
+        List<Future<JsonObject>> deviceCreationFutures = new ArrayList<>();
+
+        for (Object obj : successfulDiscoveries) {
+            JsonObject discovery = (JsonObject) obj;
+            Future<JsonObject> deviceFuture = createSingleDeviceFromTestDiscovery(discovery);
+            deviceCreationFutures.add(deviceFuture);
+        }
+
+        // Wait for all device creations to complete
+        Future.all(deviceCreationFutures)
+            .onSuccess(compositeFuture -> {
+                for (Future<JsonObject> future : deviceCreationFutures) {
+                    if (future.result() != null) {
+                        createdDevices.add(future.result());
+                    }
+                }
+                promise.complete(createdDevices);
+            })
+            .onFailure(promise::fail);
+
+        return promise.future();
+    }
+
+/**
+ * Create a single device from a successful discovery result using DeviceService.
+ *
+ * @param discovery JsonObject from GoEngine containing ip_address, hostname, device_type, port, credential_id
+ * @return Future resolving to created device summary or null if creation failed
+ */
+    private Future<JsonObject> createSingleDeviceFromTestDiscovery(JsonObject discovery) {
+        Promise<JsonObject> promise = Promise.promise();
+
+        // Prepare device data for DeviceService.deviceCreateFromDiscovery
+        JsonObject deviceData = new JsonObject()
+            .put("device_name", discovery.getString("hostname", discovery.getString("ip_address")))
+            .put("ip_address", discovery.getString("ip_address"))
+            .put("device_type", discovery.getString("device_type"))
+            .put("port", discovery.getInteger("port", 22))
+            .put("protocol", discovery.getString("device_type").contains("windows") ? "winrm" : "ssh")
+            .put("credential_profile_id", discovery.getString("credential_id")) // ONLY the successful credential ID
+            .put("host_name", discovery.getString("hostname", discovery.getString("ip_address")));
+
+        logger.info("🔧 Creating device from test discovery: {}", deviceData.getString("ip_address"));
+
+        deviceService.deviceCreateFromDiscovery(deviceData, ar -> {
+            if (ar.succeeded()) {
+                JsonObject result = ar.result();
+                logger.info("✅ Device created from test discovery: {}", result.getString("device_id"));
+
+                // Return device info for response
+                promise.complete(new JsonObject()
+                    .put("ip_address", deviceData.getString("ip_address"))
+                    .put("hostname", deviceData.getString("host_name"))
+                    .put("device_id", result.getString("device_id"))
+                    .put("device_name", deviceData.getString("device_name"))
+                    .put("success", true));
+            } else {
+                logger.error("❌ Failed to create device from test discovery: {}", ar.cause().getMessage());
+                promise.complete(null); // Return null for failed creation
+            }
+        });
+
+        return promise.future();
+    }
+
+/**
+ * Build the final test discovery response payload for API consumers.
+ *
+ * @param profileData source profile info (id, name, total_targets)
+ * @param devicesCreated number of devices successfully created
+ * @param devicesFailed number of failed discoveries
+ * @param devicesExisting number of pre-existing devices skipped
+ * @param createdDevices details of created devices
+ * @param failedDevices details of failed results
+ * @param existingDevices details of existing devices
+ * @return JsonObject response summarizing the test discovery run
+ */
+
+
+    private JsonObject createTestDiscoveryResponse(JsonObject profileData, int devicesCreated, int devicesFailed,
+                                                  int devicesExisting, JsonArray createdDevices, JsonArray failedDevices,
+                                                  JsonArray existingDevices) {
+        return new JsonObject()
+            .put("success", true)
+            .put("profile_id", profileData.getString("profile_id"))
+            .put("discovery_name", profileData.getString("discovery_name"))
+            .put("total_targets", profileData.getInteger("total_targets", 0))
+            .put("devices_discovered", devicesCreated)
+            .put("devices_failed", devicesFailed)
+            .put("devices_existing", devicesExisting)
+            .put("discovered_devices", createdDevices)
+            .put("failed_devices", failedDevices)
+            .put("existing_devices", existingDevices)
+            .put("message", String.format("Test discovery completed: %d discovered, %d failed, %d existing",
+                                        devicesCreated, devicesFailed, devicesExisting));
+    }
+
+    /**
+     * NEW: GoEngine v6.0.0 Credential Iteration Processor
+     * Uses GoEngine's built-in credential iteration (tests multiple credentials per IP until one succeeds)
+     */
+    private class CredentialIterationProcessor {
+        private final JsonObject profileData;
+        private final Queue<String> remainingIPs;
+        private final JsonArray allResults;
+        private final int totalTargets;
+
+        public CredentialIterationProcessor(JsonObject profileData, JsonArray allTargetIPs) {
+            this.profileData = profileData;
+            this.remainingIPs = new ConcurrentLinkedQueue<>();
+            this.allResults = new JsonArray();
+            this.totalTargets = allTargetIPs.size();
+
+            // Fill queue with IPs
+            for (Object obj : allTargetIPs) {
+                remainingIPs.offer((String) obj);
+            }
+
+            JsonArray credentials = profileData.getJsonArray("credentials");
+            logger.info("📋 Credential iteration processor initialized: {} credentials, {} IPs",
+                       credentials.size(), remainingIPs.size());
+        }
+
+/**
+ * Process the next batch of IPs using GoEngine credential iteration and append results.
+ * Recursively processes until all IPs are handled.
+ *
+ * @param promise completes with all discovery results
+ */
+        public void processNextBatch(Promise<JsonArray> promise) {
+            if (remainingIPs.isEmpty()) {
+                logger.info("🎉 All batches completed, total results: {}", allResults.size());
+                promise.complete(allResults);
+                return;
+            }
+
+            // Create current batch of IPs (GoEngine will handle credential iteration internally)
+            JsonArray currentBatch = createBatchOfIPs();
+
+            if (currentBatch.isEmpty()) {
+                promise.complete(allResults);
+                return;
+            }
+
+            logger.info("🔄 Processing batch with {} IPs (GoEngine v6.0.0 credential iteration)", currentBatch.size());
+
+            executeGoEngineDiscovery(profileData, currentBatch)
+                .onSuccess(batchResults -> {
+                    // Add results directly (GoEngine already handled credential iteration)
+                    for (Object obj : batchResults) {
+                        allResults.add(obj);
+                    }
+
+                    logger.info("✅ Batch completed: {} results, {} total results, {} IPs remaining",
+                               batchResults.size(), allResults.size(), remainingIPs.size());
+
+                    // Continue with next batch
+                    processNextBatch(promise);
+                })
+                .onFailure(promise::fail);
+        }
+
+/**
+ * Build a batch of up to discoveryBatchSize IPs; GoEngine will iterate credentials internally.
+ *
+ * @return JsonArray of IPs for the next credential-iteration batch
+ */
+        private JsonArray createBatchOfIPs() {
+            JsonArray batch = new JsonArray();
+
+            // Create batch of IPs (GoEngine v6.0.0 handles credential iteration internally)
+            for (int i = 0; i < discoveryBatchSize && !remainingIPs.isEmpty(); i++) {
+                String ip = remainingIPs.poll();
+                if (ip != null) {
+                    batch.add(ip);
+                }
+            }
+
+            return batch;
+        }
+    }
+
+/**
+ * Stop the verticle and perform any required cleanup.
+ *
+ * @param stopPromise completed when shutdown work is finished
+ */
     @Override
+
     public void stop(Promise<Void> stopPromise) {
         logger.info("🛑 Stopping DiscoveryVerticle");
         stopPromise.complete();

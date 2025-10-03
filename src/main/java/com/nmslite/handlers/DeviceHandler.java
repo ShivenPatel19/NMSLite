@@ -3,6 +3,8 @@ package com.nmslite.handlers;
 import com.nmslite.services.DeviceService;
 import com.nmslite.services.DeviceTypeService;
 import com.nmslite.utils.ExceptionUtil;
+import com.nmslite.utils.CommonValidationUtil;
+import com.nmslite.utils.DeviceValidationUtil;
 import io.vertx.config.ConfigRetriever;
 import io.vertx.core.Vertx;
 import io.vertx.core.json.JsonObject;
@@ -12,13 +14,13 @@ import org.slf4j.LoggerFactory;
 
 /**
  * DeviceHandler - Handles all device-related HTTP requests
- * 
+ *
  * This handler manages:
  * - Device listing and management
  * - Device types
  * - Device soft delete and restore
  * - Device discovery integration
- * 
+ *
  * Uses DeviceService and DeviceTypeService for database operations
  */
 public class DeviceHandler {
@@ -42,64 +44,22 @@ public class DeviceHandler {
     // DEVICE MANAGEMENT
     // ========================================
 
-    public void getDevices(RoutingContext ctx) {
-        // Get query parameter for including deleted devices (default: false)
-        boolean includeDeleted = "true".equals(ctx.request().getParam("includeDeleted"));
-
-        deviceService.deviceList(includeDeleted, ar -> {
+    public void getDiscoveredDevices(RoutingContext ctx) {
+        deviceService.deviceListByProvisioned(false, ar -> {
             if (ar.succeeded()) {
                 ExceptionUtil.handleSuccess(ctx, ar.result());
             } else {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to get devices");
+                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to get unprovisioned devices");
             }
         });
     }
 
-    public void createDevice(RoutingContext ctx) {
-        JsonObject requestBody = ctx.body().asJsonObject();
-
-        // Validate required fields for device creation
-        if (!ExceptionUtil.validateRequiredFields(ctx, requestBody,
-            "device_name", "ip_address", "device_type", "port", "protocol", "username", "password")) {
-            return; // Response already sent by validateRequiredFields
-        }
-
-        logger.info("🔧 Creating device: {}", requestBody.getString("device_name"));
-
-        // Check if polling_interval_seconds is provided, if not, use default from config
-        if (!requestBody.containsKey("polling_interval_seconds") || requestBody.getValue("polling_interval_seconds") == null) {
-            Integer defaultPollingInterval = config.getInteger("polling.default.device.polling.interval", 300); // Default 5 minutes
-            requestBody.put("polling_interval_seconds", defaultPollingInterval);
-            logger.info("🔧 Polling interval not provided, using default: {} seconds", defaultPollingInterval);
-        } else {
-            logger.info("🔧 Using provided polling interval: {} seconds", requestBody.getValue("polling_interval_seconds"));
-        }
-
-        // Check if timeout_seconds is provided, if not, use default (300 seconds = 5 minutes)
-        if (!requestBody.containsKey("timeout_seconds") || requestBody.getValue("timeout_seconds") == null) {
-            Integer defaultTimeout = 300; // 5 minutes default timeout
-            requestBody.put("timeout_seconds", defaultTimeout);
-            logger.info("🔧 Timeout not provided, using default: {} seconds", defaultTimeout);
-        } else {
-            logger.info("🔧 Using provided timeout: {} seconds", requestBody.getValue("timeout_seconds"));
-        }
-
-        // Check if retry_count is provided, if not, use default (2 retries)
-        if (!requestBody.containsKey("retry_count") || requestBody.getValue("retry_count") == null) {
-            Integer defaultRetryCount = 2; // 2 retries default
-            requestBody.put("retry_count", defaultRetryCount);
-            logger.info("🔧 Retry count not provided, using default: {} retries", defaultRetryCount);
-        } else {
-            logger.info("🔧 Using provided retry count: {} retries", requestBody.getValue("retry_count"));
-        }
-
-        deviceService.deviceCreate(requestBody, ar -> {
+    public void getProvisionedDevices(RoutingContext ctx) {
+        deviceService.deviceListByProvisioned(true, ar -> {
             if (ar.succeeded()) {
-                logger.info("✅ Device created successfully: {}", requestBody.getString("device_name"));
                 ExceptionUtil.handleSuccess(ctx, ar.result());
             } else {
-                logger.error("❌ Failed to create device: {}", ar.cause().getMessage());
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to create device");
+                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to get provisioned devices");
             }
         });
     }
@@ -107,11 +67,13 @@ public class DeviceHandler {
     public void softDeleteDevice(RoutingContext ctx) {
         String deviceId = ctx.pathParam("id");
         JsonObject requestBody = ctx.body().asJsonObject();
-        
-        // Get deletedBy from request body or use default
-        String deletedBy = requestBody != null ? requestBody.getString("deleted_by", "system") : "system";
 
-        deviceService.deviceDelete(deviceId, deletedBy, ar -> {
+        // ===== PATH PARAMETER VALIDATION =====
+        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID")) {
+            return;
+        }
+
+        deviceService.deviceDelete(deviceId, ar -> {
             if (ar.succeeded()) {
                 ExceptionUtil.handleSuccess(ctx, ar.result());
             } else {
@@ -123,6 +85,11 @@ public class DeviceHandler {
     public void restoreDevice(RoutingContext ctx) {
         String deviceId = ctx.pathParam("id");
 
+        // ===== PATH PARAMETER VALIDATION =====
+        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID")) {
+            return;
+        }
+
         deviceService.deviceRestore(deviceId, ar -> {
             if (ar.succeeded()) {
                 ExceptionUtil.handleSuccess(ctx, ar.result());
@@ -132,46 +99,108 @@ public class DeviceHandler {
         });
     }
 
-    public void updateDeviceMonitoringConfig(RoutingContext ctx) {
+
+    public void enableMonitoring(RoutingContext ctx) {
         String deviceId = ctx.pathParam("id");
-        JsonObject requestBody = ctx.body().asJsonObject();
 
-        // Validate update fields - at least one monitoring field must be provided
-        if (!ExceptionUtil.validateUpdateFields(ctx, requestBody,
-            "polling_interval_seconds", "alert_threshold_cpu", "alert_threshold_memory", "alert_threshold_disk")) {
-            return; // Response already sent by validateUpdateFields
+        // Validate device ID
+        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID")) {
+            return;
         }
 
-        // Validate threshold ranges (0-100) if provided
-        if (!ExceptionUtil.validateDecimalRange(ctx, requestBody, "alert_threshold_cpu", 0.0, 100.0) ||
-            !ExceptionUtil.validateDecimalRange(ctx, requestBody, "alert_threshold_memory", 0.0, 100.0) ||
-            !ExceptionUtil.validateDecimalRange(ctx, requestBody, "alert_threshold_disk", 0.0, 100.0)) {
-            return; // Response already sent by validateDecimalRange
-        }
-
-        // Validate polling interval (positive integer) if provided
-        if (requestBody.containsKey("polling_interval_seconds")) {
-            Integer pollingInterval = requestBody.getInteger("polling_interval_seconds");
-            if (pollingInterval != null && pollingInterval <= 0) {
-                ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("polling_interval_seconds must be positive"));
-                return;
-            }
-        }
-
-        logger.info("🔧 Updating device monitoring configuration for device: {}", deviceId);
-
-        deviceService.deviceUpdateMonitoringConfig(deviceId, requestBody, ar -> {
+        deviceService.deviceEnableMonitoring(deviceId, ar -> {
             if (ar.succeeded()) {
-                logger.info("✅ Device monitoring configuration updated successfully for device: {}", deviceId);
                 ExceptionUtil.handleSuccess(ctx, ar.result());
             } else {
-                logger.error("❌ Failed to update device monitoring configuration for device {}: {}", deviceId, ar.cause().getMessage());
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to update device monitoring configuration");
+                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to enable monitoring for device");
+            }
+        });
+    }
+    public void disableMonitoring(RoutingContext ctx) {
+        String deviceId = ctx.pathParam("id");
+
+        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID")) {
+            return;
+        }
+
+        deviceService.deviceDisableMonitoring(deviceId, ar -> {
+            if (ar.succeeded()) {
+                ExceptionUtil.handleSuccess(ctx, ar.result());
+            } else {
+                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to disable monitoring for device");
             }
         });
     }
 
 
+
+
+
+    public void updateDeviceConfig(RoutingContext ctx) {
+        String deviceId = ctx.pathParam("id");
+        JsonObject body = ctx.body().asJsonObject();
+
+        // ===== VALIDATION =====
+        // 1) Validate path parameter
+        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID")) {
+            return;
+        }
+
+        // 2) Validate request body and fields
+        if (!DeviceValidationUtil.validateDeviceUpdate(ctx, body)) {
+            return;
+        }
+
+        // 4) Invoke service
+        deviceService.deviceUpdateConfig(deviceId, body, ar -> {
+            if (ar.succeeded()) {
+                ExceptionUtil.handleSuccess(ctx, ar.result());
+            } else {
+                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to update device configuration");
+            }
+        });
+    }
+
+    // ========================================
+    // DEVICE PROVISIONING
+    // ========================================
+
+    // COMMENTED OUT FOR TESTING - Device Provisioning API
+    // /**
+    //  * Provision devices from a discovery profile (supports IP ranges)
+    //  * This endpoint creates individual devices from discovery profile data
+    //  */
+    // public void provisionDevicesFromProfile(RoutingContext ctx) {
+    //     String profileId = ctx.pathParam("profileId");
+
+    //     // ===== PATH PARAMETER VALIDATION =====
+    //     if (profileId == null || profileId.trim().isEmpty()) {
+    //         ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Profile ID is required"),
+    //             "Discovery profile ID is required");
+    //         return;
+    //     }
+
+    //     try {
+    //         java.util.UUID.fromString(profileId);
+    //     } catch (IllegalArgumentException e) {
+    //         ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
+    //             "Discovery profile ID must be a valid UUID");
+    //         return;
+    //     }
+
+    //     logger.info("🔧 Provisioning devices from discovery profile: {}", profileId);
+
+    //     // TODO: Implement device provisioning from discovery profile
+    //     // This should find devices created from the discovery profile and set them as provisioned
+    //     // For now, return a placeholder response
+    //     JsonObject result = new JsonObject()
+    //         .put("success", true)
+    //         .put("message", "Device provisioning from discovery profile not yet implemented")
+    //         .put("profile_id", profileId);
+
+    //     logger.warn("⚠️ Device provisioning from discovery profile not yet implemented for profile: {}", profileId);
+    //     ExceptionUtil.handleSuccess(ctx, result);
+    // }
 
     // ========================================
     // DEVICE TYPES

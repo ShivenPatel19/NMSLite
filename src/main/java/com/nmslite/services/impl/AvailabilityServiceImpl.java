@@ -99,10 +99,8 @@ public class AvailabilityServiceImpl implements AvailabilityService {
             LocalDateTime checkedAt = availabilityData.getString("checked_at") != null ? 
                 LocalDateTime.parse(availabilityData.getString("checked_at")) : LocalDateTime.now();
 
-            if (deviceId == null || status == null) {
-                blockingPromise.fail(new IllegalArgumentException("Device ID and status are required"));
-                return;
-            }
+            // ===== TRUST HANDLER VALIDATION =====
+            // No validation here - handler has already validated all input
 
             // Normalize status to lowercase
             String normalizedStatus = status.toLowerCase();
@@ -151,11 +149,10 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                         WHEN device_availability.current_status != $8 THEN $8 
                                         ELSE device_availability.current_status 
                                     END,
-                                    status_since = CASE 
-                                        WHEN device_availability.current_status != $8 THEN $5 
-                                        ELSE device_availability.status_since 
-                                    END,
-                                    updated_at = $5
+                                    status_since = CASE
+                                        WHEN device_availability.current_status != $8 THEN $5
+                                        ELSE device_availability.status_since
+                                    END
                                 RETURNING device_id, total_checks, successful_checks, failed_checks, availability_percent,
                                          last_check_time, current_status, status_since, updated_at
                                 """;
@@ -295,10 +292,8 @@ public class AvailabilityServiceImpl implements AvailabilityService {
     public void availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
-            if (status == null) {
-                blockingPromise.fail(new IllegalArgumentException("Status is required"));
-                return;
-            }
+            // ===== TRUST HANDLER VALIDATION =====
+            // No validation here - handler has already validated all input
 
             // Normalize status to lowercase
             String normalizedStatus = status.toLowerCase();
@@ -349,8 +344,7 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                     status_since = CASE
                                         WHEN current_status != $4 THEN $3
                                         ELSE status_since
-                                    END,
-                                    updated_at = $3
+                                    END
                                 WHERE device_id = $5
                                 RETURNING device_id, total_checks, successful_checks, failed_checks, availability_percent,
                                          last_check_time, current_status, status_since, updated_at

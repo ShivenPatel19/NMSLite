@@ -40,10 +40,10 @@ public class UserServiceImpl implements UserService {
     public void userList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler) {
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                SELECT user_id, username, is_active, created_at, updated_at, last_login_at
+                SELECT user_id, username, is_active
                 FROM users
                 """ + (includeInactive ? "" : "WHERE is_active = true ") + """
-                ORDER BY created_at DESC
+                ORDER BY username
                 """;
 
             pgPool.query(sql)
@@ -54,12 +54,7 @@ public class UserServiceImpl implements UserService {
                         JsonObject user = new JsonObject()
                             .put("user_id", row.getUUID("user_id").toString())
                             .put("username", row.getString("username"))
-                            .put("is_active", row.getBoolean("is_active"))
-                            .put("created_at", row.getLocalDateTime("created_at").toString())
-                            .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                row.getLocalDateTime("updated_at").toString() : null)
-                            .put("last_login_at", row.getLocalDateTime("last_login_at") != null ?
-                                row.getLocalDateTime("last_login_at").toString() : null);
+                            .put("is_active", row.getBoolean("is_active"));
                         users.add(user);
                     }
                     blockingPromise.complete(users);
@@ -71,13 +66,6 @@ public class UserServiceImpl implements UserService {
         }, resultHandler);
     }
 
-    /**
-     * Get all users (default: active users only)
-     */
-    public void userList(Handler<AsyncResult<JsonArray>> resultHandler) {
-        userList(false, resultHandler);
-    }
-
     @Override
     public void userCreate(JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler) {
         vertx.executeBlocking(blockingPromise -> {
@@ -85,18 +73,16 @@ public class UserServiceImpl implements UserService {
             String password = userData.getString("password");
             Boolean isActive = userData.getBoolean("is_active", true);
 
-            if (username == null || password == null) {
-                blockingPromise.fail(new IllegalArgumentException("Username and password are required"));
-                return;
-            }
-
             // Hash password for user authentication
             String passwordHash = PasswordUtil.hashPassword(password);
+
+            // ===== TRUST HANDLER VALIDATION =====
+            // No validation here - handler has already validated all input
 
             String sql = """
                 INSERT INTO users (username, password_hash, is_active)
                 VALUES ($1, $2, $3)
-                RETURNING user_id, username, is_active, created_at
+                RETURNING user_id, username, is_active
                 """;
 
             pgPool.preparedQuery(sql)
@@ -108,7 +94,6 @@ public class UserServiceImpl implements UserService {
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
                         .put("is_active", row.getBoolean("is_active"))
-                        .put("created_at", row.getLocalDateTime("created_at").toString())
                         .put("message", "User created successfully");
                     blockingPromise.complete(result);
                 })
@@ -130,6 +115,9 @@ public class UserServiceImpl implements UserService {
             String password = userData.getString("password");
             Boolean isActive = userData.getBoolean("is_active");
 
+            // ===== TRUST HANDLER VALIDATION =====
+            // No validation here - handler has already validated all input
+
             StringBuilder sqlBuilder = new StringBuilder("UPDATE users SET ");
             JsonArray params = new JsonArray();
             int paramIndex = 1;
@@ -148,14 +136,12 @@ public class UserServiceImpl implements UserService {
                 params.add(isActive);
             }
 
-            if (params.size() == 0) {
-                blockingPromise.fail(new IllegalArgumentException("No fields to update"));
-                return;
+            // Remove trailing comma and space, add WHERE clause
+            String sqlStr = sqlBuilder.toString();
+            if (sqlStr.endsWith(", ")) {
+                sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
             }
-
-            // Remove trailing comma and space
-            String sql = sqlBuilder.substring(0, sqlBuilder.length() - 2) +
-                " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active, updated_at";
+            String sql = sqlStr + " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active";
             params.add(UUID.fromString(userId));
 
             pgPool.preparedQuery(sql)
@@ -171,7 +157,6 @@ public class UserServiceImpl implements UserService {
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
                         .put("is_active", row.getBoolean("is_active"))
-                        .put("updated_at", row.getLocalDateTime("updated_at").toString())
                         .put("message", "User updated successfully");
                     blockingPromise.complete(result);
                 })
@@ -262,106 +247,11 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void userUpdateLastLogin(String userId, Handler<AsyncResult<JsonObject>> resultHandler) {
-
-        vertx.executeBlocking(blockingPromise -> {
-            String sql = """
-                UPDATE users
-                SET last_login_at = CURRENT_TIMESTAMP
-                WHERE user_id = $1 AND is_active = true
-                RETURNING user_id, username, last_login_at
-                """;
-
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(userId)))
-                .onSuccess(rows -> {
-                    if (rows.size() == 0) {
-                        blockingPromise.fail(new IllegalArgumentException("User not found or inactive"));
-                        return;
-                    }
-                    Row row = rows.iterator().next();
-                    JsonObject result = new JsonObject()
-                        .put("success", true)
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("last_login_at", row.getLocalDateTime("last_login_at").toString())
-                        .put("message", "Last login updated successfully");
-                    blockingPromise.complete(result);
-                })
-                .onFailure(cause -> {
-                    logger.error("Failed to update last login", cause);
-                    blockingPromise.fail(cause);
-                });
-        }, resultHandler);
-    }
-
-    @Override
-    public void userChangePassword(String userId, String oldPassword, String newPassword, Handler<AsyncResult<JsonObject>> resultHandler) {
-
-        vertx.executeBlocking(blockingPromise -> {
-            // First verify the old password
-            String selectSql = """
-                SELECT password_hash
-                FROM users
-                WHERE user_id = $1 AND is_active = true
-                """;
-
-            pgPool.preparedQuery(selectSql)
-                .execute(Tuple.of(UUID.fromString(userId)))
-                .onSuccess(rows -> {
-                    if (rows.size() == 0) {
-                        blockingPromise.fail(new IllegalArgumentException("User not found or inactive"));
-                        return;
-                    }
-
-                    Row row = rows.iterator().next();
-                    String storedPasswordHash = row.getString("password_hash");
-
-                    if (!PasswordUtil.verifyPassword(oldPassword, storedPasswordHash)) {
-                        blockingPromise.complete(new JsonObject()
-                            .put("success", false)
-                            .put("message", "Current password is incorrect"));
-                        return;
-                    }
-
-                    // Update with new password
-                    String newPasswordHash = PasswordUtil.hashPassword(newPassword);
-                    String updateSql = """
-                        UPDATE users
-                        SET password_hash = $1
-                        WHERE user_id = $2
-                        RETURNING user_id, username
-                        """;
-
-                    pgPool.preparedQuery(updateSql)
-                        .execute(Tuple.of(newPasswordHash, UUID.fromString(userId)))
-                        .onSuccess(updateRows -> {
-                            Row updateRow = updateRows.iterator().next();
-                            JsonObject result = new JsonObject()
-                                .put("success", true)
-                                .put("user_id", updateRow.getUUID("user_id").toString())
-                                .put("username", updateRow.getString("username"))
-                                .put("message", "Password changed successfully");
-                            blockingPromise.complete(result);
-                        })
-                        .onFailure(cause -> {
-                            logger.error("Failed to update password", cause);
-                            blockingPromise.fail(cause);
-                        });
-                })
-                .onFailure(cause -> {
-                    logger.error("Failed to verify old password", cause);
-                    blockingPromise.fail(cause);
-                });
-        }, resultHandler);
-    }
-
-    @Override
     public void userGetById(String userId, Handler<AsyncResult<JsonObject>> resultHandler) {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                SELECT user_id, username, is_active, created_at, updated_at, last_login_at
+                SELECT user_id, username, is_active
                 FROM users
                 WHERE user_id = $1
                 """;
@@ -379,12 +269,7 @@ public class UserServiceImpl implements UserService {
                         .put("found", true)
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
-                        .put("is_active", row.getBoolean("is_active"))
-                        .put("created_at", row.getLocalDateTime("created_at").toString())
-                        .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                            row.getLocalDateTime("updated_at").toString() : null)
-                        .put("last_login_at", row.getLocalDateTime("last_login_at") != null ?
-                            row.getLocalDateTime("last_login_at").toString() : null);
+                        .put("is_active", row.getBoolean("is_active"));
                     blockingPromise.complete(result);
                 })
                 .onFailure(cause -> {

@@ -1,19 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    
-    <!-- Console Appender -->
+
+    <!-- Console Appender - Simplified logging for clean development -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
-    
-    <!-- File Appender -->
+
+    <!--
+    FILE LOGGING DISABLED - Uncomment below if file logging is needed
+
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/nmslite.log</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>logs/nmslite.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
-            <maxFileSize>10MB</maxFileSize>
+            <fileNamePattern>logs/nmslite.%d{yyyy-MM-dd}.log</fileNamePattern>
             <maxHistory>30</maxHistory>
             <totalSizeCap>1GB</totalSizeCap>
         </rollingPolicy>
@@ -21,29 +22,20 @@
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
-    
-    <!-- Async Appender for better performance -->
-    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
-        <appender-ref ref="FILE"/>
-        <queueSize>512</queueSize>
-        <discardingThreshold>0</discardingThreshold>
-    </appender>
-    
-    <!-- Logger configurations -->
+    -->
+
+    <!-- Logger configurations - Console only -->
     <logger name="com.nmslite" level="INFO" additivity="false">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="ASYNC_FILE"/>
     </logger>
-    
+
     <logger name="io.vertx" level="INFO" additivity="false">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="ASYNC_FILE"/>
     </logger>
-    
-    <!-- Root logger -->
+
+    <!-- Root logger - Console only -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="ASYNC_FILE"/>
     </root>
     
 </configuration>

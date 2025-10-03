@@ -6,7 +6,7 @@ A lightweight, event-driven network monitoring system built with Vert.x and Post
 
 NMSLite uses a **4-verticle event-driven architecture**:
 
-- **MainVerticle**: HTTP API + WebSocket real-time updates
+- **ServerVerticle**: HTTP API server
 - **DatabaseVerticle**: All database operations (PostgreSQL)
 - **DiscoveryVerticle**: Device discovery workflow (fping + GoEngine)
 - **PollingMetricsVerticle**: Continuous monitoring (60s intervals)
@@ -65,12 +65,21 @@ main {
   websocket.path = "/ws"
 }
 
-# Discovery Configuration
-discovery {
+# Shared Tools Configuration
+tools {
   goengine.path = "./goengine/goengine"
   fping.path = "fping"
-  timeout.seconds = 30
+}
+
+# Discovery Configuration
+discovery {
   batch.size = 100
+}
+
+# Polling Configuration
+polling {
+  system.cycle.interval.seconds = 60       # How often the system checks for devices to poll
+  batch.size = 50
 }
 ```
 
@@ -122,32 +131,7 @@ GET /api/credentials
 POST /api/credentials
 ```
 
-## 🔌 WebSocket Real-time Updates
 
-Connect to WebSocket for real-time updates:
-
-```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
-
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  
-  switch(message.type) {
-    case 'discovery.result':
-      console.log('Discovery result:', message.data);
-      break;
-    case 'discovery.completed':
-      console.log('Discovery completed:', message.data);
-      break;
-    case 'connectivity.failed':
-      console.log('Device unreachable:', message.data);
-      break;
-    case 'metrics.update':
-      console.log('Metrics update:', message.data);
-      break;
-  }
-};
-```
 
 ## 🔧 Configuration
 
@@ -163,10 +147,11 @@ All configuration is loaded from `src/main/resources/application.conf`. The appl
 | `database.user` | nmslite | Database user |
 | `database.password` | nmslite | Database password |
 | `main.http.port` | 8080 | HTTP server port |
-| `discovery.goengine.path` | ./goengine/goengine | Path to GoEngine binary |
-| `discovery.fping.path` | fping | Path to fping binary |
-| `discovery.timeout.seconds` | 30 | Discovery timeout (seconds) |
-| `polling.interval.seconds` | 60 | Polling interval (seconds) |
+| `tools.goengine.path` | ./goengine/goengine | Path to GoEngine binary |
+| `tools.fping.path` | fping | Path to fping binary |
+| `tools.network.connection.timeout.seconds` | 30 | Network timeout for device connections |
+| `polling.system.cycle.interval.seconds` | 60 | How often system checks for devices to poll |
+| `device.defaults.device.polling.interval.seconds` | 300 | Default interval for polling individual devices |
 
 ### Customizing Configuration
 
@@ -184,7 +169,7 @@ Edit `src/main/resources/application.conf` before building the application to cu
 - System executes fping for connectivity
 - Port scanning for alive devices
 - GoEngine SSH/WinRM discovery for accessible devices
-- Real-time results via WebSocket
+- Results available via API polling
 
 ### 3. Provision Phase
 - Successful discoveries create devices for monitoring

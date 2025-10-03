@@ -2,6 +2,8 @@ package com.nmslite.handlers;
 
 import com.nmslite.services.UserService;
 import com.nmslite.utils.ExceptionUtil;
+import com.nmslite.utils.JWTUtil;
+import com.nmslite.utils.UserValidationUtil;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.RoutingContext;
 import org.slf4j.Logger;
@@ -22,9 +24,11 @@ public class UserHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(UserHandler.class);
     private final UserService userService;
+    private final JWTUtil jwtUtil;
 
-    public UserHandler(UserService userService) {
+    public UserHandler(UserService userService, JWTUtil jwtUtil) {
         this.userService = userService;
+        this.jwtUtil = jwtUtil;
     }
 
     // ========================================
@@ -32,8 +36,19 @@ public class UserHandler {
     // ========================================
 
     public void getUsers(RoutingContext ctx) {
-        // Get includeInactive parameter from query string (default: false)
-        boolean includeInactive = "true".equals(ctx.request().getParam("includeInactive"));
+        // ===== QUERY PARAMETER VALIDATION =====
+        String includeInactiveParam = ctx.request().getParam("includeInactive");
+        boolean includeInactive = false;
+
+        if (includeInactiveParam != null) {
+            if ("true".equalsIgnoreCase(includeInactiveParam) || "false".equalsIgnoreCase(includeInactiveParam)) {
+                includeInactive = "true".equalsIgnoreCase(includeInactiveParam);
+            } else {
+                ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid includeInactive parameter"),
+                    "includeInactive parameter must be 'true' or 'false'");
+                return;
+            }
+        }
 
         userService.userList(includeInactive, ar -> {
             if (ar.succeeded()) {
@@ -46,10 +61,9 @@ public class UserHandler {
 
     public void createUser(RoutingContext ctx) {
         JsonObject body = ctx.body().asJsonObject();
-        
-        // Validate required fields
-        if (!ExceptionUtil.validateRequiredFields(ctx, body, "username", "password")) {
-            return; // Response already sent by validateRequiredFields
+
+        if (!UserValidationUtil.validateUserBasicFields(ctx, body)) {
+            return; // Validation failed, response already sent
         }
 
         JsonObject userData = new JsonObject()
@@ -70,9 +84,24 @@ public class UserHandler {
         String userId = ctx.pathParam("id");
         JsonObject body = ctx.body().asJsonObject();
 
-        // Validate update fields - at least one field must be provided
-        if (!ExceptionUtil.validateUpdateFields(ctx, body, "username", "password", "is_active")) {
-            return; // Response already sent by validateUpdateFields
+        // 1. Validate path parameter
+        if (userId == null || userId.trim().isEmpty()) {
+            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("User ID is required"),
+                "User ID path parameter is required");
+            return;
+        }
+
+        try {
+            java.util.UUID.fromString(userId);
+        } catch (IllegalArgumentException e) {
+            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
+                "User ID must be a valid UUID");
+            return;
+        }
+
+        // 2. Validate user update fields
+        if (!UserValidationUtil.validateUserUpdate(ctx, body)) {
+            return; // Validation failed, response already sent
         }
 
         userService.userUpdate(userId, body, ar -> {
@@ -84,10 +113,23 @@ public class UserHandler {
         });
     }
 
-
-
     public void deleteUser(RoutingContext ctx) {
         String userId = ctx.pathParam("id");
+
+        // ===== PATH PARAMETER VALIDATION =====
+        if (userId == null || userId.trim().isEmpty()) {
+            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("User ID is required"),
+                "User ID path parameter is required");
+            return;
+        }
+
+        try {
+            java.util.UUID.fromString(userId);
+        } catch (IllegalArgumentException e) {
+            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
+                "User ID must be a valid UUID");
+            return;
+        }
 
         userService.userDelete(userId, ar -> {
             if (ar.succeeded()) {
@@ -98,32 +140,55 @@ public class UserHandler {
         });
     }
 
-
-
     // ========================================
-    // PASSWORD MANAGEMENT
+    // USER AUTHENTICATION
     // ========================================
 
-    public void changeUserPassword(RoutingContext ctx) {
-        String userId = ctx.pathParam("id");
+    public void authenticateUser(RoutingContext ctx) {
         JsonObject body = ctx.body().asJsonObject();
-        
-        // Validate required fields
-        if (!ExceptionUtil.validateRequiredFields(ctx, body, "oldPassword", "newPassword")) {
-            return; // Response already sent by validateRequiredFields
+
+        if (!UserValidationUtil.validateUserAuthentication(ctx, body)) {
+            return; // Validation failed, response already sent
         }
 
-        String oldPassword = body.getString("oldPassword");
-        String newPassword = body.getString("newPassword");
+        String username = body.getString("username");
+        String password = body.getString("password");
 
-        userService.userChangePassword(userId, oldPassword, newPassword, ar -> {
+        userService.userAuthenticate(username, password, ar -> {
             if (ar.succeeded()) {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                JsonObject authResult = ar.result();
+                boolean authenticated = authResult.getBoolean("authenticated", false);
+
+                if (authenticated) {
+                    // Generate JWT token for successful authentication
+                    String userId = authResult.getString("user_id");
+                    String authenticatedUsername = authResult.getString("username");
+                    boolean isActive = authResult.getBoolean("is_active", false);
+
+                    try {
+                        String jwtToken = jwtUtil.generateToken(userId, authenticatedUsername, isActive);
+
+                        // Add JWT token to response
+                        JsonObject enhancedResult = authResult.copy()
+                            .put("jwt_token", jwtToken)
+                            .put("token_type", "Bearer")
+                            .put("expires_in_hours", JWTUtil.getTokenExpiryHours())
+                            .put("message", "Authentication successful - JWT token generated");
+
+                        logger.info("✅ JWT token generated for user: {}", authenticatedUsername);
+                        ExceptionUtil.handleSuccess(ctx, enhancedResult);
+
+                    } catch (Exception e) {
+                        logger.error("❌ Failed to generate JWT token for user: {}", authenticatedUsername, e);
+                        ExceptionUtil.handleHttp(ctx, e, "Authentication successful but failed to generate token");
+                    }
+                } else {
+                    // Authentication failed - no token generation
+                    ExceptionUtil.handleSuccess(ctx, authResult);
+                }
             } else {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to change password");
+                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to authenticate user");
             }
         });
     }
-
-
 }

@@ -11,7 +11,7 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
  * DeviceService - Device management operations with ProxyGen
- * 
+ *
  * This interface provides:
  * - Device CRUD operations with soft delete
  * - Device monitoring management
@@ -40,47 +40,42 @@ public interface DeviceService {
     // ========================================
 
     /**
-     * Get all devices
+     * List devices by provision status only
+     * FILTER: is_provisioned = <param>, is_deleted = false
      *
-     * @param includeDeleted Include soft-deleted devices
+     * @param isProvisioned Whether to return provisioned (true) or non-provisioned (false) devices
      * @param resultHandler Handler for the async result containing JsonArray of devices
      */
-    void deviceList(boolean includeDeleted, Handler<AsyncResult<JsonArray>> resultHandler);
+    void deviceListByProvisioned(boolean isProvisioned, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
-     * Create a new device
+     * List devices where both provisioned and monitoring are enabled
+     * FILTER: is_provisioned = true AND is_monitoring_enabled = true AND is_deleted = false
      *
-     * @param deviceData JsonObject containing device data (device_name, ip_address, device_type, port, username, password, is_monitoring_enabled, discovery_profile_id, polling_interval_seconds, timeout_seconds, retry_count)
-     * @param resultHandler Handler for the async result containing JsonObject with creation result
+     * @param resultHandler Handler for the async result containing JsonArray of devices
      */
-    void deviceCreate(JsonObject deviceData, Handler<AsyncResult<JsonObject>> resultHandler);
+    void deviceListProvisionedAndMonitoringEnabled(Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
-     * Update device monitoring status (only field directly editable)
+     * Update device configuration in a single call.
+     * Allows updating any subset of: device_name, port, polling_interval_seconds,
+     * timeout_seconds, retry_count, alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk.
      *
-     * @param deviceId  Device ID
-     * @param isEnabled Monitoring enabled status
+     * NOTE: ip_address, device_type, host_name are IMMUTABLE and cannot be updated here.
+     *
+     * @param deviceId Device ID
+     * @param updateFields JsonObject with any of the allowed fields above
      * @param resultHandler Handler for the async result containing JsonObject with update result
      */
-    void deviceUpdateIsMonitoringStatus(String deviceId, boolean isEnabled, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
-     * Update device monitoring configuration (directly editable fields)
-     *
-     * @param deviceId         Device ID
-     * @param monitoringConfig JsonObject containing monitoring configuration (polling_interval_seconds, alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk)
-     * @param resultHandler Handler for the async result containing JsonObject with update result
-     */
-    void deviceUpdateMonitoringConfig(String deviceId, JsonObject monitoringConfig, Handler<AsyncResult<JsonObject>> resultHandler);
+    void deviceUpdateConfig(String deviceId, JsonObject updateFields, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Soft delete a device
      *
      * @param deviceId  Device ID to delete
-     * @param deletedBy User who deleted the device
      * @param resultHandler Handler for the async result containing JsonObject with deletion result
      */
-    void deviceDelete(String deviceId, String deletedBy, Handler<AsyncResult<JsonObject>> resultHandler);
+    void deviceDelete(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
      * Restore a soft-deleted device
@@ -108,17 +103,29 @@ public interface DeviceService {
     void deviceFindByIp(String ipAddress, boolean includeDeleted, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
-     * Get devices ready for polling (active monitoring enabled devices)
+     * Enable monitoring for a device and set monitoring_enabled_at timestamp.
+     * If already enabled, preserves existing timestamp.
      *
-     * @param resultHandler Handler for the async result containing JsonArray of devices ready for polling
+     * @param deviceId Device ID
+     * @param resultHandler Handler for async result containing device_id, is_monitoring_enabled, monitoring_enabled_at
      */
-    void deviceListForPolling(Handler<AsyncResult<JsonArray>> resultHandler);
+    void deviceEnableMonitoring(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
+    
+    /**
+     * Disable monitoring for a device (does not change monitoring_enabled_at).
+     *
+     * @param deviceId Device ID
+     * @param resultHandler Handler for async result containing device_id, is_monitoring_enabled, monitoring_enabled_at
+     */
+    void deviceDisableMonitoring(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
-     * Synchronize all devices from attached tables (discovery profiles, credentials, device types)
-     * This method will refresh all device data from their authoritative sources
+     * Create device from discovery result (called after successful discovery)
+     * Creates device with: device_name = host_name, is_provisioned = false, is_monitoring_enabled = false
+     * NOTE: ip_address, device_type, host_name are IMMUTABLE after creation
      *
-     * @param resultHandler Handler for the async result containing JsonObject with synchronization result
+     * @param deviceData JsonObject containing device data from discovery (device_name, ip_address, device_type, port, protocol, credential_profile_id, host_name)
+     * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
-    void deviceSync(Handler<AsyncResult<JsonObject>> resultHandler);
+    void deviceCreateFromDiscovery(JsonObject deviceData, Handler<AsyncResult<JsonObject>> resultHandler);
 }

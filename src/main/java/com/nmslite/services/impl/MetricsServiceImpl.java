@@ -44,7 +44,6 @@ public class MetricsServiceImpl implements MetricsService {
 
         vertx.executeBlocking(blockingPromise -> {
             String deviceId = metricsData.getString("device_id");
-            Boolean success = metricsData.getBoolean("success");
             Integer durationMs = metricsData.getInteger("duration_ms");
             Double cpuUsage = metricsData.getDouble("cpu_usage_percent");
             Double memoryUsage = metricsData.getDouble("memory_usage_percent");
@@ -55,38 +54,33 @@ public class MetricsServiceImpl implements MetricsService {
             Long diskTotal = metricsData.getLong("disk_total_bytes");
             Long diskUsed = metricsData.getLong("disk_used_bytes");
             Long diskFree = metricsData.getLong("disk_free_bytes");
-            String errorMessage = metricsData.getString("error_message");
 
-            if (deviceId == null || success == null) {
-                blockingPromise.fail(new IllegalArgumentException("Device ID and success status are required"));
-                return;
-            }
+            // ===== TRUST HANDLER VALIDATION =====
+            // No validation here - handler has already validated all input
 
             String sql = """
-                    INSERT INTO metrics (device_id, success, duration_ms, cpu_usage_percent, memory_usage_percent, 
-                                       memory_total_bytes, memory_used_bytes, memory_free_bytes, disk_usage_percent, 
-                                       disk_total_bytes, disk_used_bytes, disk_free_bytes, error_message)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                    RETURNING metric_id, device_id, success, timestamp, duration_ms, cpu_usage_percent, memory_usage_percent, 
-                             disk_usage_percent, error_message
+                    INSERT INTO metrics (device_id, duration_ms, cpu_usage_percent, memory_usage_percent,
+                                       memory_total_bytes, memory_used_bytes, memory_free_bytes, disk_usage_percent,
+                                       disk_total_bytes, disk_used_bytes, disk_free_bytes)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    RETURNING metric_id, device_id, timestamp, duration_ms, cpu_usage_percent, memory_usage_percent,
+                             disk_usage_percent
                     """;
 
             pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId), success, durationMs, cpuUsage, memoryUsage, 
-                                    memoryTotal, memoryUsed, memoryFree, diskUsage, diskTotal, diskUsed, diskFree, errorMessage))
+                    .execute(Tuple.of(UUID.fromString(deviceId), durationMs, cpuUsage, memoryUsage,
+                                    memoryTotal, memoryUsed, memoryFree, diskUsage, diskTotal, diskUsed, diskFree))
                     .onSuccess(rows -> {
                         Row row = rows.iterator().next();
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("metric_id", row.getUUID("metric_id").toString())
                                 .put("device_id", row.getUUID("device_id").toString())
-                                .put("success_status", row.getBoolean("success"))
                                 .put("timestamp", row.getLocalDateTime("timestamp").toString())
                                 .put("duration_ms", row.getInteger("duration_ms"))
                                 .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
                                 .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
                                 .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
-                                .put("error_message", row.getString("error_message"))
                                 .put("message", "Metrics data stored successfully");
                         blockingPromise.complete(result);
                     })
@@ -113,10 +107,10 @@ public class MetricsServiceImpl implements MetricsService {
         vertx.executeBlocking(blockingPromise -> {
             // Build SQL with optional device filter and ensure device is active
             StringBuilder sqlBuilder = new StringBuilder("""
-                    SELECT m.metric_id, m.device_id, m.success, m.timestamp, m.duration_ms, 
-                           m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes, 
-                           m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes, 
-                           m.disk_free_bytes, m.error_message, d.device_name, d.ip_address
+                    SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
+                           m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
+                           m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
+                           m.disk_free_bytes, d.device_name, d.ip_address
                     FROM metrics m
                     JOIN devices d ON m.device_id = d.device_id
                     WHERE d.is_deleted = false
@@ -178,8 +172,7 @@ public class MetricsServiceImpl implements MetricsService {
                                                 .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
                                                 .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                                 .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                                .put("disk_free_bytes", row.getLong("disk_free_bytes"))
-                                                .put("error_message", row.getString("error_message"));
+                                                .put("disk_free_bytes", row.getLong("disk_free_bytes"));
                                         metrics.add(metric);
                                     }
 
@@ -209,10 +202,10 @@ public class MetricsServiceImpl implements MetricsService {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                    SELECT m.metric_id, m.device_id, m.success, m.timestamp, m.duration_ms, 
-                           m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes, 
-                           m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes, 
-                           m.disk_free_bytes, m.error_message, d.device_name, d.ip_address
+                    SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
+                           m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
+                           m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
+                           m.disk_free_bytes, d.device_name, d.ip_address
                     FROM metrics m
                     JOIN devices d ON m.device_id = d.device_id
                     WHERE m.metric_id = $1 AND d.is_deleted = false
@@ -244,8 +237,7 @@ public class MetricsServiceImpl implements MetricsService {
                                 .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
                                 .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                 .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                .put("disk_free_bytes", row.getLong("disk_free_bytes"))
-                                .put("error_message", row.getString("error_message"));
+                                .put("disk_free_bytes", row.getLong("disk_free_bytes"));
                         blockingPromise.complete(result);
                     })
                     .onFailure(cause -> {
@@ -351,10 +343,10 @@ public class MetricsServiceImpl implements MetricsService {
 
                                     // Main query
                                     String sql = """
-                                            SELECT metric_id, device_id, success, timestamp, duration_ms,
+                                            SELECT metric_id, device_id, timestamp, duration_ms,
                                                    cpu_usage_percent, memory_usage_percent, memory_total_bytes, memory_used_bytes,
                                                    memory_free_bytes, disk_usage_percent, disk_total_bytes, disk_used_bytes,
-                                                   disk_free_bytes, error_message
+                                                   disk_free_bytes
                                             FROM metrics
                                             WHERE device_id = $1
                                             ORDER BY timestamp DESC
@@ -382,8 +374,7 @@ public class MetricsServiceImpl implements MetricsService {
                                                             .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
                                                             .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                                             .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                                            .put("disk_free_bytes", row.getLong("disk_free_bytes"))
-                                                            .put("error_message", row.getString("error_message"));
+                                                            .put("disk_free_bytes", row.getLong("disk_free_bytes"));
                                                     metrics.add(metric);
                                                 }
 
@@ -421,10 +412,10 @@ public class MetricsServiceImpl implements MetricsService {
 
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
-                    SELECT m.metric_id, m.device_id, m.success, m.timestamp, m.duration_ms,
+                    SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
                            m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
                            m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
-                           m.disk_free_bytes, m.error_message, d.device_name, d.ip_address
+                           m.disk_free_bytes, d.device_name, d.ip_address
                     FROM metrics m
                     JOIN devices d ON m.device_id = d.device_id
                     WHERE m.device_id = $1 AND d.is_deleted = false
@@ -458,8 +449,7 @@ public class MetricsServiceImpl implements MetricsService {
                                 .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
                                 .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                 .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                .put("disk_free_bytes", row.getLong("disk_free_bytes"))
-                                .put("error_message", row.getString("error_message"));
+                                .put("disk_free_bytes", row.getLong("disk_free_bytes"));
                         blockingPromise.complete(result);
                     })
                     .onFailure(cause -> {
@@ -475,10 +465,10 @@ public class MetricsServiceImpl implements MetricsService {
         vertx.executeBlocking(blockingPromise -> {
             String sql = """
                     SELECT DISTINCT ON (d.device_id)
-                           m.metric_id, m.device_id, m.success, m.timestamp, m.duration_ms,
+                           m.metric_id, m.device_id, m.timestamp, m.duration_ms,
                            m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
                            m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
-                           m.disk_free_bytes, m.error_message, d.device_name, d.ip_address, d.device_type
+                           m.disk_free_bytes, d.device_name, d.ip_address, d.device_type
                     FROM devices d
                     LEFT JOIN metrics m ON d.device_id = m.device_id
                     WHERE d.is_deleted = false AND d.is_monitoring_enabled = true
@@ -516,7 +506,6 @@ public class MetricsServiceImpl implements MetricsService {
                                       .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                       .put("disk_used_bytes", row.getLong("disk_used_bytes"))
                                       .put("disk_free_bytes", row.getLong("disk_free_bytes"))
-                                      .put("error_message", row.getString("error_message"))
                                       .put("has_metrics", true);
                             } else {
                                 metric.put("has_metrics", false)
@@ -548,10 +537,10 @@ public class MetricsServiceImpl implements MetricsService {
                 }
 
                 String sql = """
-                        SELECT m.metric_id, m.device_id, m.success, m.timestamp, m.duration_ms,
+                        SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
                                m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
                                m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
-                               m.disk_free_bytes, m.error_message, d.device_name, d.ip_address
+                               m.disk_free_bytes, d.device_name, d.ip_address
                         FROM metrics m
                         JOIN devices d ON m.device_id = d.device_id
                         WHERE m.device_id = $1 AND d.is_deleted = false
@@ -580,8 +569,7 @@ public class MetricsServiceImpl implements MetricsService {
                                         .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
                                         .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                         .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                        .put("disk_free_bytes", row.getLong("disk_free_bytes"))
-                                        .put("error_message", row.getString("error_message"));
+                                        .put("disk_free_bytes", row.getLong("disk_free_bytes"));
                                 metrics.add(metric);
                             }
                             blockingPromise.complete(metrics);

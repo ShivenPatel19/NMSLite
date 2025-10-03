@@ -46,7 +46,7 @@ public interface CredentialProfileService {
 
     /**
      * Create a new credential profile
-     * @param credentialData JsonObject containing credential data (profile_name, username, password, protocol, created_by)
+     * @param credentialData JsonObject containing credential data (profile_name, username, password, protocol)
      * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
     void credentialCreate(JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler);
@@ -72,4 +72,11 @@ public interface CredentialProfileService {
      * @param resultHandler Handler for the async result containing JsonObject with credential profile data or not found
      */
     void credentialGetById(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler);
+
+    /**
+     * Get multiple credential profiles by IDs
+     * @param credentialIds JsonArray containing credential profile IDs
+     * @param resultHandler Handler for the async result containing JsonObject with credentials array
+     */
+    void credentialGetByIds(JsonArray credentialIds, Handler<AsyncResult<JsonObject>> resultHandler);
 }

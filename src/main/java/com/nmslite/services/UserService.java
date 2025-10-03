@@ -76,22 +76,6 @@ public interface UserService {
     void userAuthenticate(String username, String password, Handler<AsyncResult<JsonObject>> resultHandler);
 
     /**
-     * Update user's last login timestamp
-     * @param userId User ID
-     * @param resultHandler Handler for the async result containing JsonObject with update result
-     */
-    void userUpdateLastLogin(String userId, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
-     * Change user password
-     * @param userId User ID
-     * @param oldPassword Current password
-     * @param newPassword New password
-     * @param resultHandler Handler for the async result containing JsonObject with change result
-     */
-    void userChangePassword(String userId, String oldPassword, String newPassword, Handler<AsyncResult<JsonObject>> resultHandler);
-
-    /**
      * Get user by ID
      * @param userId User ID
      * @param resultHandler Handler for the async result containing JsonObject with user data or not found
