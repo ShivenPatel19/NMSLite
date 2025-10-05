@@ -1,17 +1,24 @@
 package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
+
 import io.vertx.codegen.annotations.VertxGen;
+
 import io.vertx.core.AsyncResult;
+
 import io.vertx.core.Handler;
+
 import io.vertx.core.Vertx;
+
 import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
+
 import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
  * UserService - User management operations with ProxyGen
- * 
+ *
  * This interface provides:
  * - User CRUD operations
  * - Password hashing and validation
@@ -21,14 +28,19 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
  */
 @ProxyGen
 @VertxGen
-public interface UserService {
+public interface UserService
+{
 
     String SERVICE_ADDRESS = "user.service";
 
     /**
      * Create a proxy instance for the user service
+     *
+     * @param vertx Vert.x instance
+     * @return UserService proxy instance
      */
-    static UserService createProxy(Vertx vertx) {
+    static UserService createProxy(Vertx vertx)
+    {
         return new ServiceProxyBuilder(vertx)
             .setAddress(SERVICE_ADDRESS)
             .build(UserService.class);
@@ -40,6 +52,7 @@ public interface UserService {
 
     /**
      * Get all users
+     *
      * @param includeInactive Include inactive users (false = active users only, true = all users)
      * @param resultHandler Handler for the async result containing JsonArray of users
      */
@@ -47,6 +60,7 @@ public interface UserService {
 
     /**
      * Create a new user
+     *
      * @param userData JsonObject containing user data (username, password, is_active)
      * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
@@ -54,6 +68,7 @@ public interface UserService {
 
     /**
      * Update user information
+     *
      * @param userId User ID to update
      * @param userData JsonObject containing fields to update
      * @param resultHandler Handler for the async result containing JsonObject with update result
@@ -62,6 +77,7 @@ public interface UserService {
 
     /**
      * Delete a user
+     *
      * @param userId User ID to delete
      * @param resultHandler Handler for the async result containing JsonObject with deletion result
      */
@@ -69,6 +85,7 @@ public interface UserService {
 
     /**
      * Authenticate user with username and password
+     *
      * @param username Username
      * @param password Plain text password
      * @param resultHandler Handler for the async result containing JsonObject with authentication result
@@ -77,6 +94,7 @@ public interface UserService {
 
     /**
      * Get user by ID
+     *
      * @param userId User ID
      * @param resultHandler Handler for the async result containing JsonObject with user data or not found
      */
@@ -84,9 +102,11 @@ public interface UserService {
 
     /**
      * Activate or deactivate user
+     *
      * @param userId User ID
      * @param isActive Active status
      * @param resultHandler Handler for the async result containing JsonObject with update result
      */
     void userSetActive(String userId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler);
+
 }

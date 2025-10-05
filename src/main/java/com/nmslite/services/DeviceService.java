@@ -1,12 +1,19 @@
 package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
+
 import io.vertx.codegen.annotations.VertxGen;
+
 import io.vertx.core.AsyncResult;
+
 import io.vertx.core.Handler;
+
 import io.vertx.core.Vertx;
+
 import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
+
 import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
@@ -22,14 +29,19 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
  */
 @ProxyGen
 @VertxGen
-public interface DeviceService {
+public interface DeviceService
+{
 
     String SERVICE_ADDRESS = "device.service";
 
     /**
      * Create a proxy instance for the device service
+     *
+     * @param vertx Vert.x instance
+     * @return DeviceService proxy instance
      */
-    static DeviceService createProxy(Vertx vertx) {
+    static DeviceService createProxy(Vertx vertx)
+    {
         return new ServiceProxyBuilder(vertx)
                 .setAddress(SERVICE_ADDRESS)
                 .build(DeviceService.class);
@@ -110,7 +122,7 @@ public interface DeviceService {
      * @param resultHandler Handler for async result containing device_id, is_monitoring_enabled, monitoring_enabled_at
      */
     void deviceEnableMonitoring(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
-    
+
     /**
      * Disable monitoring for a device (does not change monitoring_enabled_at).
      *
@@ -118,6 +130,16 @@ public interface DeviceService {
      * @param resultHandler Handler for async result containing device_id, is_monitoring_enabled, monitoring_enabled_at
      */
     void deviceDisableMonitoring(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
+
+    /**
+     * Provision devices and enable monitoring (bulk operation).
+     * Sets is_provisioned=true AND is_monitoring_enabled=true for multiple devices.
+     * Only provisions devices that are currently unprovisioned (is_provisioned=false).
+     *
+     * @param deviceIds List of device IDs to provision
+     * @param resultHandler Handler for async result containing JsonArray with results for each device
+     */
+    void deviceProvisionAndEnableMonitoring(JsonArray deviceIds, Handler<AsyncResult<JsonArray>> resultHandler);
 
     /**
      * Create device from discovery result (called after successful discovery)
@@ -128,4 +150,5 @@ public interface DeviceService {
      * @param resultHandler Handler for the async result containing JsonObject with creation result
      */
     void deviceCreateFromDiscovery(JsonObject deviceData, Handler<AsyncResult<JsonObject>> resultHandler);
+
 }

@@ -1,16 +1,27 @@
 package com.nmslite.services.impl;
 
 import com.nmslite.services.CredentialProfileService;
+
 import com.nmslite.utils.PasswordUtil;
+
 import io.vertx.core.AsyncResult;
+
 import io.vertx.core.Handler;
+
 import io.vertx.core.Vertx;
+
 import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
+
 import io.vertx.pgclient.PgPool;
+
 import io.vertx.sqlclient.Row;
+
 import io.vertx.sqlclient.Tuple;
+
 import org.slf4j.Logger;
+
 import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
@@ -22,21 +33,39 @@ import java.util.UUID;
  * - Credential profile CRUD operations
  * - Password encryption/decryption for secure storage
  */
-public class CredentialProfileServiceImpl implements CredentialProfileService {
+public class CredentialProfileServiceImpl implements CredentialProfileService
+{
 
     private static final Logger logger = LoggerFactory.getLogger(CredentialProfileServiceImpl.class);
+
     private final Vertx vertx;
+
     private final PgPool pgPool;
 
-    public CredentialProfileServiceImpl(Vertx vertx, PgPool pgPool) {
+    /**
+     * Constructor for CredentialProfileServiceImpl
+     *
+     * @param vertx Vert.x instance
+     * @param pgPool PostgreSQL connection pool
+     */
+    public CredentialProfileServiceImpl(Vertx vertx, PgPool pgPool)
+    {
         this.vertx = vertx;
+
         this.pgPool = pgPool;
     }
 
+    /**
+     * Get list of credential profiles
+     *
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void credentialList(Handler<AsyncResult<JsonArray>> resultHandler) {
+    public void credentialList(Handler<AsyncResult<JsonArray>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     SELECT credential_profile_id, profile_name, username, created_at, updated_at
                     FROM credential_profiles
@@ -45,9 +74,12 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
 
             pgPool.query(sql)
                     .execute()
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         JsonArray credentials = new JsonArray();
-                        for (Row row : rows) {
+
+                        for (Row row : rows)
+                        {
                             JsonObject credential = new JsonObject()
                                     .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                     .put("profile_name", row.getString("profile_name"))
@@ -55,23 +87,37 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
                                     .put("created_at", row.getLocalDateTime("created_at").toString())
                                     .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                         row.getLocalDateTime("updated_at").toString() : null);
+
                             credentials.add(credential);
                         }
+
                         blockingPromise.complete(credentials);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get credential profiles", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Create a new credential profile
+     *
+     * @param credentialData Credential profile data
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void credentialCreate(JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void credentialCreate(JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String profileName = credentialData.getString("profile_name");
+
             String username = credentialData.getString("username");
+
             String password = credentialData.getString("password");
 
             // ===== TRUST HANDLER VALIDATION =====
@@ -88,8 +134,10 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(profileName, username, encryptedPassword))
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         Row row = rows.iterator().next();
+
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
@@ -97,42 +145,70 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
                                 .put("username", row.getString("username"))
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("message", "Credential profile created successfully");
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to create credential profile", cause);
-                        if (cause.getMessage().contains("duplicate key")) {
+
+                        if (cause.getMessage().contains("duplicate key"))
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Profile name already exists"));
-                        } else {
+                        }
+                        else
+                        {
                             blockingPromise.fail(cause);
                         }
                     });
         }, resultHandler);
     }
 
+    /**
+     * Update an existing credential profile
+     *
+     * @param credentialId Credential profile ID
+     * @param credentialData Credential profile data to update
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void credentialUpdate(String credentialId, JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void credentialUpdate(String credentialId, JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String profileName = credentialData.getString("profile_name");
+
             String username = credentialData.getString("username");
+
             String password = credentialData.getString("password");
 
             StringBuilder sqlBuilder = new StringBuilder("UPDATE credential_profiles SET ");
+
             JsonArray params = new JsonArray();
+
             int paramIndex = 1;
 
-            if (profileName != null) {
+            if (profileName != null)
+            {
                 sqlBuilder.append("profile_name = $").append(paramIndex++).append(", ");
+
                 params.add(profileName);
             }
-            if (username != null) {
+
+            if (username != null)
+            {
                 sqlBuilder.append("username = $").append(paramIndex++).append(", ");
+
                 params.add(username);
             }
-            if (password != null) {
+
+            if (password != null)
+            {
                 String encryptedPassword = PasswordUtil.encryptPassword(password);
+
                 sqlBuilder.append("password_encrypted = $").append(paramIndex++).append(", ");
+
                 params.add(encryptedPassword);
             }
 
@@ -141,44 +217,67 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
 
             // Remove trailing comma and space, add WHERE clause
             String sqlStr = sqlBuilder.toString();
-            if (sqlStr.endsWith(", ")) {
+
+            if (sqlStr.endsWith(", "))
+            {
                 sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
             }
+
             String sql = sqlStr + " WHERE credential_profile_id = $" + paramIndex +
                     " RETURNING credential_profile_id, profile_name, username";
+
             params.add(UUID.fromString(credentialId));
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.from(params.getList()))
-                    .onSuccess(rows -> {
-                        if (rows.size() == 0) {
+                    .onSuccess(rows ->
+                    {
+                        if (rows.size() == 0)
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Credential profile not found"));
+
                             return;
                         }
+
                         Row row = rows.iterator().next();
+
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("profile_name", row.getString("profile_name"))
                                 .put("username", row.getString("username"))
                                 .put("message", "Credential profile updated successfully");
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to update credential profile", cause);
-                        if (cause.getMessage().contains("duplicate key")) {
+
+                        if (cause.getMessage().contains("duplicate key"))
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Profile name already exists"));
-                        } else {
+                        }
+                        else
+                        {
                             blockingPromise.fail(cause);
                         }
                     });
         }, resultHandler);
     }
 
+    /**
+     * Delete a credential profile
+     *
+     * @param credentialId Credential profile ID
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void credentialDelete(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void credentialDelete(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             UUID credentialUuid = UUID.fromString(credentialId);
 
             // Step 1: Check if credential is used in devices table
@@ -190,16 +289,20 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
 
             pgPool.preparedQuery(checkDevicesSql)
                     .execute(Tuple.of(credentialUuid))
-                    .onSuccess(deviceRows -> {
+                    .onSuccess(deviceRows ->
+                    {
                         long deviceCount = deviceRows.iterator().next().getLong("device_count");
 
-                        if (deviceCount > 0) {
+                        if (deviceCount > 0)
+                        {
                             String errorMsg = String.format(
                                 "Cannot delete credential profile - it is currently in use by %d device(s). " +
                                 "Please remove or reassign these devices before deleting the credential profile.",
                                 deviceCount
                             );
+
                             blockingPromise.fail(new IllegalStateException(errorMsg));
+
                             return;
                         }
 
@@ -212,16 +315,20 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
 
                         pgPool.preparedQuery(checkDiscoverySql)
                                 .execute(Tuple.of(credentialUuid))
-                                .onSuccess(discoveryRows -> {
+                                .onSuccess(discoveryRows ->
+                                {
                                     long discoveryCount = discoveryRows.iterator().next().getLong("discovery_count");
 
-                                    if (discoveryCount > 0) {
+                                    if (discoveryCount > 0)
+                                    {
                                         String errorMsg = String.format(
                                             "Cannot delete credential profile - it is currently in use by %d discovery profile(s). " +
                                             "Please remove it from these discovery profiles before deleting.",
                                             discoveryCount
                                         );
+
                                         blockingPromise.fail(new IllegalStateException(errorMsg));
+
                                         return;
                                     }
 
@@ -233,38 +340,57 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
 
                                     pgPool.preparedQuery(deleteSql)
                                             .execute(Tuple.of(credentialUuid))
-                                            .onSuccess(deleteRows -> {
-                                                if (deleteRows.rowCount() == 0) {
+                                            .onSuccess(deleteRows ->
+                                            {
+                                                if (deleteRows.rowCount() == 0)
+                                                {
                                                     blockingPromise.fail(new IllegalArgumentException("Credential profile not found"));
+
                                                     return;
                                                 }
+
                                                 JsonObject result = new JsonObject()
                                                         .put("success", true)
                                                         .put("credential_profile_id", credentialId)
                                                         .put("message", "Credential profile deleted successfully");
+
                                                 blockingPromise.complete(result);
                                             })
-                                            .onFailure(cause -> {
+                                            .onFailure(cause ->
+                                            {
                                                 logger.error("Failed to delete credential profile", cause);
+
                                                 blockingPromise.fail(cause);
                                             });
                                 })
-                                .onFailure(cause -> {
+                                .onFailure(cause ->
+                                {
                                     logger.error("Failed to check discovery profile usage", cause);
+
                                     blockingPromise.fail(cause);
                                 });
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to check device usage", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get credential profile by ID
+     *
+     * @param credentialId Credential profile ID
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void credentialGetById(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void credentialGetById(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
                     FROM credential_profiles
@@ -273,13 +399,17 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(credentialId)))
-                    .onSuccess(rows -> {
-                        if (rows.size() == 0) {
+                    .onSuccess(rows ->
+                    {
+                        if (rows.size() == 0)
+                        {
                             blockingPromise.complete(new JsonObject().put("found", false));
+
                             return;
                         }
 
                         Row row = rows.iterator().next();
+
                         // Decrypt password for response (be careful with this in production)
                         String decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
 
@@ -292,28 +422,43 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                     row.getLocalDateTime("updated_at").toString() : null);
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get credential profile by ID", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get credential profiles by IDs
+     *
+     * @param credentialIds Array of credential profile IDs
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void credentialGetByIds(JsonArray credentialIds, Handler<AsyncResult<JsonObject>> resultHandler) {
-        vertx.executeBlocking(blockingPromise -> {
-            if (credentialIds.isEmpty()) {
+    public void credentialGetByIds(JsonArray credentialIds, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
+        vertx.executeBlocking(blockingPromise ->
+        {
+            if (credentialIds.isEmpty())
+            {
                 blockingPromise.complete(new JsonObject()
                     .put("success", true)
                     .put("data", new JsonObject().put("credentials", new JsonArray())));
+
                 return;
             }
 
             // Convert JsonArray to UUID array for PostgreSQL
             UUID[] uuidArray = new UUID[credentialIds.size()];
-            for (int i = 0; i < credentialIds.size(); i++) {
+
+            for (int i = 0; i < credentialIds.size(); i++)
+            {
                 uuidArray[i] = UUID.fromString(credentialIds.getString(i));
             }
 
@@ -325,10 +470,12 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(uuidArray))
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         JsonArray credentials = new JsonArray();
 
-                        for (Row row : rows) {
+                        for (Row row : rows)
+                        {
                             // Decrypt password for discovery use
                             String decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
 
@@ -340,18 +487,23 @@ public class CredentialProfileServiceImpl implements CredentialProfileService {
                                     .put("created_at", row.getLocalDateTime("created_at").toString())
                                     .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                         row.getLocalDateTime("updated_at").toString() : null);
+
                             credentials.add(credential);
                         }
 
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("data", new JsonObject().put("credentials", credentials));
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get credential profiles by IDs", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
+
 }

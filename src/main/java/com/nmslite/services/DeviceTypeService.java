@@ -1,12 +1,19 @@
 package com.nmslite.services;
 
 import io.vertx.codegen.annotations.ProxyGen;
+
 import io.vertx.codegen.annotations.VertxGen;
+
 import io.vertx.core.AsyncResult;
+
 import io.vertx.core.Handler;
+
 import io.vertx.core.Vertx;
+
 import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
+
 import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
@@ -23,14 +30,19 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
  */
 @ProxyGen
 @VertxGen
-public interface DeviceTypeService {
+public interface DeviceTypeService
+{
 
     String SERVICE_ADDRESS = "devicetype.service";
 
     /**
      * Create a proxy instance for the device type service
+     *
+     * @param vertx Vert.x instance
+     * @return DeviceTypeService proxy instance
      */
-    static DeviceTypeService createProxy(Vertx vertx) {
+    static DeviceTypeService createProxy(Vertx vertx)
+    {
         return new ServiceProxyBuilder(vertx)
             .setAddress(SERVICE_ADDRESS)
             .build(DeviceTypeService.class);
@@ -42,6 +54,7 @@ public interface DeviceTypeService {
 
     /**
      * Get all device types (active by default)
+     *
      * @param includeInactive Include inactive device types (false = active only, true = all)
      * @param resultHandler Handler for the async result containing JsonArray of device types
      */
@@ -49,8 +62,10 @@ public interface DeviceTypeService {
 
     /**
      * Get device type by ID
+     *
      * @param deviceTypeId Device type ID
      * @param resultHandler Handler for the async result containing JsonObject with device type data or not found
      */
     void deviceTypeGetById(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler);
+
 }

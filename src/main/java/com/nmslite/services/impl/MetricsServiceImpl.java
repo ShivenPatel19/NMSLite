@@ -1,26 +1,40 @@
 package com.nmslite.services.impl;
 
 import com.nmslite.services.MetricsService;
+
 import io.vertx.core.AsyncResult;
+
 import io.vertx.core.Future;
+
 import io.vertx.core.Handler;
+
 import io.vertx.core.Promise;
+
 import io.vertx.core.Vertx;
+
 import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
+
 import io.vertx.pgclient.PgPool;
+
 import io.vertx.sqlclient.Row;
+
 import io.vertx.sqlclient.Tuple;
+
 import org.slf4j.Logger;
+
 import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
+
 import java.time.format.DateTimeFormatter;
+
 import java.util.UUID;
 
 /**
  * MetricsServiceImpl - Implementation of MetricsService
- * 
+ *
  * Provides metrics management operations including:
  * - Metrics CRUD operations
  * - Time-series data management
@@ -28,31 +42,60 @@ import java.util.UUID;
  * - Metrics aggregation and cleanup
  * - Dashboard data preparation
  */
-public class MetricsServiceImpl implements MetricsService {
+public class MetricsServiceImpl implements MetricsService
+{
 
     private static final Logger logger = LoggerFactory.getLogger(MetricsServiceImpl.class);
+
     private final Vertx vertx;
+
     private final PgPool pgPool;
 
-    public MetricsServiceImpl(Vertx vertx, PgPool pgPool) {
+    /**
+     * Constructor for MetricsServiceImpl
+     *
+     * @param vertx Vert.x instance
+     * @param pgPool PostgreSQL connection pool
+     */
+    public MetricsServiceImpl(Vertx vertx, PgPool pgPool)
+    {
         this.vertx = vertx;
+
         this.pgPool = pgPool;
     }
 
+    /**
+     * Create new metrics record
+     *
+     * @param metricsData Metrics data
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsCreate(JsonObject metricsData, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void metricsCreate(JsonObject metricsData, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String deviceId = metricsData.getString("device_id");
+
             Integer durationMs = metricsData.getInteger("duration_ms");
+
             Double cpuUsage = metricsData.getDouble("cpu_usage_percent");
+
             Double memoryUsage = metricsData.getDouble("memory_usage_percent");
+
             Long memoryTotal = metricsData.getLong("memory_total_bytes");
+
             Long memoryUsed = metricsData.getLong("memory_used_bytes");
+
             Long memoryFree = metricsData.getLong("memory_free_bytes");
+
             Double diskUsage = metricsData.getDouble("disk_usage_percent");
+
             Long diskTotal = metricsData.getLong("disk_total_bytes");
+
             Long diskUsed = metricsData.getLong("disk_used_bytes");
+
             Long diskFree = metricsData.getLong("disk_free_bytes");
 
             // ===== TRUST HANDLER VALIDATION =====
@@ -70,8 +113,10 @@ public class MetricsServiceImpl implements MetricsService {
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(deviceId), durationMs, cpuUsage, memoryUsage,
                                     memoryTotal, memoryUsed, memoryFree, diskUsage, diskTotal, diskUsed, diskFree))
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         Row row = rows.iterator().next();
+
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("metric_id", row.getUUID("metric_id").toString())
@@ -82,29 +127,49 @@ public class MetricsServiceImpl implements MetricsService {
                                 .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
                                 .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
                                 .put("message", "Metrics data stored successfully");
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to create metrics", cause);
-                        if (cause.getMessage().contains("foreign key")) {
+
+                        if (cause.getMessage().contains("foreign key"))
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Invalid device ID"));
-                        } else if (cause.getMessage().contains("chk_duration_positive")) {
+                        }
+                        else if (cause.getMessage().contains("chk_duration_positive"))
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Duration must be positive"));
-                        } else if (cause.getMessage().contains("chk_cpu_range") || 
-                                 cause.getMessage().contains("chk_memory_range") || 
-                                 cause.getMessage().contains("chk_disk_range")) {
+                        }
+                        else if (cause.getMessage().contains("chk_cpu_range") ||
+                                 cause.getMessage().contains("chk_memory_range") ||
+                                 cause.getMessage().contains("chk_disk_range"))
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Usage percentages must be between 0 and 100"));
-                        } else {
+                        }
+                        else
+                        {
                             blockingPromise.fail(cause);
                         }
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get paginated list of metrics
+     *
+     * @param page Page number
+     * @param pageSize Page size
+     * @param deviceId Optional device ID filter
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsList(int page, int pageSize, String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void metricsList(int page, int pageSize, String deviceId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             // Build SQL with optional device filter and ensure device is active
             StringBuilder sqlBuilder = new StringBuilder("""
                     SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
@@ -117,17 +182,24 @@ public class MetricsServiceImpl implements MetricsService {
                     """);
 
             JsonArray params = new JsonArray();
+
             int paramIndex = 1;
 
-            if (deviceId != null) {
+            if (deviceId != null)
+            {
                 sqlBuilder.append(" AND m.device_id = $").append(paramIndex++);
+
                 params.add(UUID.fromString(deviceId));
             }
 
             sqlBuilder.append(" ORDER BY m.timestamp DESC");
+
             sqlBuilder.append(" LIMIT $").append(paramIndex++);
+
             sqlBuilder.append(" OFFSET $").append(paramIndex);
+
             params.add(pageSize);
+
             params.add(page * pageSize);
 
             // Count query for pagination
@@ -139,23 +211,30 @@ public class MetricsServiceImpl implements MetricsService {
                     """);
 
             JsonArray countParams = new JsonArray();
-            if (deviceId != null) {
+
+            if (deviceId != null)
+            {
                 countSqlBuilder.append(" AND m.device_id = $1");
+
                 countParams.add(UUID.fromString(deviceId));
             }
 
             // Execute count query first
             pgPool.preparedQuery(countSqlBuilder.toString())
                     .execute(countParams.size() > 0 ? Tuple.from(countParams.getList()) : Tuple.tuple())
-                    .onSuccess(countRows -> {
+                    .onSuccess(countRows ->
+                    {
                         long total = countRows.iterator().next().getLong("total");
-                        
+
                         // Execute main query
                         pgPool.preparedQuery(sqlBuilder.toString())
                                 .execute(Tuple.from(params.getList()))
-                                .onSuccess(rows -> {
+                                .onSuccess(rows ->
+                                {
                                     JsonArray metrics = new JsonArray();
-                                    for (Row row : rows) {
+
+                                    for (Row row : rows)
+                                    {
                                         JsonObject metric = new JsonObject()
                                                 .put("metric_id", row.getUUID("metric_id").toString())
                                                 .put("device_id", row.getUUID("device_id").toString())
@@ -173,6 +252,7 @@ public class MetricsServiceImpl implements MetricsService {
                                                 .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                                 .put("disk_used_bytes", row.getLong("disk_used_bytes"))
                                                 .put("disk_free_bytes", row.getLong("disk_free_bytes"));
+
                                         metrics.add(metric);
                                     }
 
@@ -183,24 +263,37 @@ public class MetricsServiceImpl implements MetricsService {
                                                     .put("pageSize", pageSize)
                                                     .put("total", total)
                                                     .put("totalPages", (int) Math.ceil((double) total / pageSize)));
+
                                     blockingPromise.complete(result);
                                 })
-                                .onFailure(cause -> {
+                                .onFailure(cause ->
+                                {
                                     logger.error("Failed to get metrics list", cause);
+
                                     blockingPromise.fail(cause);
                                 });
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to count metrics", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get metric by ID
+     *
+     * @param metricId Metric ID
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsGet(String metricId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void metricsGet(String metricId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
                            m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
@@ -213,13 +306,17 @@ public class MetricsServiceImpl implements MetricsService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(metricId)))
-                    .onSuccess(rows -> {
-                        if (rows.size() == 0) {
+                    .onSuccess(rows ->
+                    {
+                        if (rows.size() == 0)
+                        {
                             blockingPromise.complete(new JsonObject().put("found", false));
+
                             return;
                         }
 
                         Row row = rows.iterator().next();
+
                         JsonObject result = new JsonObject()
                                 .put("found", true)
                                 .put("metric_id", row.getUUID("metric_id").toString())
@@ -238,21 +335,34 @@ public class MetricsServiceImpl implements MetricsService {
                                 .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                 .put("disk_used_bytes", row.getLong("disk_used_bytes"))
                                 .put("disk_free_bytes", row.getLong("disk_free_bytes"));
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get metric by ID", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Delete metrics older than specified days
+     *
+     * @param olderThanDays Number of days
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsDeleteOlderThan(int olderThanDays, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void metricsDeleteOlderThan(int olderThanDays, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
-            if (olderThanDays <= 0) {
+        vertx.executeBlocking(blockingPromise ->
+        {
+            if (olderThanDays <= 0)
+            {
                 blockingPromise.fail(new IllegalArgumentException("Days must be positive"));
+
                 return;
             }
 
@@ -263,26 +373,39 @@ public class MetricsServiceImpl implements MetricsService {
 
             pgPool.query(sql)
                     .execute()
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         int deletedCount = rows.rowCount();
+
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("deleted_count", deletedCount)
                                 .put("older_than_days", olderThanDays)
                                 .put("message", "Metrics cleanup completed successfully");
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to delete old metrics", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Delete all metrics for a device
+     *
+     * @param deviceId Device ID
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsDeleteAllByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void metricsDeleteAllByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     DELETE FROM metrics
                     WHERE device_id = $1
@@ -290,26 +413,41 @@ public class MetricsServiceImpl implements MetricsService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         int deletedCount = rows.rowCount();
+
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("device_id", deviceId)
                                 .put("deleted_count", deletedCount)
                                 .put("message", "All metrics for device deleted successfully");
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to delete metrics for device", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get paginated list of metrics for a device
+     *
+     * @param deviceId Device ID
+     * @param page Page number
+     * @param pageSize Page size
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsListByDevice(String deviceId, int page, int pageSize, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void metricsListByDevice(String deviceId, int page, int pageSize, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             // First verify device exists and is active
             String deviceCheckSql = """
                     SELECT device_name, ip_address
@@ -319,14 +457,19 @@ public class MetricsServiceImpl implements MetricsService {
 
             pgPool.preparedQuery(deviceCheckSql)
                     .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(deviceRows -> {
-                        if (deviceRows.size() == 0) {
+                    .onSuccess(deviceRows ->
+                    {
+                        if (deviceRows.size() == 0)
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Device not found or deleted"));
+
                             return;
                         }
 
                         Row deviceRow = deviceRows.iterator().next();
+
                         String deviceName = deviceRow.getString("device_name");
+
                         String ipAddress = deviceRow.getValue("ip_address").toString();
 
                         // Count query
@@ -338,7 +481,8 @@ public class MetricsServiceImpl implements MetricsService {
 
                         pgPool.preparedQuery(countSql)
                                 .execute(Tuple.of(UUID.fromString(deviceId)))
-                                .onSuccess(countRows -> {
+                                .onSuccess(countRows ->
+                                {
                                     long total = countRows.iterator().next().getLong("total");
 
                                     // Main query
@@ -355,9 +499,12 @@ public class MetricsServiceImpl implements MetricsService {
 
                                     pgPool.preparedQuery(sql)
                                             .execute(Tuple.of(UUID.fromString(deviceId), pageSize, page * pageSize))
-                                            .onSuccess(rows -> {
+                                            .onSuccess(rows ->
+                                            {
                                                 JsonArray metrics = new JsonArray();
-                                                for (Row row : rows) {
+
+                                                for (Row row : rows)
+                                                {
                                                     JsonObject metric = new JsonObject()
                                                             .put("metric_id", row.getUUID("metric_id").toString())
                                                             .put("device_id", row.getUUID("device_id").toString())
@@ -375,6 +522,7 @@ public class MetricsServiceImpl implements MetricsService {
                                                             .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                                             .put("disk_used_bytes", row.getLong("disk_used_bytes"))
                                                             .put("disk_free_bytes", row.getLong("disk_free_bytes"));
+
                                                     metrics.add(metric);
                                                 }
 
@@ -388,29 +536,44 @@ public class MetricsServiceImpl implements MetricsService {
                                                                 .put("pageSize", pageSize)
                                                                 .put("total", total)
                                                                 .put("totalPages", (int) Math.ceil((double) total / pageSize)));
+
                                                 blockingPromise.complete(result);
                                             })
-                                            .onFailure(cause -> {
+                                            .onFailure(cause ->
+                                            {
                                                 logger.error("Failed to get device metrics", cause);
+
                                                 blockingPromise.fail(cause);
                                             });
                                 })
-                                .onFailure(cause -> {
+                                .onFailure(cause ->
+                                {
                                     logger.error("Failed to count device metrics", cause);
+
                                     blockingPromise.fail(cause);
                                 });
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to verify device", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get latest metric for a device
+     *
+     * @param deviceId Device ID
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsGetLatestByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void metricsGetLatestByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
                            m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
@@ -425,13 +588,17 @@ public class MetricsServiceImpl implements MetricsService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows -> {
-                        if (rows.size() == 0) {
+                    .onSuccess(rows ->
+                    {
+                        if (rows.size() == 0)
+                        {
                             blockingPromise.complete(new JsonObject().put("found", false));
+
                             return;
                         }
 
                         Row row = rows.iterator().next();
+
                         JsonObject result = new JsonObject()
                                 .put("found", true)
                                 .put("metric_id", row.getUUID("metric_id").toString())
@@ -450,19 +617,29 @@ public class MetricsServiceImpl implements MetricsService {
                                 .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                 .put("disk_used_bytes", row.getLong("disk_used_bytes"))
                                 .put("disk_free_bytes", row.getLong("disk_free_bytes"));
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get latest metric for device", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get latest metrics for all monitoring-enabled devices
+     *
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsGetLatestAllDevices(Handler<AsyncResult<JsonArray>> resultHandler) {
+    public void metricsGetLatestAllDevices(Handler<AsyncResult<JsonArray>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     SELECT DISTINCT ON (d.device_id)
                            m.metric_id, m.device_id, m.timestamp, m.duration_ms,
@@ -477,11 +654,16 @@ public class MetricsServiceImpl implements MetricsService {
 
             pgPool.query(sql)
                     .execute()
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         JsonArray metrics = new JsonArray();
-                        for (Row row : rows) {
+
+                        for (Row row : rows)
+                        {
                             UUID deviceId = row.getUUID("device_id");
-                            if (deviceId == null) {
+
+                            if (deviceId == null)
+                            {
                                 continue; // Skip rows with null device_id
                             }
 
@@ -492,7 +674,8 @@ public class MetricsServiceImpl implements MetricsService {
                                     .put("device_type", row.getString("device_type"));
 
                             // Add metric data if available
-                            if (row.getUUID("metric_id") != null) {
+                            if (row.getUUID("metric_id") != null)
+                            {
                                 metric.put("metric_id", row.getUUID("metric_id").toString())
                                       .put("success", row.getBoolean("success"))
                                       .put("timestamp", row.getLocalDateTime("timestamp").toString())
@@ -507,32 +690,52 @@ public class MetricsServiceImpl implements MetricsService {
                                       .put("disk_used_bytes", row.getLong("disk_used_bytes"))
                                       .put("disk_free_bytes", row.getLong("disk_free_bytes"))
                                       .put("has_metrics", true);
-                            } else {
+                            }
+                            else
+                            {
                                 metric.put("has_metrics", false)
                                       .put("message", "No metrics data available");
                             }
+
                             metrics.add(metric);
                         }
+
                         blockingPromise.complete(metrics);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get latest metrics for all devices", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get metrics for a device within a time range
+     *
+     * @param deviceId Device ID
+     * @param startTime Start time (ISO 8601 format)
+     * @param endTime End time (ISO 8601 format)
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void metricsGetByDeviceTimeRange(String deviceId, String startTime, String endTime, Handler<AsyncResult<JsonArray>> resultHandler) {
+    public void metricsGetByDeviceTimeRange(String deviceId, String startTime, String endTime, Handler<AsyncResult<JsonArray>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
-            try {
+        vertx.executeBlocking(blockingPromise ->
+        {
+            try
+            {
                 // Parse and validate time strings
                 LocalDateTime start = LocalDateTime.parse(startTime, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+
                 LocalDateTime end = LocalDateTime.parse(endTime, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 
-                if (start.isAfter(end)) {
+                if (start.isAfter(end))
+                {
                     blockingPromise.fail(new IllegalArgumentException("Start time must be before end time"));
+
                     return;
                 }
 
@@ -550,9 +753,12 @@ public class MetricsServiceImpl implements MetricsService {
 
                 pgPool.preparedQuery(sql)
                         .execute(Tuple.of(UUID.fromString(deviceId), start, end))
-                        .onSuccess(rows -> {
+                        .onSuccess(rows ->
+                        {
                             JsonArray metrics = new JsonArray();
-                            for (Row row : rows) {
+
+                            for (Row row : rows)
+                            {
                                 JsonObject metric = new JsonObject()
                                         .put("metric_id", row.getUUID("metric_id").toString())
                                         .put("device_id", row.getUUID("device_id").toString())
@@ -570,15 +776,21 @@ public class MetricsServiceImpl implements MetricsService {
                                         .put("disk_total_bytes", row.getLong("disk_total_bytes"))
                                         .put("disk_used_bytes", row.getLong("disk_used_bytes"))
                                         .put("disk_free_bytes", row.getLong("disk_free_bytes"));
+
                                 metrics.add(metric);
                             }
+
                             blockingPromise.complete(metrics);
                         })
-                        .onFailure(cause -> {
+                        .onFailure(cause ->
+                        {
                             logger.error("Failed to get metrics by time range", cause);
+
                             blockingPromise.fail(cause);
                         });
-            } catch (Exception e) {
+            }
+            catch (Exception exception)
+            {
                 blockingPromise.fail(new IllegalArgumentException("Invalid time format. Use ISO 8601 format (yyyy-MM-ddTHH:mm:ss)"));
             }
         }, resultHandler);

@@ -1,17 +1,29 @@
 package com.nmslite.services.impl;
 
 import com.nmslite.services.DeviceTypeService;
+
 import io.vertx.core.AsyncResult;
+
 import io.vertx.core.Future;
+
 import io.vertx.core.Handler;
+
 import io.vertx.core.Promise;
+
 import io.vertx.core.Vertx;
+
 import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
+
 import io.vertx.pgclient.PgPool;
+
 import io.vertx.sqlclient.Row;
+
 import io.vertx.sqlclient.Tuple;
+
 import org.slf4j.Logger;
+
 import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
@@ -26,21 +38,40 @@ import java.util.UUID;
  *
  * NOTE: Users cannot create, update, or delete device types for security reasons
  */
-public class DeviceTypeServiceImpl implements DeviceTypeService {
+public class DeviceTypeServiceImpl implements DeviceTypeService
+{
 
     private static final Logger logger = LoggerFactory.getLogger(DeviceTypeServiceImpl.class);
+
     private final Vertx vertx;
+
     private final PgPool pgPool;
 
-    public DeviceTypeServiceImpl(Vertx vertx, PgPool pgPool) {
+    /**
+     * Constructor for DeviceTypeServiceImpl
+     *
+     * @param vertx Vert.x instance
+     * @param pgPool PostgreSQL connection pool
+     */
+    public DeviceTypeServiceImpl(Vertx vertx, PgPool pgPool)
+    {
         this.vertx = vertx;
+
         this.pgPool = pgPool;
     }
 
+    /**
+     * Get list of device types
+     *
+     * @param includeInactive Include inactive device types
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void deviceTypeList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler) {
+    public void deviceTypeList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     SELECT device_type_id, device_type_name, default_port, is_active, created_at
                     FROM device_types
@@ -50,30 +81,45 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
 
             pgPool.query(sql)
                     .execute()
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         JsonArray deviceTypes = new JsonArray();
-                        for (Row row : rows) {
+
+                        for (Row row : rows)
+                        {
                             JsonObject deviceType = new JsonObject()
                                     .put("device_type_id", row.getUUID("device_type_id").toString())
                                     .put("device_type_name", row.getString("device_type_name"))
                                     .put("default_port", row.getInteger("default_port"))
                                     .put("is_active", row.getBoolean("is_active"))
                                     .put("created_at", row.getLocalDateTime("created_at").toString());
+
                             deviceTypes.add(deviceType);
                         }
+
                         blockingPromise.complete(deviceTypes);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get device types", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get device type by ID
+     *
+     * @param deviceTypeId Device type ID
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void deviceTypeGetById(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void deviceTypeGetById(String deviceTypeId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     SELECT device_type_id, device_type_name, default_port, is_active, created_at
                     FROM device_types
@@ -82,13 +128,17 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(deviceTypeId)))
-                    .onSuccess(rows -> {
-                        if (rows.size() == 0) {
+                    .onSuccess(rows ->
+                    {
+                        if (rows.size() == 0)
+                        {
                             blockingPromise.complete(new JsonObject().put("found", false));
+
                             return;
                         }
 
                         Row row = rows.iterator().next();
+
                         JsonObject result = new JsonObject()
                                 .put("found", true)
                                 .put("device_type_id", row.getUUID("device_type_id").toString())
@@ -96,14 +146,16 @@ public class DeviceTypeServiceImpl implements DeviceTypeService {
                                 .put("default_port", row.getInteger("default_port"))
                                 .put("is_active", row.getBoolean("is_active"))
                                 .put("created_at", row.getLocalDateTime("created_at").toString());
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get device type by ID", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
-
 
 }

@@ -1,48 +1,79 @@
 package com.nmslite.services.impl;
 
 import com.nmslite.services.AvailabilityService;
+
 import io.vertx.core.AsyncResult;
+
 import io.vertx.core.Future;
+
 import io.vertx.core.Handler;
+
 import io.vertx.core.Promise;
+
 import io.vertx.core.Vertx;
+
 import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
+
 import io.vertx.pgclient.PgPool;
+
 import io.vertx.sqlclient.Row;
+
 import io.vertx.sqlclient.Tuple;
+
 import org.slf4j.Logger;
+
 import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
+
 import java.util.UUID;
 
 /**
  * AvailabilityServiceImpl - Implementation of AvailabilityService
- * 
+ *
  * Provides device availability status operations including:
  * - Current device availability status tracking
  * - Real-time status updates
  * - Device status monitoring
  * - Dashboard status views
  */
-public class AvailabilityServiceImpl implements AvailabilityService {
+public class AvailabilityServiceImpl implements AvailabilityService
+{
 
     private static final Logger logger = LoggerFactory.getLogger(AvailabilityServiceImpl.class);
+
     private final Vertx vertx;
+
     private final PgPool pgPool;
 
-    public AvailabilityServiceImpl(Vertx vertx, PgPool pgPool) {
+    /**
+     * Constructor for AvailabilityServiceImpl
+     *
+     * @param vertx Vert.x instance
+     * @param pgPool PostgreSQL connection pool
+     */
+    public AvailabilityServiceImpl(Vertx vertx, PgPool pgPool)
+    {
         this.vertx = vertx;
+
         this.pgPool = pgPool;
     }
 
+    /**
+     * Get list of all device availability statuses
+     *
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void availabilityListAll(Handler<AsyncResult<JsonArray>> resultHandler) {
+    public void availabilityListAll(Handler<AsyncResult<JsonArray>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
-                    SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks, 
+                    SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
                            da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
                            da.current_status, da.status_since, da.updated_at,
                            d.device_name, d.ip_address, d.device_type, d.is_monitoring_enabled
@@ -54,9 +85,12 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
             pgPool.query(sql)
                     .execute()
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         JsonArray availabilities = new JsonArray();
-                        for (Row row : rows) {
+
+                        for (Row row : rows)
+                        {
                             JsonObject availability = new JsonObject()
                                     .put("device_id", row.getUUID("device_id").toString())
                                     .put("device_name", row.getString("device_name"))
@@ -67,36 +101,51 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                     .put("successful_checks", row.getInteger("successful_checks"))
                                     .put("failed_checks", row.getInteger("failed_checks"))
                                     .put("availability_percent", row.getBigDecimal("availability_percent"))
-                                    .put("last_check_time", row.getLocalDateTime("last_check_time") != null ? 
+                                    .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
                                         row.getLocalDateTime("last_check_time").toString() : null)
-                                    .put("last_success_time", row.getLocalDateTime("last_success_time") != null ? 
+                                    .put("last_success_time", row.getLocalDateTime("last_success_time") != null ?
                                         row.getLocalDateTime("last_success_time").toString() : null)
-                                    .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ? 
+                                    .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ?
                                         row.getLocalDateTime("last_failure_time").toString() : null)
                                     .put("current_status", row.getString("current_status"))
-                                    .put("status_since", row.getLocalDateTime("status_since") != null ? 
+                                    .put("status_since", row.getLocalDateTime("status_since") != null ?
                                         row.getLocalDateTime("status_since").toString() : null)
-                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? 
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                         row.getLocalDateTime("updated_at").toString() : null);
+
                             availabilities.add(availability);
                         }
+
                         blockingPromise.complete(availabilities);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get all device availability statuses", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Create or update device availability status
+     *
+     * @param availabilityData Availability data
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void availabilityCreateOrUpdate(JsonObject availabilityData, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void availabilityCreateOrUpdate(JsonObject availabilityData, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String deviceId = availabilityData.getString("device_id");
+
             String status = availabilityData.getString("status");
+
             Long responseTime = availabilityData.getLong("response_time");
-            LocalDateTime checkedAt = availabilityData.getString("checked_at") != null ? 
+
+            LocalDateTime checkedAt = availabilityData.getString("checked_at") != null ?
                 LocalDateTime.parse(availabilityData.getString("checked_at")) : LocalDateTime.now();
 
             // ===== TRUST HANDLER VALIDATION =====
@@ -104,34 +153,42 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
             // Normalize status to lowercase
             String normalizedStatus = status.toLowerCase();
-            if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down")) {
+
+            if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down"))
+            {
                 blockingPromise.fail(new IllegalArgumentException("Status must be 'up' or 'down'"));
+
                 return;
             }
 
             // First verify device exists and is active
             String deviceCheckSql = """
-                    SELECT device_name, ip_address 
-                    FROM devices 
+                    SELECT device_name, ip_address
+                    FROM devices
                     WHERE device_id = $1 AND is_deleted = false
                     """;
 
             pgPool.preparedQuery(deviceCheckSql)
                     .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(deviceRows -> {
-                        if (deviceRows.size() == 0) {
+                    .onSuccess(deviceRows ->
+                    {
+                        if (deviceRows.size() == 0)
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Device not found or deleted"));
+
                             return;
                         }
 
                         Row deviceRow = deviceRows.iterator().next();
+
                         String deviceName = deviceRow.getString("device_name");
+
                         String ipAddress = deviceRow.getValue("ip_address").toString();
 
                         // Upsert availability record
                         String upsertSql = """
-                                INSERT INTO device_availability (device_id, total_checks, successful_checks, failed_checks, 
-                                                                availability_percent, last_check_time, last_success_time, 
+                                INSERT INTO device_availability (device_id, total_checks, successful_checks, failed_checks,
+                                                                availability_percent, last_check_time, last_success_time,
                                                                 last_failure_time, current_status, status_since, updated_at)
                                 VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $5, $5)
                                 ON CONFLICT (device_id) DO UPDATE SET
@@ -139,15 +196,15 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                     successful_checks = device_availability.successful_checks + $2,
                                     failed_checks = device_availability.failed_checks + $3,
                                     availability_percent = ROUND(
-                                        (device_availability.successful_checks + $2) * 100.0 / 
+                                        (device_availability.successful_checks + $2) * 100.0 /
                                         (device_availability.total_checks + 1), 2
                                     ),
                                     last_check_time = $5,
                                     last_success_time = CASE WHEN $2 = 1 THEN $5 ELSE device_availability.last_success_time END,
                                     last_failure_time = CASE WHEN $3 = 1 THEN $5 ELSE device_availability.last_failure_time END,
-                                    current_status = CASE 
-                                        WHEN device_availability.current_status != $8 THEN $8 
-                                        ELSE device_availability.current_status 
+                                    current_status = CASE
+                                        WHEN device_availability.current_status != $8 THEN $8
+                                        ELSE device_availability.current_status
                                     END,
                                     status_since = CASE
                                         WHEN device_availability.current_status != $8 THEN $5
@@ -158,16 +215,22 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                 """;
 
                         int successfulIncrement = normalizedStatus.equals("up") ? 1 : 0;
+
                         int failedIncrement = normalizedStatus.equals("down") ? 1 : 0;
+
                         double initialAvailability = normalizedStatus.equals("up") ? 100.0 : 0.0;
+
                         LocalDateTime successTime = normalizedStatus.equals("up") ? checkedAt : null;
+
                         LocalDateTime failureTime = normalizedStatus.equals("down") ? checkedAt : null;
 
                         pgPool.preparedQuery(upsertSql)
-                                .execute(Tuple.of(UUID.fromString(deviceId), successfulIncrement, failedIncrement, 
+                                .execute(Tuple.of(UUID.fromString(deviceId), successfulIncrement, failedIncrement,
                                                 initialAvailability, checkedAt, successTime, failureTime, normalizedStatus))
-                                .onSuccess(rows -> {
+                                .onSuccess(rows ->
+                                {
                                     Row row = rows.iterator().next();
+
                                     JsonObject result = new JsonObject()
                                             .put("success", true)
                                             .put("device_id", row.getUUID("device_id").toString())
@@ -183,32 +246,50 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                             .put("updated_at", row.getLocalDateTime("updated_at").toString())
                                             .put("response_time", responseTime)
                                             .put("message", "Device availability status updated successfully");
+
                                     blockingPromise.complete(result);
                                 })
-                                .onFailure(cause -> {
+                                .onFailure(cause ->
+                                {
                                     logger.error("Failed to create or update availability", cause);
-                                    if (cause.getMessage().contains("chk_availability_range")) {
+
+                                    if (cause.getMessage().contains("chk_availability_range"))
+                                    {
                                         blockingPromise.fail(new IllegalArgumentException("Availability percentage must be between 0 and 100"));
-                                    } else if (cause.getMessage().contains("chk_checks_consistency")) {
+                                    }
+                                    else if (cause.getMessage().contains("chk_checks_consistency"))
+                                    {
                                         blockingPromise.fail(new IllegalArgumentException("Check counts consistency error"));
-                                    } else {
+                                    }
+                                    else
+                                    {
                                         blockingPromise.fail(cause);
                                     }
                                 });
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to verify device", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Get device availability by device ID
+     *
+     * @param deviceId Device ID
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void availabilityGetByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void availabilityGetByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
-                    SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks, 
+                    SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
                            da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
                            da.current_status, da.status_since, da.updated_at,
                            d.device_name, d.ip_address, d.device_type, d.is_monitoring_enabled
@@ -219,13 +300,17 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows -> {
-                        if (rows.size() == 0) {
+                    .onSuccess(rows ->
+                    {
+                        if (rows.size() == 0)
+                        {
                             blockingPromise.complete(new JsonObject().put("found", false));
+
                             return;
                         }
 
                         Row row = rows.iterator().next();
+
                         JsonObject result = new JsonObject()
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
@@ -237,30 +322,41 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                 .put("successful_checks", row.getInteger("successful_checks"))
                                 .put("failed_checks", row.getInteger("failed_checks"))
                                 .put("availability_percent", row.getBigDecimal("availability_percent"))
-                                .put("last_check_time", row.getLocalDateTime("last_check_time") != null ? 
+                                .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
                                     row.getLocalDateTime("last_check_time").toString() : null)
-                                .put("last_success_time", row.getLocalDateTime("last_success_time") != null ? 
+                                .put("last_success_time", row.getLocalDateTime("last_success_time") != null ?
                                     row.getLocalDateTime("last_success_time").toString() : null)
-                                .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ? 
+                                .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ?
                                     row.getLocalDateTime("last_failure_time").toString() : null)
                                 .put("current_status", row.getString("current_status"))
-                                .put("status_since", row.getLocalDateTime("status_since") != null ? 
+                                .put("status_since", row.getLocalDateTime("status_since") != null ?
                                     row.getLocalDateTime("status_since").toString() : null)
-                                .put("updated_at", row.getLocalDateTime("updated_at") != null ? 
+                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                     row.getLocalDateTime("updated_at").toString() : null);
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to get device availability", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
+    /**
+     * Delete device availability by device ID
+     *
+     * @param deviceId Device ID
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void availabilityDeleteByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void availabilityDeleteByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             String sql = """
                     DELETE FROM device_availability
                     WHERE device_id = $1
@@ -268,8 +364,10 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
             pgPool.preparedQuery(sql)
                     .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows -> {
+                    .onSuccess(rows ->
+                    {
                         int deletedCount = rows.rowCount();
+
                         JsonObject result = new JsonObject()
                                 .put("success", true)
                                 .put("device_id", deviceId)
@@ -277,28 +375,42 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                 .put("message", deletedCount > 0 ?
                                     "Device availability status deleted successfully" :
                                     "No availability status found for device");
+
                         blockingPromise.complete(result);
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to delete device availability", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
 
-
-
+    /**
+     * Update device availability status
+     *
+     * @param deviceId Device ID
+     * @param status Device status (up/down)
+     * @param responseTime Response time in milliseconds
+     * @param resultHandler Handler for the async result
+     */
     @Override
-    public void availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime, Handler<AsyncResult<JsonObject>> resultHandler) {
+    public void availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime, Handler<AsyncResult<JsonObject>> resultHandler)
+    {
 
-        vertx.executeBlocking(blockingPromise -> {
+        vertx.executeBlocking(blockingPromise ->
+        {
             // ===== TRUST HANDLER VALIDATION =====
             // No validation here - handler has already validated all input
 
             // Normalize status to lowercase
             String normalizedStatus = status.toLowerCase();
-            if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down")) {
+
+            if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down"))
+            {
                 blockingPromise.fail(new IllegalArgumentException("Status must be 'up' or 'down'"));
+
                 return;
             }
 
@@ -311,18 +423,25 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
             pgPool.preparedQuery(deviceCheckSql)
                     .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(deviceRows -> {
-                        if (deviceRows.size() == 0) {
+                    .onSuccess(deviceRows ->
+                    {
+                        if (deviceRows.size() == 0)
+                        {
                             blockingPromise.fail(new IllegalArgumentException("Device not found or deleted"));
+
                             return;
                         }
 
                         Row deviceRow = deviceRows.iterator().next();
+
                         String deviceName = deviceRow.getString("device_name");
+
                         String ipAddress = deviceRow.getValue("ip_address").toString();
 
                         LocalDateTime now = LocalDateTime.now();
+
                         int successfulIncrement = normalizedStatus.equals("up") ? 1 : 0;
+
                         int failedIncrement = normalizedStatus.equals("down") ? 1 : 0;
 
                         // Update availability record
@@ -352,13 +471,17 @@ public class AvailabilityServiceImpl implements AvailabilityService {
 
                         pgPool.preparedQuery(updateSql)
                                 .execute(Tuple.of(successfulIncrement, failedIncrement, now, normalizedStatus, UUID.fromString(deviceId)))
-                                .onSuccess(rows -> {
-                                    if (rows.size() == 0) {
+                                .onSuccess(rows ->
+                                {
+                                    if (rows.size() == 0)
+                                    {
                                         blockingPromise.fail(new IllegalArgumentException("Device availability record not found"));
+
                                         return;
                                     }
 
                                     Row row = rows.iterator().next();
+
                                     JsonObject result = new JsonObject()
                                             .put("success", true)
                                             .put("device_id", row.getUUID("device_id").toString())
@@ -374,19 +497,23 @@ public class AvailabilityServiceImpl implements AvailabilityService {
                                             .put("updated_at", row.getLocalDateTime("updated_at").toString())
                                             .put("response_time", responseTime)
                                             .put("message", "Device status updated successfully");
+
                                     blockingPromise.complete(result);
                                 })
-                                .onFailure(cause -> {
+                                .onFailure(cause ->
+                                {
                                     logger.error("Failed to update device status", cause);
+
                                     blockingPromise.fail(cause);
                                 });
                     })
-                    .onFailure(cause -> {
+                    .onFailure(cause ->
+                    {
                         logger.error("Failed to verify device", cause);
+
                         blockingPromise.fail(cause);
                     });
         }, resultHandler);
     }
-
 
 }

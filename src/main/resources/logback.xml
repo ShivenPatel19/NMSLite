@@ -1,41 +1,56 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
 
-    <!-- Console Appender - Simplified logging for clean development -->
+    <!--
+    NMSLite Logging Configuration
+
+    Controlled by application.conf and system properties set at startup:
+    - nmslite.log.level: TRACE, DEBUG, INFO, WARN, ERROR, OFF (default: INFO)
+    - nmslite.log.file.path: Log file path (default: logs/nmslite.log)
+    - nmslite.log.file.max.history: Days to keep logs (default: 30)
+    - nmslite.log.file.max.size: Maximum total log size (default: 1GB)
+
+    To disable logging: Set logging.enabled=false in application.conf
+    To disable file logging: Set logging.file.enabled=false in application.conf
+    To disable console logging: Set logging.console.enabled=false in application.conf
+    -->
+
+    <!-- Console Appender -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
 
-    <!--
-    FILE LOGGING DISABLED - Uncomment below if file logging is needed
-
+    <!-- File Appender with Rolling -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>logs/nmslite.log</file>
+        <file>${nmslite.log.file.path:-logs/nmslite.log}</file>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>logs/nmslite.%d{yyyy-MM-dd}.log</fileNamePattern>
-            <maxHistory>30</maxHistory>
-            <totalSizeCap>1GB</totalSizeCap>
+            <fileNamePattern>${nmslite.log.file.path:-logs/nmslite}.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>${nmslite.log.file.max.history:-30}</maxHistory>
+            <totalSizeCap>${nmslite.log.file.max.size:-1GB}</totalSizeCap>
         </rollingPolicy>
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
-    -->
 
-    <!-- Logger configurations - Console only -->
-    <logger name="com.nmslite" level="INFO" additivity="false">
-        <appender-ref ref="CONSOLE"/>
+    <!-- Application logger -->
+    <logger name="com.nmslite" level="${nmslite.log.level:-INFO}" additivity="false">
+        <appender-ref ref="${nmslite.log.console.appender:-CONSOLE}"/>
+        <appender-ref ref="${nmslite.log.file.appender:-FILE}"/>
     </logger>
 
-    <logger name="io.vertx" level="INFO" additivity="false">
-        <appender-ref ref="CONSOLE"/>
+    <!-- Vert.x logger (less verbose) -->
+    <logger name="io.vertx" level="WARN" additivity="false">
+        <appender-ref ref="${nmslite.log.console.appender:-CONSOLE}"/>
+        <appender-ref ref="${nmslite.log.file.appender:-FILE}"/>
     </logger>
 
-    <!-- Root logger - Console only -->
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
+    <!-- Root logger -->
+    <root level="${nmslite.log.level:-INFO}">
+        <appender-ref ref="${nmslite.log.console.appender:-CONSOLE}"/>
+        <appender-ref ref="${nmslite.log.file.appender:-FILE}"/>
     </root>
-    
+
 </configuration>
