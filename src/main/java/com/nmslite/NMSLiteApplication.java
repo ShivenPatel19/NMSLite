@@ -223,7 +223,7 @@ public class NMSLiteApplication extends AbstractVerticle
 
                 startPromise.fail(cause);
             });
-    }
+    }status
 
     /**
      * Deploys the DatabaseVerticle with database configuration.
