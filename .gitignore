@@ -32,6 +32,10 @@ polling_failed/
 test-results/
 *-test.log
 
+# Testing and development
+charts/
+curls/
+
 # Temporary files
 *.tmp
 *.temp
@@ -58,6 +62,7 @@ secrets.json
 *.db
 *.sqlite
 !database/
+database/queries.sql
 
 # Documentation (exclude generated docs)
 API_DOCUMENTATION.md
