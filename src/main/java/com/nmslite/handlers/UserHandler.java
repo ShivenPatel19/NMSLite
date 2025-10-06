@@ -293,4 +293,29 @@ public class UserHandler
             }
         });
     }
+
+    /**
+     * Logout a user (client-side token invalidation).
+     *
+     * Since JWT tokens are stateless, this endpoint simply returns a success response.
+     * The client should discard the JWT token upon receiving this response.
+     *
+     * @param ctx routing context containing the HTTP request and response
+     */
+    public void logoutUser(RoutingContext ctx)
+    {
+        // Extract user info from JWT token (set by auth middleware)
+        JsonObject user = ctx.get("user");
+
+        String username = user != null ? user.getString("username") : "unknown";
+
+        logger.info("🚪 User logout request: {}", username);
+
+        JsonObject response = new JsonObject()
+            .put("success", true)
+            .put("message", "Logout successful - please discard your JWT token");
+
+        ExceptionUtil.handleSuccess(ctx, response);
+    }
 }
+

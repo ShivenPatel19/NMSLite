@@ -1,5 +1,5 @@
 logging:
-  enabled: true              # Device results still stream to stdout, even if disabled
+  enabled: true             # Device results still stream to stdout, even if its disabled.
 
 timing:
   enabled: true              # Enable Go-side timestamp and duration calculation
@@ -9,11 +9,9 @@ max_workers: 30
 discovery:
   enabled: true
   timeout_seconds: 30        # Overall timeout per IP (seconds)
-  connection_timeout: 5      # Timeout per credential attempt (seconds)
-  retry_count: 2             # Number of retries per credential
+  connection_timeout: 10     # Timeout per credential attempt (seconds) - matches Java default
 
 metrics:
   enabled: true
   timeout_seconds: 60        # Overall timeout per device (seconds)
   connection_timeout: 10     # Timeout per device connection attempt (seconds)
-  retry_count: 2             # Number of retries per device

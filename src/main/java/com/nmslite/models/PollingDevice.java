@@ -49,6 +49,9 @@ public class PollingDevice
 
     public long pollingIntervalSeconds;  // devices.polling_interval_seconds
 
+    // Global configuration (from config file, same for all devices)
+    public int connectionTimeoutSeconds; // device.defaults.connection.timeout.seconds (NOT in database)
+
     // Timestamps
     public Instant monitoringEnabledAt;  // devices.monitoring_enabled_at (anchor for scheduling)
 
@@ -65,7 +68,7 @@ public class PollingDevice
     /**
      * Converts the PollingDevice to GoEngine JSON format for metrics collection.
      *
-     * GoEngine expects:
+     * GoEngine v7.0.0 expects:
      * {
      *   "address": "10.0.0.1",
      *   "device_type": "server linux",
@@ -73,8 +76,10 @@ public class PollingDevice
      *   "password": "password",
      *   "port": 22,
      *   "timeout_seconds": 60,
-     *   "retry_count": 2
+     *   "connection_timeout": 10
      * }
+     *
+     * Note: retry_count is handled by Java backend, not passed to GoEngine v7.0.0
      *
      * @return JsonObject formatted for GoEngine consumption
      */
@@ -87,7 +92,8 @@ public class PollingDevice
             .put("password", password)
             .put("port", port)
             .put("timeout_seconds", timeoutSeconds)
-            .put("retry_count", retryCount);
+            .put("connection_timeout", connectionTimeoutSeconds);
+            // retry_count handled by Java, not passed to GoEngine v7.0.0
     }
 
     /**

@@ -342,7 +342,7 @@ public class DeviceServiceImpl implements DeviceService
         {
             String sql = """
                     SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
+                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name, cp.password_encrypted,
                            d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
                            d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
                            d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.last_polled_at, d.monitoring_enabled_at
@@ -375,6 +375,7 @@ public class DeviceServiceImpl implements DeviceService
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("username", row.getString("username"))
                                 .put("credential_profile_name", row.getString("credential_profile_name"))
+                                .put("password_encrypted", row.getString("password_encrypted"))
                                 .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                 .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
                                 .put("timeout_seconds", row.getInteger("timeout_seconds"))

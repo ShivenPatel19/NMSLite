@@ -53,6 +53,10 @@ public class NetworkConnectivityUtil
      * Uses fping's batch mode: writes all IPs to stdin and reads results from stdout.
      * This is much more efficient than running individual fping processes.
      *
+     * 2-Level Timeout Hierarchy:
+     * - Level 2: Per-IP timeout (tools.fping.timeout.seconds) - fping -t parameter
+     * - Level 1: Batch operation timeout (fping.batch.blocking.timeout.seconds) - process.waitFor
+     *
      * @param vertx Vert.x instance
      * @param ipAddresses List of IP addresses to check
      * @param config Configuration object
@@ -71,7 +75,11 @@ public class NetworkConnectivityUtil
 
         String fpingPath = config.getString("tools.fping.path", "fping");
 
-        int timeoutSeconds = config.getInteger("tools.fping.timeout.seconds", 5);
+        // Level 2: Per-IP timeout (fping -t parameter)
+        int perIpTimeoutSeconds = config.getInteger("tools.fping.timeout.seconds", 5);
+
+        // Level 1: Batch operation timeout (process.waitFor)
+        int batchTimeoutSeconds = config.getInteger("fping.batch.blocking.timeout.seconds", 180);
 
         vertx.executeBlocking(blockingPromise ->
         {
@@ -81,7 +89,7 @@ public class NetworkConnectivityUtil
             {
                 // fping batch mode: -a (show alive), -q (quiet), -t (timeout in ms)
                 ProcessBuilder pb = new ProcessBuilder(
-                    fpingPath, "-a", "-q", "-t", String.valueOf(timeoutSeconds * 1000)
+                    fpingPath, "-a", "-q", "-t", String.valueOf(perIpTimeoutSeconds * 1000)
                 );
 
                 Process process = pb.start();
@@ -97,14 +105,14 @@ public class NetworkConnectivityUtil
                     }
                 } // Writer closed here, signals EOF to fping
 
-                // Wait for process to complete
-                boolean finished = process.waitFor(timeoutSeconds + 10, TimeUnit.SECONDS);
+                // Wait for process to complete using configured batch timeout
+                boolean finished = process.waitFor(batchTimeoutSeconds, TimeUnit.SECONDS);
 
                 if (!finished)
                 {
                     process.destroyForcibly();
 
-                    logger.warn("Batch fping timeout for {} IPs", ipAddresses.size());
+                    logger.warn("Batch fping timeout for {} IPs after {} seconds", ipAddresses.size(), batchTimeoutSeconds);
 
                     blockingPromise.complete(results);
 
@@ -156,6 +164,10 @@ public class NetworkConnectivityUtil
      * Uses Java parallel streams to check multiple ports concurrently.
      * Much faster than sequential port checks.
      *
+     * 2-Level Timeout Hierarchy:
+     * - Level 2: Per-socket timeout (tools.port.check.timeout.seconds)
+     * - Level 1: Batch operation timeout (port.check.batch.blocking.timeout.seconds)
+     *
      * @param vertx Vert.x instance
      * @param ipAddresses List of IP addresses to check
      * @param port Port number to check
@@ -173,7 +185,8 @@ public class NetworkConnectivityUtil
             return promise.future();
         }
 
-        int timeoutSeconds = config.getInteger("tools.port.check.timeout.seconds", 5);
+        // Level 2: Per-socket timeout (TCP connection timeout)
+        int perSocketTimeoutSeconds = config.getInteger("tools.port.check.timeout.seconds", 5);
 
         vertx.executeBlocking(blockingPromise ->
         {
@@ -186,13 +199,16 @@ public class NetworkConnectivityUtil
 
                 try (Socket socket = new Socket())
                 {
-                    socket.connect(new InetSocketAddress(ip, port), timeoutSeconds * 1000);
+                    socket.connect(new InetSocketAddress(ip, port), perSocketTimeoutSeconds * 1000);
 
                     portOpen = true;
+
+                    logger.debug("Port {} open on {}", port, ip);
                 }
                 catch (IOException exception)
                 {
-                    // Port not reachable
+                    // Port not reachable (timeout, connection refused, etc.)
+                    logger.debug("Port {} not reachable on {}: {}", port, ip, exception.getMessage());
                 }
 
                 synchronized (results)

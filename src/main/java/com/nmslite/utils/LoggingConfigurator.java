@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory;
  * - Set log level (TRACE, DEBUG, INFO, WARN, ERROR, OFF)
  * - Enable/disable file logging
  * - Enable/disable console logging
- * - Configure log file path and rolling policy
+ * - Configure log file path
  *
  * Configuration in application.conf:
  * logging {
@@ -27,8 +27,6 @@ import org.slf4j.LoggerFactory;
  *   file.path = "logs/nmslite.log"   # Log file path
  *   file.enabled = true               # Enable file logging
  *   console.enabled = true            # Enable console logging
- *   file.max.history = 30             # Days to keep logs
- *   file.max.size = "1GB"             # Maximum total log size
  * }
  */
 public class LoggingConfigurator
@@ -54,18 +52,10 @@ public class LoggingConfigurator
 
         String filePath = loggingConfig.getString("file.path", "logs/nmslite.log");
 
-        Integer maxHistory = loggingConfig.getInteger("file.max.history", 30);
-
-        String maxSize = loggingConfig.getString("file.max.size", "1GB");
-
         // Set system properties for logback.xml
         System.setProperty("nmslite.log.level", loggingEnabled ? logLevel : "OFF");
 
         System.setProperty("nmslite.log.file.path", filePath);
-
-        System.setProperty("nmslite.log.file.max.history", maxHistory.toString());
-
-        System.setProperty("nmslite.log.file.max.size", maxSize);
 
         // Configure appenders based on enabled flags
         if (!consoleEnabled)
@@ -148,10 +138,6 @@ public class LoggingConfigurator
             if (fileEnabled)
             {
                 logger.info("Log File Path: {}", filePath);
-
-                logger.info("Max History: {} days", maxHistory);
-
-                logger.info("Max Size: {}", maxSize);
             }
 
             logger.info("=".repeat(60));

@@ -7,8 +7,6 @@
     Controlled by application.conf and system properties set at startup:
     - nmslite.log.level: TRACE, DEBUG, INFO, WARN, ERROR, OFF (default: INFO)
     - nmslite.log.file.path: Log file path (default: logs/nmslite.log)
-    - nmslite.log.file.max.history: Days to keep logs (default: 30)
-    - nmslite.log.file.max.size: Maximum total log size (default: 1GB)
 
     To disable logging: Set logging.enabled=false in application.conf
     To disable file logging: Set logging.file.enabled=false in application.conf
@@ -22,18 +20,16 @@
         </encoder>
     </appender>
 
-    <!-- File Appender with Rolling -->
-    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <!-- File Appender (Single File - No Rotation) -->
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
         <file>${nmslite.log.file.path:-logs/nmslite.log}</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${nmslite.log.file.path:-logs/nmslite}.%d{yyyy-MM-dd}.log</fileNamePattern>
-            <maxHistory>${nmslite.log.file.max.history:-30}</maxHistory>
-            <totalSizeCap>${nmslite.log.file.max.size:-1GB}</totalSizeCap>
-        </rollingPolicy>
         <encoder>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
+
+    <!-- NULL Appender (for disabling specific appenders) -->
+    <appender name="NULL" class="ch.qos.logback.core.helpers.NOPAppender"/>
 
     <!-- Application logger -->
     <logger name="com.nmslite" level="${nmslite.log.level:-INFO}" additivity="false">

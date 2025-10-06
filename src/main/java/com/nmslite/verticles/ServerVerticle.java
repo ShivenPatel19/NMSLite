@@ -207,8 +207,11 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void setupUserRoutes(Router router)
     {
-        // User Authentication APIs (No authentication required)
+        // User Authentication APIs (No authentication required for login)
         router.post("/api/auth/login").handler(userHandler::authenticateUser);
+
+        // User Logout API (Authentication required)
+        router.post("/api/auth/logout").handler(authMiddleware.requireAuthentication()).handler(userHandler::logoutUser);
 
         // User Management APIs (Authentication required)
         router.get("/api/users").handler(authMiddleware.requireAuthentication()).handler(userHandler::getUsers);
@@ -266,33 +269,24 @@ public class ServerVerticle extends AbstractVerticle
         // Listing routes split by provision status
         router.get("/api/devices/discovered").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDiscoveredDevices);
 
-        router.get("/api/devices/provisioned").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getProvisionedDevices);
-        // REMOVED - Manual device creation not needed (devices created via discovery only)
-        // router.post("/api/devices").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::createDevice);
-
         // Provision devices (bulk operation - sets is_provisioned=true AND is_monitoring_enabled=true)
         router.post("/api/devices/provision").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::provisionAndEnableMonitoring);
 
-        router.put("/api/devices/:id/config").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::updateDeviceConfig);
+        // Get provisioned devices
+        router.get("/api/devices/provisioned").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getProvisionedDevices);
 
-        router.delete("/api/devices/:id").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::softDeleteDevice);
+        router.put("/api/devices/:id/config").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::updateDeviceConfig);
 
         router.post("/api/devices/:id/monitoring/enable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::enableMonitoring);
 
         router.post("/api/devices/:id/monitoring/disable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::disableMonitoring);
 
+        router.delete("/api/devices/:id").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::softDeleteDevice);
+
         router.post("/api/devices/:id/restore").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::restoreDevice);
 
         // Device Types (Read-Only) - Authentication required
         router.get("/api/device-types").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDeviceTypes);
-
-        // router.post("/api/devices/:profileId/provision").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::provisionDevicesFromProfile);
-
-        // COMMENTED OUT FOR DISCOVERY TESTING - Metrics routes
-        // router.get("/api/devices/:id/metrics").handler(this::getDeviceMetrics);
-        // router.put("/api/devices/:id/status").handler(this::updateDeviceStatus);
-        // router.get("/api/metrics/devices/:id/latest").handler(this::getDeviceLatestMetrics);
-        // router.get("/api/metrics/devices/:id/availability").handler(this::getDeviceAvailability);
     }
 
     /**

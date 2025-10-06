@@ -1,5 +1,5 @@
 /*
- * METRIC POLLING FUNCTIONALITY - NOW ENABLED
+ * METRIC POLLING FUNCTIONALITY
  *
  * PollingMetricsVerticle provides continuous device monitoring capabilities.
  * Can be enabled/disabled via configuration: polling.enabled = true/false
@@ -9,7 +9,6 @@
  * - Batch fping for connectivity validation
  * - GoEngine metrics collection for alive devices
  * - Device availability tracking
- * - Real-time metrics updates to UI
  */
 
 package com.nmslite.verticles;
@@ -23,6 +22,8 @@ import com.nmslite.services.MetricsService;
 import com.nmslite.services.AvailabilityService;
 
 import com.nmslite.utils.PasswordUtil;
+
+import com.nmslite.utils.QueueBatchProcessor;
 
 import io.vertx.core.AbstractVerticle;
 
@@ -58,7 +59,6 @@ import java.util.stream.Collectors;
  * - Batch fping for connectivity validation
  * - GoEngine metrics collection for alive devices
  * - Device availability tracking
- * - Real-time metrics updates to UI
  */
 public class PollingMetricsVerticle extends AbstractVerticle
 {
@@ -70,9 +70,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     private String fpingPath;
 
-    private int intervalSeconds;
+    private int fpingTimeoutSeconds;         // fping per-IP timeout
 
-    private int networkTimeoutSeconds;
+    private int fpingBatchTimeoutSeconds;    // fping batch timeout
+
+    private int portCheckTimeoutSeconds;     // Port check per-socket timeout
 
     private int batchSize;
 
@@ -80,9 +82,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     private int blockingTimeoutGoEngine;
 
-    private int goEngineProcessTimeout;
+    private int defaultConnectionTimeoutSeconds;  // Default connection timeout for all devices
 
-    // NEW: Polling cycle configuration
+    // Polling cycle configuration
     private int cycleIntervalSeconds;        // How often scheduler checks for due devices
 
     private int maxCyclesSkipped;            // Auto-disable threshold
@@ -96,15 +98,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     private AvailabilityService availabilityService;
 
-    // Polling state
-    private volatile boolean isPolling = false;
-
-    private volatile JsonObject pollingStatus = new JsonObject()
-        .put("status", "idle")
-        .put("last_poll_time", 0)
-        .put("devices_polled", 0);
-
-    // NEW: In-memory device cache
+    // In-memory device cache
     // Key: device_id, Value: PollingDevice (persistent data + runtime state)
     private ConcurrentHashMap<String, PollingDevice> deviceCache;
 
@@ -125,39 +119,46 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         goEnginePath = toolsConfig.getString("goengine.path", "./goengine/goengine");
 
-        fpingPath = toolsConfig.getString("fping.path", "fping");
+        // Load fping configuration
+        JsonObject fpingConfig = toolsConfig.getJsonObject("fping", new JsonObject());
 
-        // Use device-specific timeout from device.defaults.connection.timeout.seconds
-        JsonObject deviceDefaults = config().getJsonObject("device", new JsonObject())
-                                           .getJsonObject("defaults", new JsonObject());
+        fpingPath = fpingConfig.getString("path", "fping");
 
-        networkTimeoutSeconds = deviceDefaults.getInteger("connection.timeout.seconds", 15);
+        fpingTimeoutSeconds = fpingConfig.getInteger("timeout.seconds", 5);
 
-        intervalSeconds = pollingConfig.getInteger("system.cycle.interval.seconds", 60);
+        fpingBatchTimeoutSeconds = fpingConfig.getInteger("batch.blocking.timeout.seconds", 180);
+
+        // Load port check configuration
+        JsonObject portCheckConfig = toolsConfig.getJsonObject("port.check", new JsonObject());
+
+        portCheckTimeoutSeconds = portCheckConfig.getInteger("timeout.seconds", 5);
+
+        // Load polling configuration
+        cycleIntervalSeconds = pollingConfig.getInteger("cycle.interval.seconds", 60);
 
         batchSize = pollingConfig.getInteger("batch.size", 50);
 
+        maxCyclesSkipped = pollingConfig.getInteger("max.cycles.skipped", 5);
+
+        failureLogPath = pollingConfig.getString("failure.log.path", "polling_failed/metrics_polling_failed.txt");
+
         blockingTimeoutGoEngine = pollingConfig.getInteger("blocking.timeout.goengine", 330);
 
-        goEngineProcessTimeout = pollingConfig.getJsonObject("goengine", new JsonObject())
-                                             .getInteger("process.timeout.seconds", 300);
+        // Load device defaults for connection timeout
+        JsonObject deviceDefaults = config().getJsonObject("device", new JsonObject())
+                                           .getJsonObject("defaults", new JsonObject());
 
-        // NEW: Load polling cycle configuration
-        cycleIntervalSeconds = pollingConfig.getJsonObject("cycle", new JsonObject())
-                                           .getJsonObject("interval", new JsonObject())
-                                           .getInteger("seconds", 300);
-
-        maxCyclesSkipped = pollingConfig.getJsonObject("max", new JsonObject())
-                                       .getJsonObject("cycles", new JsonObject())
-                                       .getInteger("skipped", 5);
-
-        failureLogPath = pollingConfig.getJsonObject("failure", new JsonObject())
-                                      .getJsonObject("log", new JsonObject())
-                                      .getString("path", "polling_failed/metrics_polling_failed.txt");
+        defaultConnectionTimeoutSeconds = deviceDefaults.getInteger("connection.timeout.seconds", 10);
 
         logger.info("🔧 GoEngine path: {}", goEnginePath);
 
         logger.info("🔧 fping path: {}", fpingPath);
+
+        logger.info("🔧 fping timeout: {} seconds (per-IP), {} seconds (batch)", fpingTimeoutSeconds, fpingBatchTimeoutSeconds);
+
+        logger.info("🔧 Port check timeout: {} seconds", portCheckTimeoutSeconds);
+
+        logger.info("🔧 Default connection timeout: {} seconds", defaultConnectionTimeoutSeconds);
 
         logger.info("🔧 Polling cycle interval: {} seconds", cycleIntervalSeconds);
 
@@ -165,17 +166,15 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         logger.info("🔧 Batch size: {}", batchSize);
 
-        logger.info("🔧 GoEngine process timeout: {} seconds", goEngineProcessTimeout);
-
         logger.info("⏱️ GoEngine blocking timeout: {} seconds", blockingTimeoutGoEngine);
 
         // Initialize service proxies
         initializeServiceProxies();
 
-        // NEW: Initialize cache
+        // Initialize cache
         deviceCache = new ConcurrentHashMap<>();
 
-        // NEW: Load devices into cache (DatabaseVerticle is already deployed sequentially before this)
+        // Load devices into cache (DatabaseVerticle is already deployed sequentially before this)
         loadDevicesIntoCache()
             .onSuccess(count ->
             {
@@ -314,6 +313,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         pd.pollingIntervalSeconds = deviceData.getInteger("polling_interval_seconds");
 
+        // Global config (from config file, same for all devices)
+        pd.connectionTimeoutSeconds = defaultConnectionTimeoutSeconds;
+
         // Timestamps (PostgreSQL returns timestamps without 'Z', need to append it for ISO-8601)
         String monitoringEnabledAtStr = deviceData.getString("monitoring_enabled_at");
 
@@ -345,13 +347,18 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * - Next = anchor + ceil((now - anchor) / interval) * interval
      *
      * Example:
-     * - Anchor: 10:00:00
+     * - Anchor: 10:00:00 (device monitoring enabled)
      * - Interval: 600s (10 min)
-     * - Now: 10:07:00
-     * - Elapsed: 420s
-     * - Cycles passed: 0 (420 / 600 = 0.7)
-     * - Next cycle: 1
-     * - Next poll: 10:00:00 + 600s = 10:10:00
+     * - Now: 11:14:00 (current time)
+     * - Elapsed: 4440s (1 hour 14 minutes)
+     * - Cycles passed: 7 (4440 / 600 = 7.4)
+     * - Next cycle: 8
+     * - Next poll: 10:00:00 + (8 × 600s) = 10:00:00 + 4800s = 11:20:00
+     *
+     * Timeline:
+     * 10:00:00 → 10:10:00 → 10:20:00 → 10:30:00 → 10:40:00 → 10:50:00 → 11:00:00 → 11:10:00 → [11:20:00] ← Next
+     * Cycle 0     Cycle 1     Cycle 2     Cycle 3     Cycle 4     Cycle 5     Cycle 6     Cycle 7     Cycle 8
+     *                                                                                        ↑ Now (11:14:00)
      *
      * @param anchor monitoring_enabled_at timestamp
      * @param now Current time
@@ -380,79 +387,38 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * 3. For dead devices: Record connectivity failure
      * 4. Update device schedules and failure counters
      *
+     * Uses QueueBatchProcessor for sequential batch processing.
+     *
      * @param dueDevices List of devices due for polling
-     * @param now Current timestamp
      * @return Future with list of failed devices (for retry)
      */
-    private Future<List<PollingDevice>> executePhaseBatchProcessing(List<PollingDevice> dueDevices, Instant now)
+    private Future<List<PollingDevice>> executePhaseBatchProcessing(List<PollingDevice> dueDevices)
     {
         Promise<List<PollingDevice>> promise = Promise.promise();
 
         logger.info("📦 Phase 1: Batch Processing - {} devices", dueDevices.size());
 
-        List<PollingDevice> failedDevices = new ArrayList<>();
+        // Use QueueBatchProcessor for sequential batch processing
+        PollingBatchProcessor processor = new PollingBatchProcessor(dueDevices);
 
-        // Process devices in batches
-        List<List<PollingDevice>> batches = partitionIntoBatches(dueDevices, batchSize);
+        Promise<JsonArray> batchPromise = Promise.promise();
 
-        logger.info("📦 Processing {} batches (batch size: {})", batches.size(), batchSize);
+        processor.processNext(batchPromise);
 
-        // Process batches sequentially
-        processBatchesSequentially(batches, 0, failedDevices, promise);
+        batchPromise.future()
+            .onSuccess(results ->
+            {
+                List<PollingDevice> failedDevices = processor.getFailedDevices();
+
+                logger.info("📦 Phase 1 completed: {} devices processed, {} failed",
+
+                    dueDevices.size(), failedDevices.size());
+
+                promise.complete(failedDevices);
+            })
+            .onFailure(promise::fail);
 
         return promise.future();
-    }
-
-    /**
-     * Partition devices into batches
-     */
-    private List<List<PollingDevice>> partitionIntoBatches(List<PollingDevice> devices, int batchSize)
-    {
-        List<List<PollingDevice>> batches = new ArrayList<>();
-
-        for (int i = 0; i < devices.size(); i += batchSize)
-        {
-            batches.add(devices.subList(i, Math.min(i + batchSize, devices.size())));
-        }
-
-        return batches;
-    }
-
-    /**
-     * Process batches sequentially (one after another)
-     */
-    private void processBatchesSequentially(List<List<PollingDevice>> batches, int batchIndex,
-                                           List<PollingDevice> failedDevices, Promise<List<PollingDevice>> promise)
-    {
-        if (batchIndex >= batches.size())
-        {
-            // All batches processed
-            promise.complete(failedDevices);
-
-            return;
-        }
-
-        List<PollingDevice> batch = batches.get(batchIndex);
-
-        logger.info("📦 Processing batch {}/{} ({} devices)", batchIndex + 1, batches.size(), batch.size());
-
-        processSingleBatch(batch)
-            .onSuccess(batchFailures ->
-            {
-                failedDevices.addAll(batchFailures);
-
-                // Process next batch
-                processBatchesSequentially(batches, batchIndex + 1, failedDevices, promise);
-            })
-            .onFailure(cause ->
-            {
-                logger.error("❌ Batch {} failed", batchIndex + 1, cause);
-
-                // Mark all devices in this batch as failed and continue
-                failedDevices.addAll(batch);
-
-                processBatchesSequentially(batches, batchIndex + 1, failedDevices, promise);
-            });
     }
 
     /**
@@ -672,8 +638,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                             updateDeviceAvailability(pd.deviceId, true);
 
-                            updateLastPolledAt(pd.deviceId);
-
                             results.put(pd.deviceId, true);
 
                             logger.debug("✅ [{}/{}] Device {} metrics collected", processedCount, devices.size(), pd.deviceName);
@@ -705,14 +669,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 }
             }
 
-            // Wait for process to complete
-            boolean finished = process.waitFor(goEngineProcessTimeout, TimeUnit.SECONDS);
+            // Wait for process to complete (timeout handled by Vert.x blocking timeout)
+            boolean finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
 
             if (!finished)
             {
                 process.destroyForcibly();
 
-                logger.warn("⏱️ GoEngine batch timeout after {} seconds", goEngineProcessTimeout);
+                logger.warn("⏱️ GoEngine batch timeout after {} seconds", blockingTimeoutGoEngine);
 
                 return results;
             }
@@ -955,16 +919,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
     // ========== HELPER METHODS ==========
 
     /**
-     * Update last_polled_at timestamp in database
-     */
-    private void updateLastPolledAt(String deviceId)
-    {
-        // This will be called after successful metrics collection
-        // We can update the database asynchronously (fire and forget)
-        vertx.eventBus().send("device.update.last_polled", new JsonObject().put("device_id", deviceId));
-    }
-
-    /**
      * Store metrics in database
      *
      * Transforms GoEngine response format to database schema format:
@@ -1027,21 +981,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     private void setupEventBusConsumers()
     {
-        // Handle provision requests
-        vertx.eventBus().consumer("provision.start", message ->
-        {
-            JsonObject request = (JsonObject) message.body();
-
-            handleProvisionStart(message, request);
-        });
-
-        // Handle polling status requests
-        vertx.eventBus().consumer("polling.status", message ->
-        {
-            message.reply(pollingStatus.copy());
-        });
-
-        // NEW: Cache update consumers
+        // Cache update consumers
         vertx.eventBus().consumer("device.monitoring.enabled", msg ->
         {
             JsonObject data = (JsonObject) msg.body();
@@ -1185,17 +1125,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     private void startPeriodicPolling()
     {
-        // Use cycleIntervalSeconds (default 300s = 5 min) instead of intervalSeconds
         pollingTimerId = vertx.setPeriodic(cycleIntervalSeconds * 1000L, timerId ->
         {
-            if (!isPolling)
-            {
-                executePollingCycle();
-            }
-            else
-            {
-                logger.debug("⏳ Skipping polling cycle - previous cycle still running");
-            }
+            executePollingCycle();
         });
 
         logger.info("⏰ Periodic polling started - cycle interval: {} seconds", cycleIntervalSeconds);
@@ -1221,8 +1153,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private void executePollingCycle()
     {
-        isPolling = true;
-
         long startTime = System.currentTimeMillis();
 
         Instant now = Instant.now();
@@ -1251,8 +1181,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
             logger.debug("📭 No devices due for polling at this time (total devices in cache: {})",
                 deviceCache.size());
 
-            isPolling = false;
-
             return;
         }
 
@@ -1262,7 +1190,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             pd.deviceName, pd.nextScheduledAt));
 
         // Phase 1: Batch Processing
-        executePhaseBatchProcessing(dueDevices, now)
+        executePhaseBatchProcessing(dueDevices)
             .compose(failedDevices ->
             {
                 // Phase 2: Retry Failed Devices
@@ -1280,8 +1208,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
             })
             .onComplete(result ->
             {
-                isPolling = false;
-
                 long duration = System.currentTimeMillis() - startTime;
 
                 if (result.succeeded())
@@ -1315,7 +1241,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         try
         {
             List<String> command = Arrays.asList(
-                fpingPath, "-a", "-q", "-t", String.valueOf(networkTimeoutSeconds * 1000) // -a: show alive, -q: quiet, -t: timeout in ms
+                fpingPath, "-a", "-q", "-t", String.valueOf(fpingTimeoutSeconds * 1000) // -a: show alive, -q: quiet, -t: timeout in ms
             );
 
             ProcessBuilder pb = new ProcessBuilder(command);
@@ -1334,13 +1260,13 @@ public class PollingMetricsVerticle extends AbstractVerticle
             } // Writer is closed here, signaling EOF to fping
 
             // Wait for process to complete with timeout
-            boolean finished = process.waitFor(networkTimeoutSeconds + 10, TimeUnit.SECONDS);
+            boolean finished = process.waitFor(fpingBatchTimeoutSeconds, TimeUnit.SECONDS);
 
             if (!finished)
             {
                 process.destroyForcibly();
 
-                logger.warn("fping process timed out after {} seconds", networkTimeoutSeconds + 10);
+                logger.warn("fping process timed out after {} seconds", fpingBatchTimeoutSeconds);
 
                 return results; // Return all as dead
             }
@@ -1394,8 +1320,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
             return results;
         }
 
-        // Port check timeout (shorter than GoEngine timeout)
-        int portCheckTimeoutMs = 3000; // 3 seconds
+        // Port check timeout (from config)
+        int portCheckTimeoutMs = portCheckTimeoutSeconds * 1000;
 
         // Use parallel stream for concurrent port checks
         devices.parallelStream().forEach(pd ->
@@ -1439,115 +1365,101 @@ public class PollingMetricsVerticle extends AbstractVerticle
         return results;
     }
 
-    // ========================================
-    // EVENT BUS HANDLERS (Provisioning)
-    // ========================================
-
-    private void handleProvisionStart(io.vertx.core.eventbus.Message<Object> message, JsonObject request)
+    /**
+     * Polling batch processor using QueueBatchProcessor.
+     *
+     * Extends the generic QueueBatchProcessor to handle polling-specific batch processing.
+     * Processes devices in batches with fping, port check, and GoEngine metrics collection.
+     *
+     * Features:
+     * - Sequential batch processing of devices
+     * - Connectivity pre-filtering (fping + port check)
+     * - GoEngine metrics collection for alive devices
+     * - Fail-tolerant: continues with next batch on failure
+     * - Tracks failed devices for retry phase
+     */
+    private class PollingBatchProcessor extends QueueBatchProcessor<PollingDevice>
     {
-        // Handle manual provision requests
-        String profileId = request.getString("profile_id");
+        private final List<PollingDevice> failedDevices;
 
-        if (profileId == null)
+        /**
+         * Constructor for PollingBatchProcessor.
+         *
+         * Initializes the processor with devices to poll.
+         *
+         * @param devices List of devices to poll in batches
+         */
+        public PollingBatchProcessor(List<PollingDevice> devices)
         {
-            message.fail(400, "profile_id is required");
+            super(devices, batchSize);
 
-            return;
+            this.failedDevices = new ArrayList<>();
+
+            logger.info("📋 Polling batch processor initialized: {} devices", getTotalItems());
         }
 
-        vertx.<JsonObject>executeBlocking(promise ->
+        /**
+         * Process a batch of devices.
+         *
+         * Executes the complete polling workflow for a batch:
+         * 1. Batch fping connectivity check
+         * 2. Port reachability check for alive devices
+         * 3. GoEngine metrics collection for reachable devices
+         * 4. Update device schedules and failure counters
+         *
+         * @param batch List of devices to poll in this batch
+         * @return Future containing JsonArray of results (empty for polling)
+         */
+        @Override
+        protected Future<JsonArray> processBatch(List<PollingDevice> batch)
         {
-            // Get discovery profile and credentials
-            vertx.eventBus().request("db.query", new JsonObject()
-                    .put("operation", "get_discovery_and_credentials")
-                    .put("params", new JsonObject().put("profile_id", profileId)))
-                .onSuccess(reply ->
+            logger.info("🔄 Processing polling batch: {} devices", batch.size());
+
+            return processSingleBatch(batch)
+                .map(batchFailures ->
                 {
-                    JsonObject deviceConfig = (JsonObject) reply.body();
+                    failedDevices.addAll(batchFailures);
 
-                    // Execute provision (similar to discovery but for single device)
-                    executeProvision(deviceConfig, promise);
-                })
-                .onFailure(promise::fail);
-        }, false, result ->
-        {
-            if (result.succeeded())
-            {
-                message.reply(result.result());
-            }
-            else
-            {
-                message.fail(500, "Provision failed: " + result.cause().getMessage());
-            }
-        });
-    }
-
-    private void executeProvision(JsonObject deviceConfig, Promise<JsonObject> promise)
-    {
-        try
-        {
-            JsonObject goEngineDevice = new JsonObject()
-                .put("address", deviceConfig.getString("ip_address"))
-                .put("device_type", deviceConfig.getString("device_type")) // Direct from database
-                .put("username", deviceConfig.getString("username"))
-                .put("password", deviceConfig.getString("password_encrypted"))
-                .put("port", deviceConfig.getInteger("port"))
-                .put("timeout", networkTimeoutSeconds + "s");
-
-            JsonArray devices = new JsonArray().add(goEngineDevice);
-
-            String requestId = "PROVISION_" + System.currentTimeMillis();
-
-            List<String> command = Arrays.asList(
-                goEnginePath,
-                "--mode", "discovery",
-                "--targets", devices.encode(),
-                "--request-id", requestId,
-                "--timeout", "2m" // 2 minute timeout for provision
-            );
-
-            ProcessBuilder pb = new ProcessBuilder(command);
-
-            Process process = pb.start();
-
-            JsonObject result = null;
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
-            {
-                String line;
-
-                while ((line = reader.readLine()) != null)
-                {
-                    try
-                    {
-                        result = new JsonObject(line);
-
-                        break; // Only one device
-                    }
-                    catch (Exception exception)
-                    {
-                        logger.warn("Failed to parse provision result: {}", line);
-                    }
-                }
-            }
-
-            process.waitFor();
-
-            if (result != null)
-            {
-                promise.complete(result);
-            }
-            else
-            {
-                promise.fail("No result received from GoEngine");
-            }
-
+                    return new JsonArray();
+                });
         }
-        catch (Exception exception)
-        {
-            logger.error("Provision execution failed", exception);
 
-            promise.fail(exception);
+        /**
+         * Handle batch processing failure.
+         *
+         * Marks all devices in the failed batch as failed and adds them to the failed devices list.
+         * The batch processor will continue with the next batch (fail-tolerant behavior).
+         *
+         * @param batch The batch of devices that failed to process
+         * @param cause The exception that caused the failure
+         */
+        @Override
+        protected void handleBatchFailure(List<PollingDevice> batch, Throwable cause)
+        {
+            logger.warn("⚠️ Batch processing failed for {} devices: {}", batch.size(), cause.getMessage());
+
+            for (PollingDevice pd : batch)
+            {
+                pd.incrementFailures();
+
+                failedDevices.add(pd);
+            }
+
+            logger.debug("Failed devices in batch: {}", batch.stream()
+
+                .map(pd -> pd.deviceName)
+
+                .collect(Collectors.toList()));
+        }
+
+        /**
+         * Get the list of devices that failed during batch processing.
+         *
+         * @return List of failed devices
+         */
+        public List<PollingDevice> getFailedDevices()
+        {
+            return failedDevices;
         }
     }
 
@@ -1568,7 +1480,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             logger.info("⏰ Periodic polling stopped");
         }
 
-        // NEW: Clear cache
+        // Clear cache
         if (deviceCache != null)
         {
             int cacheSize = deviceCache.size();

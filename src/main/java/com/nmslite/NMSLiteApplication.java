@@ -64,11 +64,11 @@ public class NMSLiteApplication extends AbstractVerticle
     // Track deployed verticles for cleanup
     private String databaseVerticleId;
 
-    private String discoveryVerticleId;
+    private String serverVerticleId;
 
     private String pollingVerticleId;
 
-    private String serverVerticleId;
+    private String discoveryVerticleId;
 
     /**
      * Main entry point for the NMSLite application.
@@ -135,7 +135,7 @@ public class NMSLiteApplication extends AbstractVerticle
     @Override
     public void start(Promise<Void> startPromise)
     {
-        // Load configuration from application.conf FIRST (before any logging)
+        // Load configuration from application.conf FIRST
         loadConfiguration()
             .onSuccess(config ->
             {
@@ -458,15 +458,13 @@ public class NMSLiteApplication extends AbstractVerticle
     private void setupWorkerExecutor(JsonObject config)
     {
         // Get worker pool configuration from config or use defaults
-        int workerPoolSize = config.getInteger("worker.pool.size", 10);  // Start with 1 thread as requested
-
-        long maxExecuteTime = config.getLong("worker.max.execute.time", 600000L);  // 10 minutes max
+        int workerPoolSize = config.getInteger("worker.pool.size", 10);
 
         // Create shared worker executor for all blocking operations
-        workerExecutor = vertx.createSharedWorkerExecutor("nmslite-worker", workerPoolSize, maxExecuteTime);
+        // Note: No max execute time limit - operations controlled by their own timeouts
+        workerExecutor = vertx.createSharedWorkerExecutor("nmslite-worker", workerPoolSize);
 
-        logger.info("🔧 Worker executor created: pool-size={}, max-execute-time={}ms",
-            workerPoolSize, maxExecuteTime);
+        logger.info("🔧 Worker executor created: pool-size={}", workerPoolSize);
     }
 
     /**

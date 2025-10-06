@@ -133,6 +133,8 @@
                     </annotationProcessors>
                     <compilerArgs>
                         <arg>-Acodegen.output=${project.basedir}/src/main</arg>
+                        <arg>-Xlint:deprecation</arg>
+                        <arg>-Xlint:unchecked</arg>
                     </compilerArgs>
                 </configuration>
             </plugin>

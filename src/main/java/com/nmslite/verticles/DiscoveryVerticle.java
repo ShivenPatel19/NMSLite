@@ -38,6 +38,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 import java.util.concurrent.TimeUnit;
 
+import com.nmslite.utils.QueueBatchProcessor;
+
 import java.util.stream.Collectors;
 
 /**
@@ -71,8 +73,6 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     private int blockingTimeoutGoEngine;
 
-    private int goEngineProcessTimeout;
-
     // Service proxies
     private DeviceService deviceService;
 
@@ -84,7 +84,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Start the verticle: load configuration, initialize service proxies, and register event bus consumers.
-     * Loads GoEngine v6.0.0 and fping settings from config, then calls setupEventBusConsumers().
+     * Loads GoEngine and fping settings from config, then calls setupEventBusConsumers().
      *
      * @param startPromise promise completed once the verticle is ready
      */
@@ -104,34 +104,30 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         fpingPath = toolsConfig.getString("fping.path", "fping");
 
-        // GoEngine v6.0.0 configuration parameters
+        // GoEngine v7.0.0 configuration parameters
         timeoutSeconds = goEngineConfig.getInteger("timeout.seconds", 30);
 
         connectionTimeoutSeconds = goEngineConfig.getInteger("connection.timeout.seconds", 10);
 
         retryCount = goEngineConfig.getInteger("retry.count", 2);
 
-        fpingTimeoutSeconds = toolsConfig.getInteger("fping.blocking.timeout.seconds", 15);
+        fpingTimeoutSeconds = toolsConfig.getInteger("fping.batch.blocking.timeout.seconds", 180);
 
         discoveryBatchSize = discoveryConfig.getInteger("batch.size", 100);
 
         blockingTimeoutGoEngine = discoveryConfig.getInteger("blocking.timeout.goengine", 120);
 
-        goEngineProcessTimeout = goEngineConfig.getInteger("process.timeout.seconds", 90);
-
         logger.info("🔧 GoEngine path: {}", goEnginePath);
 
         logger.info("🔧 fping path: {}", fpingPath);
 
-        logger.info("🔧 GoEngine v6.0.0 - Timeout per IP: {} seconds", timeoutSeconds);
+        logger.info("🔧 GoEngine v7.0.0 - Timeout per IP: {} seconds", timeoutSeconds);
 
-        logger.info("🔧 GoEngine v6.0.0 - Connection timeout: {} seconds", connectionTimeoutSeconds);
+        logger.info("🔧 GoEngine v7.0.0 - Connection timeout: {} seconds", connectionTimeoutSeconds);
 
-        logger.info("🔧 GoEngine v6.0.0 - Retry count: {}", retryCount);
+        logger.info("🔧 Java retry count: {}", retryCount);
 
-        logger.info("🔧 GoEngine v6.0.0 - Process timeout: {} seconds", goEngineProcessTimeout);
-
-        logger.info("🕐 fping blocking timeout: {} seconds", fpingTimeoutSeconds);
+        logger.info("🕐 fping batch blocking timeout: {} seconds", fpingTimeoutSeconds);
 
         logger.info("📦 Discovery batch size: {} IPs", discoveryBatchSize);
 
@@ -325,6 +321,10 @@ public class DiscoveryVerticle extends AbstractVerticle
      * IP addresses for discovery. Handles both single IP addresses and IP ranges using
      * the IPRangeUtil utility. Adds target IP list and count to the profile data.
      *
+     * Uses executeBlocking() to avoid blocking the event loop for large IP ranges.
+     * While IP range parsing is typically fast (< 1ms for 254 IPs), using executeBlocking()
+     * ensures consistency with other blocking operations and future-proofs for larger ranges.
+     *
      * @param profile JsonObject containing discovery profile data with ip_address and is_range fields
      * @return Future<JsonObject> profile data enriched with target_ips array and total_targets count
      *
@@ -340,37 +340,44 @@ public class DiscoveryVerticle extends AbstractVerticle
     {
         Promise<JsonObject> promise = Promise.promise();
 
-        try
+        // Execute IP range parsing in worker thread to avoid blocking event loop
+        vertx.executeBlocking(blockingPromise ->
         {
-            String ipAddress = profile.getString("ip_address");
-
-            boolean isRange = profile.getBoolean("is_range", false);
-
-            JsonArray targetIps = new JsonArray();
-
-            // Use IPRangeUtil for parsing both single IP and ranges
-            List<String> ipList = IPRangeUtil.parseIPRange(ipAddress, isRange);
-
-            for (String ip : ipList)
+            try
             {
-                targetIps.add(ip);
+                String ipAddress = profile.getString("ip_address");
+
+                boolean isRange = profile.getBoolean("is_range", false);
+
+                JsonArray targetIps = new JsonArray();
+
+                // Use IPRangeUtil for parsing both single IP and ranges
+                List<String> ipList = IPRangeUtil.parseIPRange(ipAddress, isRange);
+
+                for (String ip : ipList)
+                {
+                    targetIps.add(ip);
+                }
+
+                logger.info("📋 Discovery targets: {} ({} {})", ipAddress, targetIps.size(),
+                           isRange ? "IPs from range" : "single IP");
+
+                // Create result with profile data and target IPs
+                JsonObject result = profile.copy()
+                    .put("target_ips", targetIps)
+                    .put("total_targets", targetIps.size());
+
+                blockingPromise.complete(result);
+
+            }
+            catch (Exception exception)
+            {
+                logger.error("❌ Failed to parse discovery targets: {}", exception.getMessage());
+
+                blockingPromise.fail("Failed to parse discovery targets: " + exception.getMessage());
             }
 
-            logger.info("📋 Discovery targets: {} ({} {})", ipAddress, targetIps.size(),
-                       isRange ? "IPs from range" : "single IP");
-
-            // Create result with profile data and target IPs
-            JsonObject result = profile.copy()
-                .put("target_ips", targetIps)
-                .put("total_targets", targetIps.size());
-
-            promise.complete(result);
-
-        }
-        catch (Exception exception)
-        {
-            promise.fail("Failed to parse discovery targets: " + exception.getMessage());
-        }
+        }, false, promise);
 
         return promise.future();
     }
@@ -415,7 +422,6 @@ public class DiscoveryVerticle extends AbstractVerticle
         }
 
         // Check which IPs already exist in devices table using DeviceService
-        // We'll check each IP individually since we don't have a bulk check method
         List<Future<JsonObject>> deviceCheckFutures = new ArrayList<>();
 
         for (Object ipObj : targetIps)
@@ -629,160 +635,21 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         int totalBatches = (int) Math.ceil((double) totalTargets / discoveryBatchSize);
 
-        logger.info("📦 Will process {} targets in {} batches of max {} IPs (GoEngine v6.0.0 credential iteration)",
+        logger.info("📦 Will process {} targets in {} batches of max {} IPs (GoEngine credential iteration)",
                    totalTargets, totalBatches, discoveryBatchSize);
 
-        // NEW GoEngine v6.0.0: Use credential iteration processor
-        CredentialIterationProcessor processor = new CredentialIterationProcessor(profileData, newTargets);
+        // Use QueueBatchProcessor for sequential batch discovery
+        DiscoveryBatchProcessor processor = new DiscoveryBatchProcessor(profileData, newTargets);
 
         Promise<JsonArray> arrayPromise = Promise.promise();
 
-        processor.processNextBatch(arrayPromise);
+        processor.processNext(arrayPromise);
 
         return arrayPromise.future().map(results -> profileData.put("discovery_results", results));
     }
 
     /**
-     * Optimized queue-based batch processor
-     * Stores profile template ONCE + queue of IPs (avoids duplicating credentials/device_type for each IP)
-     */
-    private class QueueBasedDiscoveryProcessor
-    {
-        private final JsonObject profileData;
-
-        private final JsonObject profileTemplate;
-
-        private final Queue<String> remainingIPs;
-
-        private final JsonArray allResults;
-
-        private final int totalTargets;
-
-        private int processedBatches;
-
-        /**
-         * Constructor for QueueBasedDiscoveryProcessor.
-         * Initializes the processor with profile data and target IPs.
-         *
-         * @param profileData JsonObject containing discovery profile configuration
-         * @param allTargetIPs JsonArray of IP addresses to discover
-         */
-        public QueueBasedDiscoveryProcessor(JsonObject profileData, JsonArray allTargetIPs)
-        {
-            this.profileData = profileData;
-
-            this.remainingIPs = new ConcurrentLinkedQueue<>();
-
-            this.allResults = new JsonArray();
-
-            this.totalTargets = allTargetIPs.size();
-
-            this.processedBatches = 0;
-
-            // Store profile template ONCE (credentials, device_type, port are same for all IPs)
-            this.profileTemplate = new JsonObject()
-                .put("device_type", profileData.getString("device_type_name"))
-                .put("username", profileData.getString("username"))
-                .put("password", profileData.getString("password_encrypted"))
-                .put("port", profileData.getInteger("port"))
-                .put("timeout", timeoutSeconds + "s");
-
-            // Fill queue with ONLY IPs (no duplication of profile data)
-            for (Object obj : allTargetIPs)
-            {
-                remainingIPs.offer((String) obj);
-            }
-
-            logger.info("📋 Optimized queue initialized: 1 profile template + {} IPs (memory efficient)", remainingIPs.size());
-        }
-
-        /**
-         * Process the next batch from the queue and append results; recurses until queue is empty.
-         *
-         * @param promise completes with accumulated results when all batches have been processed
-         */
-        public void processNextBatch(Promise<JsonArray> promise)
-        {
-            if (remainingIPs.isEmpty())
-            {
-                // All IPs processed
-                logger.info("🎉 All batches completed, total results: {}", allResults.size());
-
-                promise.complete(allResults);
-
-                return;
-            }
-
-            // Create current batch by combining profile template with IPs from queue
-            JsonArray currentBatch = createBatchFromQueue();
-
-            if (currentBatch.isEmpty())
-            {
-                // No more IPs to process
-                promise.complete(allResults);
-
-                return;
-            }
-
-            processedBatches++;
-
-            int remainingCount = remainingIPs.size();
-
-            logger.info("🔄 Processing batch {} with {} devices, {} IPs remaining in queue",
-                       processedBatches, currentBatch.size(), remainingCount);
-
-            executeGoEngineDiscovery(profileData, currentBatch)
-                .onSuccess(batchResults ->
-                {
-                    // Add results to accumulated results
-                    for (Object obj : batchResults)
-                    {
-                        allResults.add(obj);
-                    }
-
-                    logger.info("✅ Batch {} completed: {} results, {} total results, {} IPs remaining",
-                               processedBatches, batchResults.size(), allResults.size(), remainingIPs.size());
-
-                    // Clear current batch from memory
-                    currentBatch.clear();
-
-                    // Process next batch (queue automatically provides next IPs)
-                    processNextBatch(promise);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("❌ Batch {} failed: {}", processedBatches, cause.getMessage());
-
-                    promise.fail(cause);
-                });
-        }
-
-        /**
-         * Build a batch of up to discoveryBatchSize IPs from the remaining queue for GoEngine.
-         *
-         * @return JsonArray of IP addresses for the current batch
-         */
-        private JsonArray createBatchFromQueue()
-        {
-            JsonArray batch = new JsonArray();
-
-            // Poll up to discoveryBatchSize IPs for GoEngine v6.0.0 format
-            for (int i = 0; i < discoveryBatchSize && !remainingIPs.isEmpty(); i++)
-            {
-                String ip = remainingIPs.poll();
-
-                if (ip != null)
-                {
-                    batch.add(ip);  // GoEngine v6.0.0 expects just IP addresses
-                }
-            }
-
-            return batch;
-        }
-    }
-
-    /**
-     * Executes GoEngine v6.0.0 discovery with pre-connectivity checks and credential iteration.
+     * Executes GoEngine discovery with pre-connectivity checks and credential iteration.
      *
      * Performs a two-stage discovery process:
      * 1. Connectivity checks using fping and port scanning to identify reachable targets
@@ -859,7 +726,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                 }
 
                 // Step 2: Proceed with GoEngine discovery for reachable IPs only
-                logger.info("🚀 Executing GoEngine v6.0.0 discovery for {} reachable IPs with request ID: {}",
+                logger.info("🚀 Executing GoEngine discovery for {} reachable IPs with request ID: {}",
                            reachableIPs.size(), requestId);
 
                 return executeGoEngineForReachableIPs(profileData, reachableIPs, unreachableIPs, batchId, requestId);
@@ -991,10 +858,10 @@ public class DiscoveryVerticle extends AbstractVerticle
         {
             try
             {
-                // Create GoEngine v6.0.0 discovery_request format for reachable IPs only
+                // Create GoEngine discovery_request format for reachable IPs only
                 JsonObject discoveryRequest = createDiscoveryRequest(profileData, reachableIPs, batchId);
 
-                // Prepare GoEngine v6.0.0 command
+                // Prepare GoEngine command
                 List<String> command = Arrays.asList(
                     goEnginePath,
                     "--mode", "discovery",
@@ -1002,7 +869,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                     "--request-id", requestId
                 );
 
-                logger.info("📋 GoEngine v6.0.0 discovery request: {}", discoveryRequest.encodePrettily());
+                logger.info("📋 GoEngine discovery request: {}", discoveryRequest.encodePrettily());
 
                 ProcessBuilder pb = new ProcessBuilder(command);
 
@@ -1022,7 +889,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                             JsonObject result = new JsonObject(line);
 
                             if (result.containsKey("ip_address"))
-                            {  // v6.0.0 uses ip_address instead of device_address
+                            {  // uses ip_address instead of device_address
                                 results.add(result);
                             }
                         }
@@ -1033,19 +900,19 @@ public class DiscoveryVerticle extends AbstractVerticle
                     }
                 }
 
-                // Add process timeout
-                boolean finished = process.waitFor(goEngineProcessTimeout, TimeUnit.SECONDS);
+                // Process timeout handled by Vert.x blocking timeout (blockingTimeoutGoEngine)
+                boolean finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
 
                 if (!finished)
                 {
                     process.destroyForcibly();
 
-                    throw new RuntimeException("GoEngine discovery process timed out after " + goEngineProcessTimeout + " seconds");
+                    throw new RuntimeException("GoEngine discovery process timed out after " + blockingTimeoutGoEngine + " seconds");
                 }
 
                 int exitCode = process.exitValue();
 
-                logger.info("🏁 GoEngine v6.0.0 discovery completed with exit code: {}, {} results", exitCode, results.size());
+                logger.info("🏁 GoEngine v7.0.0 discovery completed with exit code: {}, {} results", exitCode, results.size());
 
                 // Combine GoEngine results with unreachable IPs
                 JsonArray finalResults = new JsonArray();
@@ -1075,7 +942,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             }
             catch (Exception exception)
             {
-                logger.error("GoEngine v6.0.0 discovery execution failed", exception);
+                logger.error("GoEngine discovery execution failed", exception);
 
                 blockingPromise.fail(exception);
             }
@@ -1085,7 +952,7 @@ public class DiscoveryVerticle extends AbstractVerticle
     }
 
     /**
-     * Create GoEngine v6.0.0 discovery_request format with credential iteration
+     * Create GoEngine discovery_request format with credential iteration
      */
     private JsonObject createDiscoveryRequest(JsonObject profileData, JsonArray targetIps, String batchId)
     {
@@ -1125,8 +992,8 @@ public class DiscoveryVerticle extends AbstractVerticle
             .put("port", profileData.getInteger("port"))
             .put("protocol", profileData.getString("protocol"))
             .put("timeout_seconds", timeoutSeconds)
-            .put("connection_timeout", connectionTimeoutSeconds)
-            .put("retry_count", retryCount);
+            .put("connection_timeout", connectionTimeoutSeconds);
+            // Note: retry_count handled by Java, not passed to GoEngine v7.0.0
 
         // Create the complete discovery_request
         JsonObject discoveryRequest = new JsonObject()
@@ -1357,116 +1224,77 @@ public class DiscoveryVerticle extends AbstractVerticle
     }
 
     /**
-     * NEW: GoEngine v6.0.0 Credential Iteration Processor
-     * Uses GoEngine's built-in credential iteration (tests multiple credentials per IP until one succeeds)
+     * Discovery batch processor using QueueBatchProcessor.
+     *
+     * Extends the generic QueueBatchProcessor to handle discovery-specific batch processing.
+     * Uses GoEngine's built-in credential iteration (tests multiple credentials per IP until one succeeds).
+     *
+     * Features:
+     * - Sequential batch processing of IP addresses
+     * - GoEngine credential iteration for each IP
+     * - Fail-tolerant: continues with next batch on failure
+     * - Memory efficient: only current batch in memory
      */
-    private class CredentialIterationProcessor
+    private class DiscoveryBatchProcessor extends QueueBatchProcessor<String>
     {
         private final JsonObject profileData;
 
-        private final Queue<String> remainingIPs;
-
-        private final JsonArray allResults;
-
-        private final int totalTargets;
-
         /**
-         * Constructor for CredentialIterationProcessor.
+         * Constructor for DiscoveryBatchProcessor.
+         *
          * Initializes the processor with profile data and target IPs.
+         * Converts JsonArray to List for QueueBatchProcessor.
          *
          * @param profileData JsonObject containing discovery profile configuration
          * @param allTargetIPs JsonArray of IP addresses to discover
          */
-        public CredentialIterationProcessor(JsonObject profileData, JsonArray allTargetIPs)
+        public DiscoveryBatchProcessor(JsonObject profileData, JsonArray allTargetIPs)
         {
+            super(allTargetIPs.getList(), discoveryBatchSize);
+
             this.profileData = profileData;
-
-            this.remainingIPs = new ConcurrentLinkedQueue<>();
-
-            this.allResults = new JsonArray();
-
-            this.totalTargets = allTargetIPs.size();
-
-            // Fill queue with IPs
-            for (Object obj : allTargetIPs)
-            {
-                remainingIPs.offer((String) obj);
-            }
 
             JsonArray credentials = profileData.getJsonArray("credentials");
 
-            logger.info("📋 Credential iteration processor initialized: {} credentials, {} IPs",
-                       credentials.size(), remainingIPs.size());
+            logger.info("📋 Discovery batch processor initialized: {} credentials, {} IPs",
+
+                credentials.size(), getTotalItems());
         }
 
         /**
-         * Process the next batch of IPs using GoEngine credential iteration and append results.
-         * Recursively processes until all IPs are handled.
+         * Process a batch of IP addresses using GoEngine discovery.
          *
-         * @param promise completes with all discovery results
+         * Converts the batch of IP strings to JsonArray and executes GoEngine discovery.
+         * GoEngine handles credential iteration internally for each IP.
+         *
+         * @param batch List of IP addresses to discover in this batch
+         * @return Future containing JsonArray of discovery results
          */
-        public void processNextBatch(Promise<JsonArray> promise)
+        @Override
+        protected Future<JsonArray> processBatch(List<String> batch)
         {
-            if (remainingIPs.isEmpty())
-            {
-                logger.info("🎉 All batches completed, total results: {}", allResults.size());
+            JsonArray ipArray = new JsonArray(batch);
 
-                promise.complete(allResults);
+            logger.info("🔄 Executing GoEngine discovery for {} IPs (credential iteration)", batch.size());
 
-                return;
-            }
-
-            // Create current batch of IPs (GoEngine will handle credential iteration internally)
-            JsonArray currentBatch = createBatchOfIPs();
-
-            if (currentBatch.isEmpty())
-            {
-                promise.complete(allResults);
-
-                return;
-            }
-
-            logger.info("🔄 Processing batch with {} IPs (GoEngine v6.0.0 credential iteration)", currentBatch.size());
-
-            executeGoEngineDiscovery(profileData, currentBatch)
-                .onSuccess(batchResults ->
-                {
-                    // Add results directly (GoEngine already handled credential iteration)
-                    for (Object obj : batchResults)
-                    {
-                        allResults.add(obj);
-                    }
-
-                    logger.info("✅ Batch completed: {} results, {} total results, {} IPs remaining",
-                               batchResults.size(), allResults.size(), remainingIPs.size());
-
-                    // Continue with next batch
-                    processNextBatch(promise);
-                })
-                .onFailure(promise::fail);
+            return executeGoEngineDiscovery(profileData, ipArray);
         }
 
         /**
-         * Build a batch of up to discoveryBatchSize IPs; GoEngine will iterate credentials internally.
+         * Handle batch processing failure.
          *
-         * @return JsonArray of IPs for the next credential-iteration batch
+         * Logs the failed IPs for debugging. The batch processor will continue
+         * with the next batch (fail-tolerant behavior).
+         *
+         * @param batch The batch of IPs that failed to process
+         * @param cause The exception that caused the failure
          */
-        private JsonArray createBatchOfIPs()
+        @Override
+        protected void handleBatchFailure(List<String> batch, Throwable cause)
         {
-            JsonArray batch = new JsonArray();
+            logger.warn("⚠️ Failed to discover {} IPs in batch: {}", batch.size(), cause.getMessage());
 
-            // Create batch of IPs (GoEngine v6.0.0 handles credential iteration internally)
-            for (int i = 0; i < discoveryBatchSize && !remainingIPs.isEmpty(); i++)
-            {
-                String ip = remainingIPs.poll();
-
-                if (ip != null)
-                {
-                    batch.add(ip);
-                }
-            }
-
-            return batch;
+            logger.debug("Failed IPs: {}", batch);
         }
     }
 
