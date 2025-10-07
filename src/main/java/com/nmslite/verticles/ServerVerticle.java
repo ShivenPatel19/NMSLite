@@ -12,6 +12,7 @@ import io.vertx.core.AbstractVerticle;
 
 import io.vertx.core.Promise;
 
+import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServer;
 
 import io.vertx.core.json.JsonObject;
@@ -28,12 +29,12 @@ import org.slf4j.LoggerFactory;
 
 /**
  * ServerVerticle - Clean HTTP API Server
- *
+
  * Responsibilities:
  * - HTTP REST API endpoints (via handlers)
  * - Service proxy initialization
  * - Router setup and middleware
- *
+
  * All business logic has been extracted to handler classes:
  * - UserHandler: User management operations
  * - CredentialHandler: Credential profile operations
@@ -72,9 +73,6 @@ public class ServerVerticle extends AbstractVerticle
     private DiscoveryProfileHandler discoveryProfileHandler;
 
     private DeviceHandler deviceHandler;
-
-    // JWT and Authentication
-    private JWTUtil jwtUtil;
 
     private AuthenticationMiddleware authMiddleware;
 
@@ -151,7 +149,8 @@ public class ServerVerticle extends AbstractVerticle
     private void createHandlers()
     {
         // Initialize JWT utilities
-        this.jwtUtil = new JWTUtil(vertx);
+        // JWT and Authentication
+        JWTUtil jwtUtil = new JWTUtil(vertx);
 
         this.authMiddleware = new AuthenticationMiddleware(jwtUtil);
 
@@ -162,7 +161,7 @@ public class ServerVerticle extends AbstractVerticle
 
         this.discoveryProfileHandler = new DiscoveryProfileHandler(vertx, discoveryProfileService, deviceTypeService, credentialProfileService);
 
-        this.deviceHandler = new DeviceHandler(deviceService, deviceTypeService, vertx);
+        this.deviceHandler = new DeviceHandler(deviceService, deviceTypeService);
     }
 
     /**
@@ -175,7 +174,12 @@ public class ServerVerticle extends AbstractVerticle
         Router router = Router.router(vertx);
 
         // Middleware
-        router.route().handler(CorsHandler.create("*"));
+        router.route().handler(CorsHandler.create()
+                .addOrigin("*")
+                .allowedMethod(HttpMethod.GET)
+                .allowedMethod(HttpMethod.POST)
+                .allowedMethod(HttpMethod.PUT)
+                .allowedMethod(HttpMethod.DELETE));
 
         router.route().handler(BodyHandler.create());
 

@@ -12,7 +12,7 @@ import com.nmslite.utils.ValidationUtil;
 
 import com.nmslite.utils.ResponseUtil;
 
-
+import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.AsyncResult;
 
@@ -29,6 +29,10 @@ import io.vertx.ext.web.RoutingContext;
 import org.slf4j.Logger;
 
 import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * DiscoveryProfileHandler - Handles discovery profile management HTTP requests
@@ -73,7 +77,7 @@ public class DiscoveryProfileHandler
     }
 
     // ========================================
-    // DISCOVERY PROFILE CRUD OPERATIONS (Database Management)
+    // DISCOVERY PROFILE CRUD OPERATIONS
     // ========================================
 
     /**
@@ -106,9 +110,6 @@ public class DiscoveryProfileHandler
     {
         JsonObject requestBody = ctx.body().asJsonObject();
 
-        // ===== COMPREHENSIVE HANDLER VALIDATION =====
-        // Using common validation methods to reduce code redundancy
-
         // Validate all discovery profile basic fields
         if (!ValidationUtil.DiscoveryProfile.validateCreate(ctx, requestBody))
         {
@@ -121,7 +122,7 @@ public class DiscoveryProfileHandler
 
         String deviceTypeId = requestBody.getString("device_type_id");
 
-        io.vertx.core.json.JsonArray credentialProfileIds = requestBody.getJsonArray("credential_profile_ids");
+        JsonArray credentialProfileIds = requestBody.getJsonArray("credential_profile_ids");
 
         logger.info("🔧 Creating discovery profile for {} (range: {})", ipAddress, isRange);
 
@@ -187,13 +188,13 @@ public class DiscoveryProfileHandler
      * @param credentialProfileIds array of credential profile IDs to validate
      * @param resultHandler handler to call with validation result
      */
-    private void validateCredentialProfileIdsExist(RoutingContext ctx, io.vertx.core.json.JsonArray credentialProfileIds,
+    private void validateCredentialProfileIdsExist(RoutingContext ctx, JsonArray credentialProfileIds,
                                                      Handler<AsyncResult<Void>> resultHandler)
     {
-        // Use AtomicInteger to track validation progress
-        java.util.concurrent.atomic.AtomicInteger validatedCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        // Use Atomic Variables to track validation progress
+        AtomicInteger validatedCount = new AtomicInteger(0);
 
-        java.util.concurrent.atomic.AtomicBoolean hasError = new java.util.concurrent.atomic.AtomicBoolean(false);
+        AtomicBoolean hasError = new AtomicBoolean(false);
 
         for (int i = 0; i < credentialProfileIds.size(); i++)
         {

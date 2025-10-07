@@ -34,8 +34,6 @@ import java.io.InputStreamReader;
 
 import java.util.*;
 
-import java.util.concurrent.ConcurrentLinkedQueue;
-
 import java.util.concurrent.TimeUnit;
 
 import com.nmslite.core.QueueBatchProcessor;
@@ -44,7 +42,7 @@ import java.util.stream.Collectors;
 
 /**
  * DiscoveryVerticle - Device Discovery Workflow
- *
+ 
  * Responsibilities:
  * - Single device discovery and validation
  * - Port scanning for device connectivity
@@ -59,15 +57,9 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     private String goEnginePath;
 
-    private String fpingPath;
-
     private int timeoutSeconds;
 
     private int connectionTimeoutSeconds;
-
-    private int retryCount;
-
-    private int fpingTimeoutSeconds;
 
     private int discoveryBatchSize;
 
@@ -102,16 +94,16 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         goEnginePath = toolsConfig.getString("goengine.path", "./goengine/goengine");
 
-        fpingPath = toolsConfig.getString("fping.path", "fping");
+        String fpingPath = toolsConfig.getString("fping.path", "fping");
 
         // GoEngine v7.0.0 configuration parameters
         timeoutSeconds = goEngineConfig.getInteger("timeout.seconds", 30);
 
         connectionTimeoutSeconds = goEngineConfig.getInteger("connection.timeout.seconds", 10);
 
-        retryCount = goEngineConfig.getInteger("retry.count", 2);
+        int retryCount = goEngineConfig.getInteger("retry.count", 2);
 
-        fpingTimeoutSeconds = toolsConfig.getInteger("fping.batch.blocking.timeout.seconds", 180);
+        int fpingTimeoutSeconds = toolsConfig.getInteger("fping.batch.blocking.timeout.seconds", 180);
 
         discoveryBatchSize = discoveryConfig.getInteger("batch.size", 100);
 
@@ -168,7 +160,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Handles test discovery from an existing discovery profile.
-     *
+     
      * This method orchestrates the complete discovery workflow:
      * 1. Fetches discovery profile and associated credentials from database
      * 2. Parses IP targets (single IP or IP range) from profile configuration
@@ -178,12 +170,12 @@ public class DiscoveryVerticle extends AbstractVerticle
      *
      * @param message Event bus message to reply with discovery results
      * @param request JsonObject containing profile_id field
-     *
+     
      * Expected request format:
      * {
      *   "profile_id": "uuid-of-discovery-profile"
      * }
-     *
+     
      * Response format:
      * {
      *   "success": true,
@@ -229,14 +221,14 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Retrieves discovery profile data along with associated credential profiles.
-     *
+     
      * Fetches the discovery profile by ID and enriches it with credential profile data
      * needed for device authentication during discovery. This creates a complete
      * profile object containing all information required for GoEngine execution.
      *
      * @param profileId UUID of the discovery profile to retrieve
      * @return Future<JsonObject> containing complete profile data with credentials
-     *
+     
      * Returned JsonObject structure:
      * {
      *   "profile_id": "uuid",
@@ -278,9 +270,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                 return;
             }
 
-            JsonObject profileData = profileResponse;
-
-            JsonArray credentialIds = profileData.getJsonArray("credential_profile_ids");
+            JsonArray credentialIds = profileResponse.getJsonArray("credential_profile_ids");
 
             // Get credential profiles using CredentialProfileService
             credentialProfileService.credentialGetByIds(credentialIds, credentialResult ->
@@ -305,9 +295,9 @@ public class DiscoveryVerticle extends AbstractVerticle
 
                 JsonArray credentials = dataObject.getJsonArray("credentials");
 
-                profileData.put("credentials", credentials);
+                profileResponse.put("credentials", credentials);
 
-                promise.complete(profileData);
+                promise.complete(profileResponse);
             });
         });
 
@@ -316,22 +306,22 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Parses IP targets from discovery profile configuration.
-     *
+     
      * Converts the IP address specification from the profile into a list of individual
      * IP addresses for discovery. Handles both single IP addresses and IP ranges using
      * the IPRangeUtil utility. Adds target IP list and count to the profile data.
-     *
+     
      * Uses executeBlocking() to avoid blocking the event loop for large IP ranges.
      * While IP range parsing is typically fast (< 1ms for 254 IPs), using executeBlocking()
      * ensures consistency with other blocking operations and future-proofs for larger ranges.
-     *
+     
      * @param profile JsonObject containing discovery profile data with ip_address and is_range fields
      * @return Future<JsonObject> profile data enriched with target_ips array and total_targets count
-     *
+     
      * Input profile must contain:
      * - ip_address: "192.168.1.10" (single) or "192.168.1.1-50" (range)
      * - is_range: boolean indicating if ip_address is a range specification
-     *
+     
      * Output adds:
      * - target_ips: ["192.168.1.1", "192.168.1.2", ...] array of individual IPs
      * - total_targets: integer count of IPs to discover
@@ -386,7 +376,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Filters out IP addresses that already have devices in the database.
-     *
+     
      * Checks each target IP against the device table to identify which IPs already
      * have discovered devices. This prevents duplicate device creation and optimizes
      * discovery by only processing new IPs. Separates IPs into existing and new
@@ -394,10 +384,10 @@ public class DiscoveryVerticle extends AbstractVerticle
      *
      * @param profileData JsonObject containing target_ips array from previous step
      * @return Future<JsonObject> profile data with existing_devices and new_targets arrays
-     *
+     
      * Input requires:
      * - target_ips: array of IP addresses to check
-     *
+    
      * Output adds:
      * - existing_devices: array of JsonObjects for IPs that already have devices
      * - new_targets: array of IP strings that need discovery
@@ -469,8 +459,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "available_for_provision";
 
                             message = "Device already exists and is available for provision";
-
-                            proceedWithDiscovery = false;
                         }
                         else if (isProvisioned && isMonitoring)
                         {
@@ -478,8 +466,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "being_monitored";
 
                             message = "Device already available and is being monitored";
-
-                            proceedWithDiscovery = false;
                         }
                         else if (isProvisioned && !isMonitoring)
                         {
@@ -487,16 +473,12 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "monitoring_disabled";
 
                             message = "Device already available, and monitoring is disabled";
-
-                            proceedWithDiscovery = false;
                         }
                         else
                         {
                             status = "unknown_state";
 
                             message = "Device in unknown state";
-
-                            proceedWithDiscovery = false;
                         }
 
                         devicePromise.complete(new JsonObject()
@@ -535,8 +517,6 @@ public class DiscoveryVerticle extends AbstractVerticle
         Future.all(deviceCheckFutures)
             .onSuccess(compositeFuture ->
             {
-                Set<String> existingIps = new HashSet<>();
-
                 // Process results
                 for (int i = 0; i < compositeFuture.size(); i++)
                 {
@@ -557,8 +537,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                         else
                         {
                             // Device exists and should not be rediscovered
-                            existingIps.add(ip);
-
                             existingDevices.add(new JsonObject()
                                 .put("ip_address", ip)
                                 .put("status", deviceCheck.getString("status"))
@@ -591,7 +569,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Executes discovery in sequential batches for network efficiency and reliability.
-     *
+     
      * Processes new target IPs in configurable batch sizes to avoid overwhelming the
      * network and GoEngine. Uses sequential processing to maintain system stability
      * and provide better error handling. Each batch is processed completely before
@@ -599,16 +577,16 @@ public class DiscoveryVerticle extends AbstractVerticle
      *
      * @param profileData JsonObject containing new_targets array and profile configuration
      * @return Future<JsonObject> profile data with discovery_results array containing all batch results
-     *
+     
      * Input requires:
      * - new_targets: array of IP strings to discover
      * - All profile data (credentials, device_type, port, protocol)
-     *
+     
      * Output adds:
      * - discovery_results: array of discovery result objects from GoEngine
      * - total_processed: integer count of IPs processed
      * - batches_completed: integer count of batches processed
-     *
+     
      * Batch processing configuration:
      * - Default batch size: 50 IPs per batch
      * - Sequential execution: waits for each batch to complete
@@ -650,11 +628,11 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Executes GoEngine discovery with pre-connectivity checks and credential iteration.
-     *
+     
      * Performs a two-stage discovery process:
      * 1. Connectivity checks using fping and port scanning to identify reachable targets
      * 2. GoEngine discovery execution only on reachable IPs for efficiency
-     *
+     
      * This method optimizes discovery by filtering unreachable IPs early, reducing
      * GoEngine execution time and improving overall discovery performance. Uses
      * NetworkConnectivityUtil for fast connectivity validation.
@@ -662,13 +640,13 @@ public class DiscoveryVerticle extends AbstractVerticle
      * @param profileData JsonObject containing discovery profile with credentials and configuration
      * @param targetIps JsonArray of IP address strings to discover
      * @return Future<JsonArray> containing discovery results for all IPs (successful and failed)
-     *
+     
      * Input profileData requires:
      * - credentials: array of credential objects with username/password
      * - device_type_name: string device type for GoEngine
      * - port: integer port number for connectivity checks
      * - protocol: string protocol (ssh/winrm)
-     *
+     
      * Output JsonArray contains:
      * - Successful discoveries: full device information from GoEngine
      * - Failed discoveries: error objects with ip_address, success=false, error message
@@ -739,7 +717,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Performs fast connectivity checks on all target IPs using BATCH fping and port scanning.
-     *
+     
      * Executes efficient batch connectivity validation to quickly identify which IPs are
      * reachable before attempting GoEngine discovery. Uses NetworkConnectivityUtil batch methods
      * for optimal performance. This pre-filtering step significantly improves discovery performance
@@ -748,17 +726,17 @@ public class DiscoveryVerticle extends AbstractVerticle
      * @param targetIps JsonArray of IP address strings to check
      * @param profileData JsonObject containing port number for port connectivity checks
      * @return Future<JsonObject> containing reachable and unreachable IP arrays
-     *
+     
      * Input requirements:
      * - targetIps: array of IP address strings
      * - profileData.port: integer port number to check (e.g., 22 for SSH, 5985 for WinRM)
-     *
+     
      * Output JsonObject structure:
      * {
      *   "reachable": ["192.168.1.10", "192.168.1.15"],
      *   "unreachable": ["192.168.1.11", "192.168.1.12"]
      * }
-     *
+     
      * Connectivity check process (OPTIMIZED):
      * 1. BATCH fping check for all IPs (single fping process)
      * 2. BATCH port check for IPs that passed fping (parallel checks)
@@ -995,16 +973,14 @@ public class DiscoveryVerticle extends AbstractVerticle
             .put("connection_timeout", connectionTimeoutSeconds);
             // Note: retry_count handled by Java, not passed to GoEngine v7.0.0
 
-        // Create the complete discovery_request
-        JsonObject discoveryRequest = new JsonObject()
+        // Create and return the complete discovery_request
+        return new JsonObject()
             .put("discovery_request", new JsonObject()
                 .put("batch_id", batchId)
                 .put("target_ips", targetIpArray)
                 .put("credentials", credentials)
                 .put("discovery_config", discoveryConfig)
             );
-
-        return discoveryRequest;
     }
 
     /**
@@ -1019,21 +995,6 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         // Convert database format (server_linux) to GoEngine format (server linux)
         return dbDeviceType.replace("_", " ");
-    }
-
-    /**
-     * Determine protocol based on device type and port
-     */
-    private String determineProtocol(String deviceType, Integer port)
-    {
-        if (deviceType.contains("windows"))
-        {
-            return "WinRM";
-        }
-        else
-        {
-            return "SSH";
-        }
     }
 
     /**
@@ -1085,10 +1046,8 @@ public class DiscoveryVerticle extends AbstractVerticle
         // Create devices from successful discoveries
         createDevicesFromTestDiscoveries(successfulDevices)
             .onSuccess(createdDevices ->
-            {
                 promise.complete(createTestDiscoveryResponse(profileData, createdDevices.size(), failedDevices.size(),
-                    existingDevices.size(), createdDevices, failedDevices, existingDevices));
-            })
+                    existingDevices.size(), createdDevices, failedDevices, existingDevices)))
             .onFailure(promise::fail);
 
         return promise.future();
@@ -1225,10 +1184,10 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Discovery batch processor using QueueBatchProcessor.
-     *
+     
      * Extends the generic QueueBatchProcessor to handle discovery-specific batch processing.
      * Uses GoEngine's built-in credential iteration (tests multiple credentials per IP until one succeeds).
-     *
+     
      * Features:
      * - Sequential batch processing of IP addresses
      * - GoEngine credential iteration for each IP
@@ -1241,7 +1200,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         /**
          * Constructor for DiscoveryBatchProcessor.
-         *
+         
          * Initializes the processor with profile data and target IPs.
          * Converts JsonArray to List for QueueBatchProcessor.
          *
@@ -1263,7 +1222,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         /**
          * Process a batch of IP addresses using GoEngine discovery.
-         *
+         
          * Converts the batch of IP strings to JsonArray and executes GoEngine discovery.
          * GoEngine handles credential iteration internally for each IP.
          *
@@ -1282,7 +1241,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         /**
          * Handle batch processing failure.
-         *
+         
          * Logs the failed IPs for debugging. The batch processor will continue
          * with the next batch (fail-tolerant behavior).
          *

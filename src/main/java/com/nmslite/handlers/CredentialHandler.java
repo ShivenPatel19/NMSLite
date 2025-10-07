@@ -30,8 +30,6 @@ import org.slf4j.LoggerFactory;
 public class CredentialHandler
 {
 
-    private static final Logger logger = LoggerFactory.getLogger(CredentialHandler.class);
-
     private final CredentialProfileService credentialProfileService;
 
     /**

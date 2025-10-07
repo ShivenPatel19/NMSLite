@@ -12,19 +12,11 @@ import com.nmslite.utils.ResponseUtil;
 
 
 
-import io.vertx.config.ConfigRetriever;
-
-import io.vertx.core.Vertx;
-
 import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.json.JsonObject;
 
 import io.vertx.ext.web.RoutingContext;
-
-import org.slf4j.Logger;
-
-import org.slf4j.LoggerFactory;
 
 import java.util.UUID;
 
@@ -42,33 +34,21 @@ import java.util.UUID;
 public class DeviceHandler
 {
 
-    private static final Logger logger = LoggerFactory.getLogger(DeviceHandler.class);
-
     private final DeviceService deviceService;
 
     private final DeviceTypeService deviceTypeService;
-
-    private final Vertx vertx;
-
-    private final JsonObject config;
 
     /**
      * Constructor for DeviceHandler.
      *
      * @param deviceService service proxy for device database operations
      * @param deviceTypeService service proxy for device type database operations
-     * @param vertx Vert.x instance for configuration retrieval
      */
-    public DeviceHandler(DeviceService deviceService, DeviceTypeService deviceTypeService, Vertx vertx)
+    public DeviceHandler(DeviceService deviceService, DeviceTypeService deviceTypeService)
     {
         this.deviceService = deviceService;
 
         this.deviceTypeService = deviceTypeService;
-
-        this.vertx = vertx;
-
-        // Load configuration
-        this.config = ConfigRetriever.create(vertx).getCachedConfig();
     }
 
     // ========================================
@@ -123,8 +103,6 @@ public class DeviceHandler
     public void softDeleteDevice(RoutingContext ctx)
     {
         String deviceId = ctx.pathParam("id");
-
-        JsonObject requestBody = ctx.body().asJsonObject();
 
         // ===== PATH PARAMETER VALIDATION =====
         if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
@@ -328,47 +306,6 @@ public class DeviceHandler
             }
         });
     }
-
-    // ========================================
-    // DEVICE PROVISIONING
-    // ========================================
-
-    // COMMENTED OUT FOR TESTING - Device Provisioning API
-    // /**
-    //  * Provision devices from a discovery profile (supports IP ranges)
-    //  * This endpoint creates individual devices from discovery profile data
-    //  */
-    // public void provisionDevicesFromProfile(RoutingContext ctx) {
-    //     String profileId = ctx.pathParam("profileId");
-
-    //     // ===== PATH PARAMETER VALIDATION =====
-    //     if (profileId == null || profileId.trim().isEmpty()) {
-    //         ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Profile ID is required"),
-    //             "Discovery profile ID is required");
-    //         return;
-    //     }
-
-    //     try {
-    //         java.util.UUID.fromString(profileId);
-    //     } catch (IllegalArgumentException e) {
-    //         ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
-    //             "Discovery profile ID must be a valid UUID");
-    //         return;
-    //     }
-
-    //     logger.info("🔧 Provisioning devices from discovery profile: {}", profileId);
-
-    //     // TODO: Implement device provisioning from discovery profile
-    //     // This should find devices created from the discovery profile and set them as provisioned
-    //     // For now, return a placeholder response
-    //     JsonObject result = new JsonObject()
-    //         .put("success", true)
-    //         .put("message", "Device provisioning from discovery profile not yet implemented")
-    //         .put("profile_id", profileId);
-
-    //     logger.warn("⚠️ Device provisioning from discovery profile not yet implemented for profile: {}", profileId);
-    //     ResponseUtil.handleSuccess(ctx, result);
-    // }
 
     // ========================================
     // DEVICE TYPES

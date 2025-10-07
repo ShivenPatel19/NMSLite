@@ -4,16 +4,14 @@
  * This package contains all database service interfaces and implementations
  * for the NMSLite Network Management System.
  *
- * Active Services:
+ * Services:
  * - UserService - User management and authentication
  * - DeviceTypeService - Device type management
- * - CredentialService - Credential profile management
- * - DiscoveryService - Discovery profile management
+ * - CredentialProfileService - Credential profile management
+ * - DiscoveryProfileService - Discovery profile management
  * - DeviceService - Device CRUD and monitoring
- *
- * Disabled Services (commented out):
- * - MetricsService - Time-series metrics data (polling disabled)
- * - AvailabilityService - Device availability tracking (polling disabled)
+ * - MetricsService - Time-series metrics data collection
+ * - AvailabilityService - Device availability tracking
  *
  * All services use Vert.x ProxyGen for type-safe event bus communication.
  */

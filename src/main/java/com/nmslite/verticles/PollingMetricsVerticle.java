@@ -53,7 +53,7 @@ import java.util.stream.Collectors;
 
 /**
  * PollingMetricsVerticle - Continuous Device Monitoring
- *
+
  * Responsibilities:
  * - Periodic polling of active devices
  * - Batch fping for connectivity validation
@@ -212,12 +212,12 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Load all eligible devices from database into in-memory cache.
-     *
+
      * Queries devices where:
      * - is_provisioned = true
      * - is_monitoring_enabled = true
      * - is_deleted = false
-     *
+
      * Joins with credential_profiles to get username and password.
      *
      * @return Future with count of devices loaded
@@ -275,7 +275,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Create PollingDevice from database JSON.
-     *
+
      * Maps database fields to PollingDevice model and computes runtime state.
      *
      * @param deviceData JSON from database query
@@ -316,7 +316,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         // Global config (from config file, same for all devices)
         pd.connectionTimeoutSeconds = defaultConnectionTimeoutSeconds;
 
-        // Timestamps (PostgreSQL returns timestamps without 'Z', need to append it for ISO-8601)
+        // Timestamps (PostgresSQL returns timestamps without 'Z', need to append it for ISO-8601)
         String monitoringEnabledAtStr = deviceData.getString("monitoring_enabled_at");
 
         pd.monitoringEnabledAt = monitoringEnabledAtStr != null
@@ -341,11 +341,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Compute aligned next poll time from anchor.
-     *
+
      * This ensures fixed cadence without drift:
      * - Anchor: monitoring_enabled_at
      * - Next = anchor + ceil((now - anchor) / interval) * interval
-     *
+
      * Example:
      * - Anchor: 10:00:00 (device monitoring enabled)
      * - Interval: 600s (10 min)
@@ -354,7 +354,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * - Cycles passed: 7 (4440 / 600 = 7.4)
      * - Next cycle: 8
      * - Next poll: 10:00:00 + (8 × 600s) = 10:00:00 + 4800s = 11:20:00
-     *
+
      * Timeline:
      * 10:00:00 → 10:10:00 → 10:20:00 → 10:30:00 → 10:40:00 → 10:50:00 → 11:00:00 → 11:10:00 → [11:20:00] ← Next
      * Cycle 0     Cycle 1     Cycle 2     Cycle 3     Cycle 4     Cycle 5     Cycle 6     Cycle 7     Cycle 8
@@ -380,13 +380,13 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Phase 1: Batch Processing
-     *
+
      * Process devices in batches:
      * 1. Batch fping connectivity check
      * 2. For alive devices: GoEngine metrics collection
      * 3. For dead devices: Record connectivity failure
      * 4. Update device schedules and failure counters
-     *
+
      * Uses QueueBatchProcessor for sequential batch processing.
      *
      * @param dueDevices List of devices due for polling
@@ -543,7 +543,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Poll metrics for multiple devices in a batch using GoEngine streaming output
-     *
+
      * GoEngine processes devices in parallel and outputs results as they become available.
      * Each result is a separate JSON line on stdout.
      *
@@ -687,7 +687,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             {
                 logger.warn("❌ GoEngine batch exited with code: {}", exitCode);
 
-                if (errorOutput.length() > 0)
+                if (!errorOutput.isEmpty())
                 {
                     logger.warn("❌ GoEngine stderr: {}", errorOutput.toString().trim());
                 }
@@ -707,15 +707,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Phase 2: Retry Failed Devices (BATCH MODE)
-     *
+
      * Retry devices that failed in Phase 1 using batch processing.
      * Uses the same batch approach as Phase 1 for consistency and efficiency.
      *
      * @param failedDevices Devices that failed in Phase 1
-     * @param now Current timestamp
      * @return Future with list of exhausted devices (failed after all retries)
      */
-    private Future<List<PollingDevice>> executePhaseRetryFailures(List<PollingDevice> failedDevices, Instant now)
+    private Future<List<PollingDevice>> executePhaseRetryFailures(List<PollingDevice> failedDevices)
     {
         Promise<List<PollingDevice>> promise = Promise.promise();
 
@@ -778,7 +777,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Phase 3: Log Exhausted Failures
-     *
+
      * Log devices that failed after exhausting all retries to file.
      *
      * @param exhaustedDevices Devices that failed after all retries
@@ -850,7 +849,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Phase 4: Auto-Disable
-     *
+
      * Disable monitoring for devices that have exceeded max_cycles_skipped consecutive failures.
      *
      * @return Future<Void>
@@ -920,7 +919,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Store metrics in database
-     *
+
      * Transforms GoEngine response format to database schema format:
      * GoEngine: {"cpu":{"usage_percent":15.2},"memory":{...},"disk":{...},"duration_ms":582}
      * Database: {"cpu_usage_percent":15.2,"memory_usage_percent":...,"duration_ms":582}
@@ -1135,19 +1134,19 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Execute 4-phase polling cycle:
-     *
+
      * Phase 1: Batch Processing
      *   - Filter devices due for polling (using aligned scheduling)
      *   - Process in batches with fping + GoEngine
      *   - Track failures
-     *
+
      * Phase 2: Retry Failed Devices
      *   - Retry devices that failed in Phase 1
      *   - Use per-device retry_count
-     *
+
      * Phase 3: Log Exhausted Failures
      *   - Log devices that failed after all retries to file
-     *
+
      * Phase 4: Auto-Disable
      *   - Disable monitoring for devices exceeding max_cycles_skipped
      */
@@ -1190,17 +1189,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
             pd.deviceName, pd.nextScheduledAt));
 
         // Phase 1: Batch Processing
+        // Phase 2: Retry Failed Devices
+        // Phase 3: Log Exhausted Failures
         executePhaseBatchProcessing(dueDevices)
-            .compose(failedDevices ->
-            {
-                // Phase 2: Retry Failed Devices
-                return executePhaseRetryFailures(failedDevices, now);
-            })
-            .compose(exhaustedDevices ->
-            {
-                // Phase 3: Log Exhausted Failures
-                return executePhaseLogFailures(exhaustedDevices);
-            })
+            .compose(this::executePhaseRetryFailures)
+            .compose(this::executePhaseLogFailures)
             .compose(v ->
             {
                 // Phase 4: Auto-Disable
@@ -1227,7 +1220,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Execute batch fping check for multiple IPs (EFFICIENT - single fping process)
-     *
+
      * Uses fping's batch mode: writes all IPs to stdin and reads results from stdout.
      * This is much more efficient than running individual fping processes.
      *
@@ -1304,7 +1297,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Execute batch port connectivity check using Java Socket
-     *
+
      * Checks if the service port (SSH 22 or WinRM 5985) is reachable.
      * Uses parallel streams for concurrent port checks with timeout.
      *
@@ -1367,10 +1360,10 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Polling batch processor using QueueBatchProcessor.
-     *
+
      * Extends the generic QueueBatchProcessor to handle polling-specific batch processing.
      * Processes devices in batches with fping, port check, and GoEngine metrics collection.
-     *
+
      * Features:
      * - Sequential batch processing of devices
      * - Connectivity pre-filtering (fping + port check)
@@ -1384,7 +1377,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         /**
          * Constructor for PollingBatchProcessor.
-         *
+
          * Initializes the processor with devices to poll.
          *
          * @param devices List of devices to poll in batches
@@ -1400,7 +1393,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         /**
          * Process a batch of devices.
-         *
+
          * Executes the complete polling workflow for a batch:
          * 1. Batch fping connectivity check
          * 2. Port reachability check for alive devices
@@ -1426,7 +1419,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         /**
          * Handle batch processing failure.
-         *
+
          * Marks all devices in the failed batch as failed and adds them to the failed devices list.
          * The batch processor will continue with the next batch (fail-tolerant behavior).
          *
