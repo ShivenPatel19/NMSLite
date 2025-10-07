@@ -62,3 +62,5 @@ secrets.json
 *.db
 *.sqlite
 database/queries.sql
+
+goengine/GOENGINE_INTEGRATION_GUIDE.md
