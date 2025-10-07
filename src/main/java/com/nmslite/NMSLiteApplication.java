@@ -39,7 +39,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * NMSLite Application - Main Entry Point
+ * NMSLite Application - Main Entry Point (Vert.x 4.5.10)
  *
  * 4-Verticle Architecture:
  * - DatabaseVerticle: All database operations (ProxyGen enabled)
