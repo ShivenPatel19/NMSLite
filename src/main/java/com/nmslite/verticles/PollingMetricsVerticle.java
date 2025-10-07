@@ -23,7 +23,7 @@ import com.nmslite.services.AvailabilityService;
 
 import com.nmslite.utils.PasswordUtil;
 
-import com.nmslite.utils.QueueBatchProcessor;
+import com.nmslite.core.QueueBatchProcessor;
 
 import io.vertx.core.AbstractVerticle;
 

@@ -6,9 +6,11 @@ import com.nmslite.services.DeviceTypeService;
 
 import com.nmslite.utils.ExceptionUtil;
 
-import com.nmslite.utils.CommonValidationUtil;
+import com.nmslite.utils.ValidationUtil;
 
-import com.nmslite.utils.DeviceValidationUtil;
+import com.nmslite.utils.ResponseUtil;
+
+
 
 import io.vertx.config.ConfigRetriever;
 
@@ -84,7 +86,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -104,7 +106,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -125,7 +127,7 @@ public class DeviceHandler
         JsonObject requestBody = ctx.body().asJsonObject();
 
         // ===== PATH PARAMETER VALIDATION =====
-        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
         {
             return;
         }
@@ -134,7 +136,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -153,7 +155,7 @@ public class DeviceHandler
         String deviceId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
-        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
         {
             return;
         }
@@ -162,7 +164,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -181,7 +183,7 @@ public class DeviceHandler
         String deviceId = ctx.pathParam("id");
 
         // Validate device ID
-        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
         {
             return;
         }
@@ -190,7 +192,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -208,7 +210,7 @@ public class DeviceHandler
     {
         String deviceId = ctx.pathParam("id");
 
-        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
         {
             return;
         }
@@ -217,7 +219,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -278,7 +280,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, new JsonObject()
+                ResponseUtil.handleSuccess(ctx, new JsonObject()
                     .put("results", ar.result())
                     .put("total", deviceIds.size()));
             }
@@ -302,13 +304,13 @@ public class DeviceHandler
 
         // ===== VALIDATION =====
         // 1) Validate path parameter
-        if (!CommonValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
         {
             return;
         }
 
         // 2) Validate request body and fields
-        if (!DeviceValidationUtil.validateDeviceUpdate(ctx, body))
+        if (!ValidationUtil.Device.validateUpdate(ctx, body))
         {
             return;
         }
@@ -318,7 +320,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -365,7 +367,7 @@ public class DeviceHandler
     //         .put("profile_id", profileId);
 
     //     logger.warn("⚠️ Device provisioning from discovery profile not yet implemented for profile: {}", profileId);
-    //     ExceptionUtil.handleSuccess(ctx, result);
+    //     ResponseUtil.handleSuccess(ctx, result);
     // }
 
     // ========================================
@@ -384,7 +386,7 @@ public class DeviceHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, new JsonObject().put("device_types", ar.result()));
+                ResponseUtil.handleSuccess(ctx, new JsonObject().put("device_types", ar.result()));
             }
             else
             {

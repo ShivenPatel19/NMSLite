@@ -58,18 +58,7 @@ application-prod.conf
 credentials.json
 secrets.json
 
-# Database files (keep schema)
+# Database files (keep schema only)
 *.db
 *.sqlite
-!database/
 database/queries.sql
-
-# Documentation (exclude generated docs)
-API_DOCUMENTATION.md
-PROJECT_GLOBAL_MAP.md
-DATABASE_SERVICES_INTEGRATION.md
-
-# GoEngine reference
-goengine/goengine\ referance/
-"goengine/goengine referance/"
-goengine/GOENGINE_INTEGRATION_GUIDE.md

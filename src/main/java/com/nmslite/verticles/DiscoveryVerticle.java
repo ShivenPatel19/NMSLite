@@ -38,7 +38,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 import java.util.concurrent.TimeUnit;
 
-import com.nmslite.utils.QueueBatchProcessor;
+import com.nmslite.core.QueueBatchProcessor;
 
 import java.util.stream.Collectors;
 

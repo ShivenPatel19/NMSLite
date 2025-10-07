@@ -8,9 +8,11 @@ import com.nmslite.services.DeviceTypeService;
 
 import com.nmslite.utils.ExceptionUtil;
 
-import com.nmslite.utils.DiscoveryProfileValidationUtil;
+import com.nmslite.utils.ValidationUtil;
 
-import com.nmslite.utils.CommonValidationUtil;
+import com.nmslite.utils.ResponseUtil;
+
+
 
 import io.vertx.core.AsyncResult;
 
@@ -85,7 +87,7 @@ public class DiscoveryProfileHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, new JsonObject().put("discovery_profiles", ar.result()));
+                ResponseUtil.handleSuccess(ctx, new JsonObject().put("discovery_profiles", ar.result()));
             }
             else
             {
@@ -108,7 +110,7 @@ public class DiscoveryProfileHandler
         // Using common validation methods to reduce code redundancy
 
         // Validate all discovery profile basic fields
-        if (!DiscoveryProfileValidationUtil.validateDiscoveryProfileBasicFields(ctx, requestBody))
+        if (!ValidationUtil.DiscoveryProfile.validateCreate(ctx, requestBody))
         {
             return; // Validation failed, response already sent
         }
@@ -252,7 +254,7 @@ public class DiscoveryProfileHandler
                 logger.info("✅ Discovery profile created successfully for {} with port {}",
                     ipAddress, requestBody.getValue("port"));
 
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -273,7 +275,7 @@ public class DiscoveryProfileHandler
         String profileId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
-        if (!CommonValidationUtil.validatePathParameterUUID(ctx, profileId, "Discovery profile ID"))
+        if (!ValidationUtil.validatePathParameterUUID(ctx, profileId, "Discovery profile ID"))
         {
             return;
         }
@@ -282,7 +284,7 @@ public class DiscoveryProfileHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -307,7 +309,7 @@ public class DiscoveryProfileHandler
         JsonObject requestBody = ctx.body().asJsonObject();
 
         // Validate required fields
-        if (!CommonValidationUtil.validateRequiredFields(ctx, requestBody, "profile_id"))
+        if (!ValidationUtil.validateRequiredFields(ctx, requestBody, "profile_id"))
         {
             return;
         }
@@ -327,7 +329,7 @@ public class DiscoveryProfileHandler
                            result.getInteger("devices_discovered", 0),
                            result.getInteger("devices_failed", 0));
 
-                ExceptionUtil.handleSuccess(ctx, result);
+                ResponseUtil.handleSuccess(ctx, result);
             })
             .onFailure(cause ->
             {

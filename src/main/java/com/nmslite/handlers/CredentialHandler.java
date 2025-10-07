@@ -4,7 +4,10 @@ import com.nmslite.services.CredentialProfileService;
 
 import com.nmslite.utils.ExceptionUtil;
 
-import com.nmslite.utils.CredentialValidationUtil;
+import com.nmslite.utils.ValidationUtil;
+
+import com.nmslite.utils.ResponseUtil;
+
 
 import io.vertx.core.json.JsonObject;
 
@@ -56,7 +59,7 @@ public class CredentialHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, new JsonObject().put("credentials", ar.result()));
+                ResponseUtil.handleSuccess(ctx, new JsonObject().put("credentials", ar.result()));
             }
             else
             {
@@ -76,7 +79,7 @@ public class CredentialHandler
 
         // ===== COMPREHENSIVE HANDLER VALIDATION =====
         // Using common validation methods to reduce code redundancy
-        if (!CredentialValidationUtil.validateCredentialBasicFields(ctx, requestBody))
+        if (!ValidationUtil.Credential.validateCreate(ctx, requestBody))
         {
             return; // Validation failed, response already sent
         }
@@ -85,7 +88,7 @@ public class CredentialHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -130,7 +133,7 @@ public class CredentialHandler
         }
 
         // 2. Validate credential update fields
-        if (!CredentialValidationUtil.validateCredentialUpdate(ctx, requestBody))
+        if (!ValidationUtil.Credential.validateUpdate(ctx, requestBody))
         {
             return; // Validation failed, response already sent
         }
@@ -139,7 +142,7 @@ public class CredentialHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -182,7 +185,7 @@ public class CredentialHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {

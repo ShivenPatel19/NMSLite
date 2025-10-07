@@ -68,7 +68,7 @@ public class PollingDevice
     /**
      * Converts the PollingDevice to GoEngine JSON format for metrics collection.
      *
-     * GoEngine v7.0.0 expects:
+     * GoEngine  expects:
      * {
      *   "address": "10.0.0.1",
      *   "device_type": "server linux",
@@ -79,7 +79,7 @@ public class PollingDevice
      *   "connection_timeout": 10
      * }
      *
-     * Note: retry_count is handled by Java backend, not passed to GoEngine v7.0.0
+     * Note: retry_count is handled by Java backend, not passed to GoEngine 
      *
      * @return JsonObject formatted for GoEngine consumption
      */
@@ -93,7 +93,6 @@ public class PollingDevice
             .put("port", port)
             .put("timeout_seconds", timeoutSeconds)
             .put("connection_timeout", connectionTimeoutSeconds);
-            // retry_count handled by Java, not passed to GoEngine v7.0.0
     }
 
     /**

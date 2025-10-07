@@ -130,8 +130,10 @@ public class DeviceServiceImpl implements DeviceService
     private int getDefaultPollingInterval()
     {
         return config.getJsonObject("device", new JsonObject())
+
                 .getJsonObject("defaults", new JsonObject())
-                .getInteger("device.polling.interval.seconds", 300);
+
+                .getInteger("polling.interval.seconds", 300);
     }
 
     /**
@@ -142,8 +144,10 @@ public class DeviceServiceImpl implements DeviceService
     private int getDefaultTimeout()
     {
         return config.getJsonObject("device", new JsonObject())
+
                 .getJsonObject("defaults", new JsonObject())
-                .getInteger("device.timeout.seconds", 300);
+
+                .getInteger("timeout.seconds", 60);
     }
 
     /**

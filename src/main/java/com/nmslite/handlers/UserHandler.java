@@ -4,9 +4,12 @@ import com.nmslite.services.UserService;
 
 import com.nmslite.utils.ExceptionUtil;
 
+import com.nmslite.utils.ValidationUtil;
+
+import com.nmslite.utils.ResponseUtil;
+
 import com.nmslite.utils.JWTUtil;
 
-import com.nmslite.utils.UserValidationUtil;
 
 import io.vertx.core.json.JsonObject;
 
@@ -84,7 +87,7 @@ public class UserHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, new JsonObject().put("users", ar.result()));
+                ResponseUtil.handleSuccess(ctx, new JsonObject().put("users", ar.result()));
             }
             else
             {
@@ -102,7 +105,7 @@ public class UserHandler
     {
         JsonObject body = ctx.body().asJsonObject();
 
-        if (!UserValidationUtil.validateUserBasicFields(ctx, body))
+        if (!ValidationUtil.User.validateCreate(ctx, body))
         {
             return; // Validation failed, response already sent
         }
@@ -116,7 +119,7 @@ public class UserHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -158,7 +161,7 @@ public class UserHandler
         }
 
         // 2. Validate user update fields
-        if (!UserValidationUtil.validateUserUpdate(ctx, body))
+        if (!ValidationUtil.User.validateUpdate(ctx, body))
         {
             return; // Validation failed, response already sent
         }
@@ -167,7 +170,7 @@ public class UserHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -210,7 +213,7 @@ public class UserHandler
         {
             if (ar.succeeded())
             {
-                ExceptionUtil.handleSuccess(ctx, ar.result());
+                ResponseUtil.handleSuccess(ctx, ar.result());
             }
             else
             {
@@ -232,7 +235,7 @@ public class UserHandler
     {
         JsonObject body = ctx.body().asJsonObject();
 
-        if (!UserValidationUtil.validateUserAuthentication(ctx, body))
+        if (!ValidationUtil.User.validateAuthentication(ctx, body))
         {
             return; // Validation failed, response already sent
         }
@@ -271,7 +274,7 @@ public class UserHandler
 
                         logger.info("✅ JWT token generated for user: {}", authenticatedUsername);
 
-                        ExceptionUtil.handleSuccess(ctx, enhancedResult);
+                        ResponseUtil.handleSuccess(ctx, enhancedResult);
 
                     }
                     catch (Exception exception)
@@ -284,7 +287,7 @@ public class UserHandler
                 else
                 {
                     // Authentication failed - no token generation
-                    ExceptionUtil.handleSuccess(ctx, authResult);
+                    ResponseUtil.handleSuccess(ctx, authResult);
                 }
             }
             else
@@ -315,7 +318,7 @@ public class UserHandler
             .put("success", true)
             .put("message", "Logout successful - please discard your JWT token");
 
-        ExceptionUtil.handleSuccess(ctx, response);
+        ResponseUtil.handleSuccess(ctx, response);
     }
 }
 
