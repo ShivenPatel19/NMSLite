@@ -1,8 +1,8 @@
 package com.nmslite;
 
-import com.nmslite.core.LoggingConfigurator;
+import com.nmslite.core.DatabaseInitializer;
 
-import com.nmslite.verticles.DatabaseVerticle;
+import com.nmslite.core.LoggingConfigurator;
 
 import com.nmslite.verticles.DiscoveryVerticle;
 
@@ -39,13 +39,17 @@ import java.util.List;
 /**
  * NMSLite Application - Main Entry Point (Vert.x 5.0.4)
 
- * 4-Verticle Architecture:
- * - DatabaseVerticle: All database operations (ProxyGen enabled)
+ * 3-Verticle Architecture:
  * - ServerVerticle: HTTP API server
  * - PollingMetricsVerticle: Continuous device monitoring
  * - DiscoveryVerticle: Device discovery workflow
 
+ * Database Services:
+ * - Initialized at startup via DatabaseInitializer (no verticle needed)
+ * - All 7 ProxyGen services registered before verticles deploy
+
  * Features:
+ * - Database initialization before verticle deployment
  * - Single method to deploy all verticles
  * - Graceful deployment failure cleanup
  * - Comprehensive shutdown handling
@@ -61,6 +65,8 @@ public class NMSLiteApplication
 
     private static WorkerExecutor workerExecutor;
 
+    private static DatabaseInitializer databaseInitializer;
+
     private static final List<String> deployedVerticleIds = new ArrayList<>();
 
     /**
@@ -75,7 +81,7 @@ public class NMSLiteApplication
 
         vertx = Vertx.vertx();
 
-        // Load configuration and deploy all verticles
+        // Load configuration, initialize database, and deploy all verticles
         loadConfiguration()
             .compose(config ->
             {
@@ -87,6 +93,11 @@ public class NMSLiteApplication
                 // Create shared worker executor
                 setupWorkerExecutor(config);
 
+                // Initialize database services BEFORE deploying verticles
+                return initializeDatabase(config);
+            })
+            .compose(config ->
+            {
                 // Deploy all verticles using single method
                 return deployAllVerticles(config);
             })
@@ -131,33 +142,44 @@ public class NMSLiteApplication
     }
 
     /**
+     * Initializes database connection and registers all ProxyGen services.
+     * This happens BEFORE any verticles are deployed to ensure services are ready.
+     *
+     * @param config Application configuration
+     * @return Future containing the config (for chaining)
+     */
+    private static Future<JsonObject> initializeDatabase(JsonObject config)
+    {
+        logger.info("🔧 Initializing database services before verticle deployment");
+
+        databaseInitializer = new DatabaseInitializer(vertx, config.getJsonObject("database", new JsonObject()));
+
+        return databaseInitializer.initialize()
+            .compose(v ->
+            {
+                logger.info("✅ Database services initialized and ready");
+
+                return Future.succeededFuture(config);
+            });
+    }
+
+    /**
      * Deploys all verticles in sequence using a single method.
-     * Order: DatabaseVerticle → ServerVerticle → PollingMetricsVerticle → DiscoveryVerticle
+     * Order: ServerVerticle → PollingMetricsVerticle → DiscoveryVerticle
+     * Note: Database services are already initialized before this method is called
      *
      * @param config Application configuration
      * @return Future that completes when all verticles are deployed
      */
     private static Future<Void> deployAllVerticles(JsonObject config)
     {
-        logger.info("🚀 Deploying all verticles - 4-Verticle Architecture");
+        logger.info("🚀 Deploying all verticles - 3-Verticle Architecture");
 
-        // Deploy DatabaseVerticle
-        var dbOptions = new DeploymentOptions()
-            .setConfig(config.getJsonObject("database", new JsonObject()));
+        // Deploy ServerVerticle
+        var serverOptions = new DeploymentOptions()
+            .setConfig(config.getJsonObject("server", new JsonObject()));
 
-        return vertx.deployVerticle(new DatabaseVerticle(), dbOptions)
-            .compose(dbId ->
-            {
-                deployedVerticleIds.add(dbId);
-
-                logger.info("✅ DatabaseVerticle deployed: {}", dbId);
-
-                // Deploy ServerVerticle
-                var serverOptions = new DeploymentOptions()
-                    .setConfig(config.getJsonObject("server", new JsonObject()));
-
-                return vertx.deployVerticle(new ServerVerticle(), serverOptions);
-            })
+        return vertx.deployVerticle(new ServerVerticle(), serverOptions)
             .compose(serverId ->
             {
                 deployedVerticleIds.add(serverId);
@@ -192,7 +214,7 @@ public class NMSLiteApplication
 
                 logger.info("📊 Total verticles deployed: {}", deployedVerticleIds.size());
 
-                logger.info("🎯 NMSLite is ready with full 4-verticle architecture!");
+                logger.info("🎯 NMSLite is ready with 3-verticle architecture + database services!");
 
                 return Future.<Void>succeededFuture();
             })
@@ -201,7 +223,7 @@ public class NMSLiteApplication
     }
 
     /**
-     * Cleans up all deployed verticles and resources.
+     * Cleans up all deployed verticles, database resources, and worker executor.
      *
      * @return Future that completes when cleanup is done
      */
@@ -209,19 +231,32 @@ public class NMSLiteApplication
     {
         logger.info("🧹 Starting cleanup...");
 
+        var cleanupFutures = new ArrayList<Future<Void>>();
+
+        // Cleanup database resources
+        if (databaseInitializer != null)
+        {
+            cleanupFutures.add(databaseInitializer.cleanup());
+        }
+
         if (deployedVerticleIds.isEmpty())
         {
             logger.info("✅ No verticles to cleanup");
 
-            // Close worker executor
-            if (workerExecutor != null)
-            {
-                workerExecutor.close();
+            // Wait for database cleanup
+            return Future.join(cleanupFutures)
+                .compose(result ->
+                {
+                    // Close worker executor
+                    if (workerExecutor != null)
+                    {
+                        workerExecutor.close();
 
-                logger.info("✅ Worker executor closed");
-            }
+                        logger.info("✅ Worker executor closed");
+                    }
 
-            return Future.succeededFuture();
+                    return Future.<Void>succeededFuture();
+                });
         }
 
         // Undeploy all verticles
@@ -237,7 +272,9 @@ public class NMSLiteApplication
         }
 
         // Wait for all undeployments to complete
-        return Future.join(undeployFutures)
+        cleanupFutures.addAll(undeployFutures);
+
+        return Future.join(cleanupFutures)
             .compose(result ->
             {
                 logger.info("✅ All verticles undeploy successfully");

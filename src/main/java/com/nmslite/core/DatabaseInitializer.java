@@ -1,14 +1,16 @@
-package com.nmslite.verticles;
+package com.nmslite.core;
 
 import com.nmslite.services.*;
 
 import com.nmslite.services.impl.*;
 
-import io.vertx.core.AbstractVerticle;
-
 import io.vertx.core.Future;
 
 import io.vertx.core.Promise;
+
+import io.vertx.core.Vertx;
+
+import io.vertx.core.json.JsonObject;
 
 import io.vertx.pgclient.PgBuilder;
 
@@ -25,28 +27,30 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * DatabaseVerticle - Comprehensive Database Operations with Vert.x ProxyGen
-
- * This verticle manages all database services using ProxyGen:
- * - UserService - User management operations
- * - DeviceTypeService - Device type management
- * - CredentialService - Credential profile management
- * - DiscoveryService - Discovery profile management
- * - DeviceService - Device management operations
- * - MetricsService - Device metrics and time-series data
- * - AvailabilityService - Device availability status tracking
-
- * Features:
- * - PostgresSQL connection management
- * - Multiple service proxy registration
- * - Automatic event bus binding
- * - Health monitoring for all services
- * - Centralized database operations
+ * DatabaseInitializer - One-time Database Setup and Service Registration
+ *
+ * This class replaces DatabaseVerticle by performing all database initialization
+ * tasks during application startup, before any verticles are deployed.
+ *
+ * Tasks performed:
+ * - Creates PostgreSQL connection pool
+ * - Instantiates all service implementations
+ * - Registers all ProxyGen services on event bus
+ *
+ * Benefits:
+ * - No thread consumed by idle verticle
+ * - Database services ready before other verticles start
+ * - Maintains ProxyGen architecture
+ * - Clean separation of initialization logic
  */
-public class DatabaseVerticle extends AbstractVerticle
+public class DatabaseInitializer
 {
 
-    private static final Logger logger = LoggerFactory.getLogger(DatabaseVerticle.class);
+    private static final Logger logger = LoggerFactory.getLogger(DatabaseInitializer.class);
+
+    private final Vertx vertx;
+
+    private final JsonObject databaseConfig;
 
     private Pool pgPool;
 
@@ -68,19 +72,30 @@ public class DatabaseVerticle extends AbstractVerticle
     private AvailabilityServiceImpl availabilityService;
 
     /**
-     * Starts the database verticle by creating PostgresSQL pool, instantiating service implementations,
-     * and registering all ProxyGen services on the event bus.
+     * Creates a new DatabaseInitializer instance.
      *
-     * @param startPromise Promise completed when all services are registered successfully
+     * @param vertx Vert.x instance
+     * @param databaseConfig Database configuration from application.conf
      */
-    @Override
-    public void start(Promise<Void> startPromise)
+    public DatabaseInitializer(Vertx vertx, JsonObject databaseConfig)
     {
-        logger.info("🔧 Starting DatabaseVerticle - Comprehensive Database Services");
+        this.vertx = vertx;
+        this.databaseConfig = databaseConfig;
+    }
 
-        // Setup PostgresSQL connection
-        setupDatabaseConnection()
-            .onSuccess(pool ->
+    /**
+     * Initializes database connection, creates service implementations,
+     * and registers all ProxyGen services on the event bus.
+     *
+     * @return Future that completes when all initialization is done
+     */
+    public Future<Void> initialize()
+    {
+        logger.info("🔧 Starting Database Initialization - Setting up all services");
+
+        // Setup PostgreSQL connection
+        return setupDatabaseConnection()
+            .compose(pool ->
             {
                 this.pgPool = pool;
 
@@ -92,21 +107,17 @@ public class DatabaseVerticle extends AbstractVerticle
                 // Register all services with ProxyGen
                 registerAllServiceProxies();
 
-                logger.info("🚀 DatabaseVerticle started successfully with all 7 services");
+                logger.info("🚀 Database initialization completed successfully with all 7 services");
 
-                startPromise.complete();
+                return Future.<Void>succeededFuture();
             })
             .onFailure(cause ->
-            {
-                logger.error("❌ Failed to start DatabaseVerticle", cause);
-
-                startPromise.fail(cause);
-            });
+                logger.error("❌ Failed to initialize database services", cause));
     }
 
     /**
-     * Sets up PostgresSQL connection pool and validates connectivity.
-     * Reads host, port, database, user, password, and pool size from verticle config and
+     * Sets up PostgreSQL connection pool and validates connectivity.
+     * Reads host, port, database, user, password, and pool size from config and
      * returns a shared Vert.x SQL Pool on success.
      *
      * @return Future resolving to an initialized Pool when the test connection succeeds
@@ -119,16 +130,16 @@ public class DatabaseVerticle extends AbstractVerticle
         {
             // Get database configuration
             var connectOptions = new PgConnectOptions()
-                .setPort(config().getInteger("port", 5432))
-                .setHost(config().getString("host", "localhost"))
-                .setDatabase(config().getString("database", "nmslite"))
-                .setUser(config().getString("user", "nmslite"))
-                .setPassword(config().getString("password", "nmslite"));
+                .setPort(databaseConfig.getInteger("port", 5432))
+                .setHost(databaseConfig.getString("host", "localhost"))
+                .setDatabase(databaseConfig.getString("database", "nmslite"))
+                .setUser(databaseConfig.getString("user", "nmslite"))
+                .setPassword(databaseConfig.getString("password", "nmslite"));
 
             var poolOptions = new PoolOptions()
-                .setMaxSize(config().getInteger("maxSize", 20));
+                .setMaxSize(databaseConfig.getInteger("maxSize", 20));
 
-            // Create PostgresSQL connection pool
+            // Create PostgreSQL connection pool
             var pool = PgBuilder.pool()
                 .with(poolOptions)
                 .connectingTo(connectOptions)
@@ -151,7 +162,6 @@ public class DatabaseVerticle extends AbstractVerticle
 
                     promise.fail(cause);
                 });
-
         }
         catch (Exception exception)
         {
@@ -250,7 +260,6 @@ public class DatabaseVerticle extends AbstractVerticle
             logger.info("📡 AvailabilityService registered at: {}", AvailabilityService.SERVICE_ADDRESS);
 
             logger.info("🎉 All 7 database services registered with ProxyGen successfully");
-
         }
         catch (Exception exception)
         {
@@ -261,19 +270,16 @@ public class DatabaseVerticle extends AbstractVerticle
     }
 
     /**
-     * Stops the database verticle by closing the PgPool and ensuring services are unbound.
-     * Uses Future.all() to await pool close and (implicit) unregistration completion.
+     * Closes the database connection pool and cleans up resources.
+     * Should be called during application shutdown.
      *
-     * @param stopPromise Promise completed when shutdown is finished
+     * @return Future that completes when cleanup is done
      */
-    @Override
-    public void stop(Promise<Void> stopPromise)
+    public Future<Void> cleanup()
     {
-        logger.info("🛑 Stopping DatabaseVerticle");
+        logger.info("🛑 Cleaning up database resources");
 
-        var closePoolPromise = Promise.<Void>promise();
-
-        var unregisterServicePromise = Promise.<Void>promise();
+        var promise = Promise.<Void>promise();
 
         // Close database pool
         if (pgPool != null)
@@ -283,60 +289,22 @@ public class DatabaseVerticle extends AbstractVerticle
                 {
                     logger.info("✅ Database connection pool closed");
 
-                    closePoolPromise.complete();
+                    promise.complete();
                 })
                 .onFailure(cause ->
                 {
                     logger.error("❌ Failed to close database pool", cause);
 
-                    closePoolPromise.fail(cause);
+                    promise.fail(cause);
                 });
         }
         else
         {
-            closePoolPromise.complete();
+            promise.complete();
         }
 
-        // Unregister all services
-        if (serviceBinder != null)
-        {
-            try
-            {
-                // Note: ServiceBinder doesn't have unregistered method in newer versions
-                // The services will be automatically unregistered when verticle stops
-                logger.info("✅ All 7 database services will be unregistered automatically");
-
-                unregisterServicePromise.complete();
-            }
-            catch (Exception exception)
-            {
-                logger.error("❌ Failed to unregister services", exception);
-
-                unregisterServicePromise.fail(exception);
-            }
-        }
-        else
-        {
-            unregisterServicePromise.complete();
-        }
-
-        // Wait for both operations to complete
-        Future.all(closePoolPromise.future(), unregisterServicePromise.future())
-            .onComplete(result ->
-            {
-                if (result.succeeded())
-                {
-                    logger.info("✅ DatabaseVerticle stopped successfully");
-
-                    stopPromise.complete();
-                }
-                else
-                {
-                    logger.error("❌ Failed to stop DatabaseVerticle", result.cause());
-
-                    stopPromise.fail(result.cause());
-                }
-            });
+        return promise.future();
     }
 
 }
+

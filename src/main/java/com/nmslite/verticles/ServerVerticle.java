@@ -127,7 +127,8 @@ public class ServerVerticle extends AbstractVerticle
 
     /**
      * Initializes all service proxies by creating proxy instances for each service.
-     * These proxies communicate with DatabaseVerticle via the event bus.
+     * These proxies communicate with database service implementations via the event bus.
+     * Note: Database services are initialized at application startup before verticles deploy.
      */
     private void initializeServiceProxies()
     {

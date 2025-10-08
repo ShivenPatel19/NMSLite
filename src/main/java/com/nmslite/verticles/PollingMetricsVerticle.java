@@ -174,7 +174,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         // Initialize cache
         deviceCache = new ConcurrentHashMap<>();
 
-        // Load devices into cache (DatabaseVerticle is already deployed sequentially before this)
+        // Load devices into cache (Database services are already initialized before verticles deploy)
         loadDevicesIntoCache()
             .onSuccess(count ->
             {

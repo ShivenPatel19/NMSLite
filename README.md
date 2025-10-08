@@ -31,14 +31,20 @@ A lightweight, event-driven network monitoring system built with Vert.x and Post
 
 ## 🏗️ Architecture
 
-NMSLite uses a **4-verticle event-driven architecture** with ProxyGen-based service communication:
+NMSLite uses a **3-verticle event-driven architecture** with ProxyGen-based service communication:
 
 ### Core Verticles
 
 - **ServerVerticle**: HTTP API server with JWT authentication middleware
-- **DatabaseVerticle**: All database operations via ProxyGen services (PostgresSQL)
 - **DiscoveryVerticle**: Device discovery workflow (fping + GoEngine + sequential batch processing)
 - **PollingMetricsVerticle**: Continuous monitoring with 4-phase polling cycle
+
+### Database Initialization
+
+- **DatabaseInitializer**: One-time database setup at application startup (no verticle needed)
+  - Creates PostgreSQL connection pool
+  - Registers all 7 ProxyGen services on event bus
+  - Runs before any verticles are deployed
 
 ### Service Layer (ProxyGen)
 
@@ -55,9 +61,9 @@ All database operations are abstracted through Vert.x ProxyGen services for type
 ### Communication Pattern
 
 ```
-HTTP Request → ServerVerticle → Service Proxy (Event Bus) → DatabaseVerticle → PostgresSQL
+HTTP Request → ServerVerticle → Service Proxy (Event Bus) → Service Implementation → PostgresSQL
                                       ↓
-                                Service Implementation
+                          (Registered at startup by DatabaseInitializer)
 ```
 
 All services use `createProxy(vertx)` pattern for seamless event bus communication without manual message handling.
