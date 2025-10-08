@@ -162,7 +162,7 @@ public class DeviceServiceImpl implements DeviceService
                        d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
                        d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
                        d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.last_polled_at, d.monitoring_enabled_at
+                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
                 FROM devices d
                 JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
                 WHERE d.is_provisioned = $1 AND d.is_deleted = false
@@ -200,7 +200,6 @@ public class DeviceServiceImpl implements DeviceService
                                 .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null)
-                                .put("last_polled_at", row.getLocalDateTime("last_polled_at") != null ? row.getLocalDateTime("last_polled_at").toString() : null)
                                 .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ? row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
                         devices.add(device);
@@ -332,7 +331,7 @@ public class DeviceServiceImpl implements DeviceService
                        d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name, cp.password_encrypted,
                        d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
                        d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.last_polled_at, d.monitoring_enabled_at
+                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
                 FROM devices d
                 JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
                 WHERE d.device_id = $1
@@ -378,8 +377,6 @@ public class DeviceServiceImpl implements DeviceService
                             .put("created_at", row.getLocalDateTime("created_at").toString())
                             .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                     row.getLocalDateTime("updated_at").toString() : null)
-                            .put("last_polled_at", row.getLocalDateTime("last_polled_at") != null ?
-                                    row.getLocalDateTime("last_polled_at").toString() : null)
                             .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
                                     row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
@@ -412,7 +409,7 @@ public class DeviceServiceImpl implements DeviceService
                        d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
                        d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
                        d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.last_polled_at, d.monitoring_enabled_at
+                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
                 FROM devices d
                 JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
                 WHERE host(d.ip_address) = $1
@@ -464,8 +461,6 @@ public class DeviceServiceImpl implements DeviceService
                             .put("created_at", row.getLocalDateTime("created_at").toString())
                             .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                     row.getLocalDateTime("updated_at").toString() : null)
-                            .put("last_polled_at", row.getLocalDateTime("last_polled_at") != null ?
-                                    row.getLocalDateTime("last_polled_at").toString() : null)
                             .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
                                     row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
@@ -866,7 +861,7 @@ public class DeviceServiceImpl implements DeviceService
                        d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
                        d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk,
                        d.host_name, d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at,
-                       d.last_polled_at, d.monitoring_enabled_at,
+                       d.monitoring_enabled_at,
                        cp.username, cp.password_encrypted
                 FROM devices d
                 JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
@@ -904,7 +899,6 @@ public class DeviceServiceImpl implements DeviceService
                                 .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null)
-                                .put("last_polled_at", row.getLocalDateTime("last_polled_at") != null ? row.getLocalDateTime("last_polled_at").toString() : null)
                                 .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ? row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
                         devices.add(device);

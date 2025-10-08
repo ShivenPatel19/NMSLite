@@ -319,12 +319,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
             ? Instant.parse(monitoringEnabledAtStr + "Z")
             : Instant.parse(deviceData.getString("created_at") + "Z");
 
-        var lastPolledAtStr = deviceData.getString("last_polled_at");
-
-        pd.lastPolledAt = lastPolledAtStr != null
-            ? Instant.parse(lastPolledAtStr + "Z")
-            : null;
-
         // Compute aligned next poll time
         pd.nextScheduledAt = computeAlignedNext(pd.monitoringEnabledAt, Instant.now(),
                                                 pd.pollingIntervalSeconds);

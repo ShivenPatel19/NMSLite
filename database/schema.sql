@@ -94,7 +94,6 @@ CREATE TABLE devices (
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_polled_at TIMESTAMP,
     monitoring_enabled_at TIMESTAMP,
 
     -- Constraints

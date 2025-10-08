@@ -60,6 +60,13 @@
             <version>${vertx.version}</version>
         </dependency>
 
+        <!-- Vert.x Web OpenAPI for Swagger/OpenAPI Support -->
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-web-openapi</artifactId>
+            <version>${vertx.version}</version>
+        </dependency>
+
         <!-- Vert.x Codegen for ProxyGen (Annotation Processor) -->
         <dependency>
             <groupId>io.vertx</groupId>

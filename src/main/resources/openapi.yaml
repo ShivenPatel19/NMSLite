@@ -1,0 +1,1037 @@
+openapi: 3.0.3
+info:
+  title: NMSLite API
+  description: |
+    Network Management System Lite - A comprehensive NMS solution for device discovery, monitoring, and management.
+
+    ## Authentication
+    All endpoints (except `/api/auth/login`) require JWT authentication.
+    Use the login endpoint to obtain a JWT token, then include it in the `Authorization` header as `Bearer <token>`.
+
+    ## Features
+    - User Management & Authentication
+    - Credential Profile Management
+    - Device Discovery & Provisioning
+    - Device Monitoring & Metrics
+    - Availability Tracking
+  version: 2.0.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: Users
+    description: User management operations
+  - name: Credentials
+    description: Credential profile management
+  - name: Discovery Profiles
+    description: Discovery profile management
+  - name: Discovery Operations
+    description: Device discovery operations
+  - name: Devices
+    description: Device management and monitoring
+  - name: Metrics
+    description: Device metrics and performance data
+  - name: Availability
+    description: Device availability tracking
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /api/auth/login endpoint
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+        error:
+          type: string
+        message:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Credential:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        profile_name:
+          type: string
+        protocol:
+          type: string
+          enum: [ssh, snmp]
+        username:
+          type: string
+        password:
+          type: string
+        port:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    DiscoveryProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        profile_name:
+          type: string
+        device_type_id:
+          type: string
+          format: uuid
+        credential_profile_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        port:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_name:
+          type: string
+        ip_address:
+          type: string
+        device_type_id:
+          type: string
+          format: uuid
+        credential_profile_id:
+          type: string
+          format: uuid
+        port:
+          type: integer
+        is_provisioned:
+          type: boolean
+        is_monitoring_enabled:
+          type: boolean
+        is_deleted:
+          type: boolean
+        polling_interval_seconds:
+          type: integer
+        timeout_seconds:
+          type: integer
+        retry_count:
+          type: integer
+        alert_threshold_cpu:
+          type: number
+          format: float
+        alert_threshold_memory:
+          type: number
+          format: float
+        alert_threshold_disk:
+          type: number
+          format: float
+        created_at:
+          type: string
+          format: date-time
+
+    DeviceType:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type_name:
+          type: string
+        default_port:
+          type: integer
+
+    Metrics:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        cpu_usage:
+          type: number
+          format: float
+        memory_usage:
+          type: number
+          format: float
+        disk_usage:
+          type: number
+          format: float
+        collected_at:
+          type: string
+          format: date-time
+
+    Availability:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        is_available:
+          type: boolean
+        last_checked_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+paths:
+  /api/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and receive JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  token:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Logout user (client should discard JWT token)
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/users:
+    get:
+      tags:
+        - Users
+      summary: Get all users
+      description: Retrieve list of all users with optional filter for inactive users
+      parameters:
+        - name: includeInactive
+          in: query
+          description: Include inactive users in the response
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Users retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      tags:
+        - Users
+      summary: Create new user
+      description: Create a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                is_active:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    $ref: '#/components/schemas/User'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/users/{id}:
+    put:
+      tags:
+        - Users
+      summary: Update user
+      description: Update an existing user's information
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                is_active:
+                  type: boolean
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags:
+        - Users
+      summary: Delete user
+      description: Delete a user account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/credentials:
+    get:
+      tags:
+        - Credentials
+      summary: Get all credential profiles
+      description: Retrieve list of all credential profiles
+      responses:
+        '200':
+          description: Credentials retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  credentials:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Credential'
+
+    post:
+      tags:
+        - Credentials
+      summary: Create credential profile
+      description: Create a new credential profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profile_name
+                - protocol
+                - username
+                - password
+              properties:
+                profile_name:
+                  type: string
+                protocol:
+                  type: string
+                  enum: [ssh, snmp]
+                username:
+                  type: string
+                password:
+                  type: string
+                port:
+                  type: integer
+      responses:
+        '200':
+          description: Credential created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  credential:
+                    $ref: '#/components/schemas/Credential'
+
+  /api/credentials/{id}:
+    put:
+      tags:
+        - Credentials
+      summary: Update credential profile
+      description: Update an existing credential profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Credential ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                profile_name:
+                  type: string
+                protocol:
+                  type: string
+                  enum: [ssh, snmp]
+                username:
+                  type: string
+                password:
+                  type: string
+                port:
+                  type: integer
+      responses:
+        '200':
+          description: Credential updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+    delete:
+      tags:
+        - Credentials
+      summary: Delete credential profile
+      description: Delete a credential profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Credential ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Credential deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+
+  /api/discovery-profiles:
+    get:
+      tags:
+        - Discovery Profiles
+      summary: Get all discovery profiles
+      description: Retrieve list of all discovery profiles
+      responses:
+        '200':
+          description: Discovery profiles retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  discovery_profiles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DiscoveryProfile'
+
+    post:
+      tags:
+        - Discovery Profiles
+      summary: Create discovery profile
+      description: Create a new discovery profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - profile_name
+                - device_type_id
+                - credential_profile_ids
+              properties:
+                profile_name:
+                  type: string
+                device_type_id:
+                  type: string
+                  format: uuid
+                credential_profile_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                port:
+                  type: integer
+      responses:
+        '200':
+          description: Discovery profile created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  profile:
+                    $ref: '#/components/schemas/DiscoveryProfile'
+
+  /api/discovery-profiles/{id}:
+    delete:
+      tags:
+        - Discovery Profiles
+      summary: Delete discovery profile
+      description: Delete a discovery profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Discovery Profile ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Discovery profile deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/discovery/test:
+    post:
+      tags:
+        - Discovery Operations
+      summary: Test discovery
+      description: Execute device discovery using GoEngine (single IP or IP range)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - discovery_profile_id
+                - ip_address
+                - is_range
+              properties:
+                discovery_profile_id:
+                  type: string
+                  format: uuid
+                  description: Discovery profile to use
+                ip_address:
+                  type: string
+                  description: Single IP or start of IP range
+                is_range:
+                  type: boolean
+                  description: Whether this is an IP range discovery
+                end_ip_address:
+                  type: string
+                  description: End IP for range discovery (required if is_range=true)
+      responses:
+        '200':
+          description: Discovery completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ip_address:
+                          type: string
+                        status:
+                          type: string
+                          enum: [success, failed]
+                        device_id:
+                          type: string
+                          format: uuid
+                        message:
+                          type: string
+
+  /api/devices/discovered:
+    get:
+      tags:
+        - Devices
+      summary: Get discovered devices
+      description: Get all devices that are discovered but not yet provisioned
+      responses:
+        '200':
+          description: Discovered devices retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  devices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+
+  /api/devices/provisioned:
+    get:
+      tags:
+        - Devices
+      summary: Get provisioned devices
+      description: Get all devices that are provisioned
+      responses:
+        '200':
+          description: Provisioned devices retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  devices:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Device'
+
+  /api/devices/provision:
+    post:
+      tags:
+        - Devices
+      summary: Provision devices
+      description: Provision devices and enable monitoring (bulk operation)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - device_ids
+              properties:
+                device_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Devices provisioned successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/devices/{id}/config:
+    put:
+      tags:
+        - Devices
+      summary: Update device configuration
+      description: Update device name, port, and monitoring configuration
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_name:
+                  type: string
+                port:
+                  type: integer
+                polling_interval_seconds:
+                  type: integer
+                timeout_seconds:
+                  type: integer
+                retry_count:
+                  type: integer
+                alert_threshold_cpu:
+                  type: number
+                  format: float
+                alert_threshold_memory:
+                  type: number
+                  format: float
+                alert_threshold_disk:
+                  type: number
+                  format: float
+      responses:
+        '200':
+          description: Device configuration updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/devices/{id}/monitoring/enable:
+    post:
+      tags:
+        - Devices
+      summary: Enable device monitoring
+      description: Enable monitoring for a specific device
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Monitoring enabled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/devices/{id}/monitoring/disable:
+    post:
+      tags:
+        - Devices
+      summary: Disable device monitoring
+      description: Disable monitoring for a specific device
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Monitoring disabled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/devices/{id}:
+    delete:
+      tags:
+        - Devices
+      summary: Soft delete device
+      description: Mark a device as deleted (soft delete)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Device deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/devices/{id}/restore:
+    post:
+      tags:
+        - Devices
+      summary: Restore deleted device
+      description: Restore a soft-deleted device
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Device restored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/device-types:
+    get:
+      tags:
+        - Devices
+      summary: Get all device types
+      description: Retrieve list of all available device types
+      responses:
+        '200':
+          description: Device types retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  device_types:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeviceType'
+
+  /api/metrics/{deviceId}:
+    get:
+      tags:
+        - Metrics
+      summary: Get device metrics
+      description: Retrieve all metrics for a specific device
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Metrics retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  metrics:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Metrics'
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/availability/{deviceId}:
+    get:
+      tags:
+        - Availability
+      summary: Get device availability
+      description: Retrieve availability status for a specific device
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Availability retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  availability:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Availability'
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'

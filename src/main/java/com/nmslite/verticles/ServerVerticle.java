@@ -13,6 +13,7 @@ import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Promise;
 
 import io.vertx.core.http.HttpMethod;
+
 import io.vertx.core.http.HttpServer;
 
 import io.vertx.core.json.JsonObject;
@@ -205,6 +206,9 @@ public class ServerVerticle extends AbstractVerticle
 
         setupAvailabilityRoutes(router);
 
+        // Setup Swagger UI routes
+        setupSwaggerRoutes(router);
+
         // 404 handler for unmatched routes
         router.route("/*").handler(ctx ->
                 ctx.response()
@@ -324,6 +328,82 @@ public class ServerVerticle extends AbstractVerticle
     {
         // Availability API (Authentication required)
         router.get("/api/availability/:deviceId").handler(authMiddleware.requireAuthentication()).handler(availabilityHandler::getDeviceAvailability);
+    }
+
+    /**
+     * Sets up Swagger UI and OpenAPI documentation routes.
+     * Serves the OpenAPI specification and Swagger UI interface.
+     *
+     * @param router Router instance to add routes to
+     */
+    private void setupSwaggerRoutes(Router router)
+    {
+        // Serve Swagger UI at /swagger with embedded OpenAPI spec
+        router.get("/swagger").handler(context ->
+        {
+            vertx.fileSystem().readFile("src/main/resources/openapi.yaml")
+                .onSuccess(specBuffer ->
+                {
+                    var specContent = specBuffer.toString()
+                        .replace("\\", "\\\\")
+                        .replace("`", "\\`")
+                        .replace("$", "\\$");
+
+                    var html = """
+                        <!DOCTYPE html>
+                        <html lang="en">
+                        <head>
+                            <meta charset="UTF-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                            <title>NMSLite API Documentation</title>
+                            <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui.css">
+                            <style>
+                                .topbar { display: none; }
+                            </style>
+                        </head>
+                        <body>
+                            <div id="swagger-ui"></div>
+                            <script src="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui-bundle.js"></script>
+                            <script src="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui-standalone-preset.js"></script>
+                            <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+                            <script>
+                                window.onload = function() {
+                                    var spec = `%s`;
+                                    var specObj = jsyaml.load(spec);
+                                    window.ui = SwaggerUIBundle({
+                                        spec: specObj,
+                                        dom_id: '#swagger-ui',
+                                        deepLinking: true,
+                                        presets: [
+                                            SwaggerUIBundle.presets.apis,
+                                            SwaggerUIStandalonePreset
+                                        ],
+                                        plugins: [
+                                            SwaggerUIBundle.plugins.DownloadUrl
+                                        ],
+                                        layout: "StandaloneLayout",
+                                        persistAuthorization: true
+                                    });
+                                };
+                            </script>
+                        </body>
+                        </html>
+                        """.formatted(specContent);
+
+                    context.response()
+                        .putHeader("Content-Type", "text/html")
+                        .end(html);
+                })
+                .onFailure(cause ->
+                {
+                    logger.error("❌ Failed to read OpenAPI spec file", cause);
+
+                    context.response()
+                        .setStatusCode(500)
+                        .putHeader("Content-Type", "text/html")
+                        .end("<h1>Error loading API documentation</h1>");
+                });
+        });
     }
 
     /**

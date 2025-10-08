@@ -55,8 +55,6 @@ public class PollingDevice
     // Timestamps
     public Instant monitoringEnabledAt;  // devices.monitoring_enabled_at (anchor for scheduling)
 
-    public Instant lastPolledAt;         // devices.last_polled_at (observability only)
-
     // ===== RUNTIME STATE (in-memory only, lost on restart) =====
 
     public Instant nextScheduledAt;      // Computed: aligned next poll time
@@ -114,8 +112,6 @@ public class PollingDevice
 
      * This maintains fixed cadence:
      * - nextScheduledAt = nextScheduledAt + pollingIntervalSeconds
-
-     * Never uses last_polled_at to avoid drift.
      */
     public void advanceSchedule()
     {
