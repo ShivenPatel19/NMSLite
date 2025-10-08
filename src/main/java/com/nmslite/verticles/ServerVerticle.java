@@ -106,7 +106,7 @@ public class ServerVerticle extends AbstractVerticle
         // Setup HTTP server with routing
         httpServer = vertx.createHttpServer();
 
-        Router router = createRouter();
+        var router = createRouter();
 
         // Start HTTP server
         httpServer.requestHandler(router)
@@ -154,7 +154,7 @@ public class ServerVerticle extends AbstractVerticle
     {
         // Initialize JWT utilities
         // JWT and Authentication
-        JWTUtil jwtUtil = new JWTUtil(vertx);
+        var jwtUtil = new JWTUtil(vertx);
 
         this.authMiddleware = new AuthenticationMiddleware(jwtUtil);
 
@@ -179,7 +179,7 @@ public class ServerVerticle extends AbstractVerticle
      */
     private Router createRouter()
     {
-        Router router = Router.router(vertx);
+        var router = Router.router(vertx);
 
         // Middleware
         router.route().handler(CorsHandler.create()

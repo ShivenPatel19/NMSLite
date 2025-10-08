@@ -10,10 +10,6 @@ import com.nmslite.utils.ValidationUtil;
 
 import com.nmslite.utils.ResponseUtil;
 
-
-
-import io.vertx.core.json.JsonArray;
-
 import io.vertx.core.json.JsonObject;
 
 import io.vertx.ext.web.RoutingContext;
@@ -90,7 +86,7 @@ public class DeviceHandler
      */
     public void softDeleteDevice(RoutingContext ctx)
     {
-        String deviceId = ctx.pathParam("id");
+        var deviceId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
         if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
@@ -112,7 +108,7 @@ public class DeviceHandler
      */
     public void restoreDevice(RoutingContext ctx)
     {
-        String deviceId = ctx.pathParam("id");
+        var deviceId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
         if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
@@ -134,7 +130,7 @@ public class DeviceHandler
      */
     public void enableMonitoring(RoutingContext ctx)
     {
-        String deviceId = ctx.pathParam("id");
+        var deviceId = ctx.pathParam("id");
 
         // Validate device ID
         if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
@@ -156,7 +152,7 @@ public class DeviceHandler
      */
     public void disableMonitoring(RoutingContext ctx)
     {
-        String deviceId = ctx.pathParam("id");
+        var deviceId = ctx.pathParam("id");
 
         if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
         {
@@ -177,7 +173,7 @@ public class DeviceHandler
      */
     public void provisionAndEnableMonitoring(RoutingContext ctx)
     {
-        JsonObject body = ctx.body().asJsonObject();
+        var body = ctx.body().asJsonObject();
 
         if (body == null || !body.containsKey("device_ids"))
         {
@@ -188,7 +184,7 @@ public class DeviceHandler
             return;
         }
 
-        JsonArray deviceIds = body.getJsonArray("device_ids");
+        var deviceIds = body.getJsonArray("device_ids");
 
         if (deviceIds == null || deviceIds.isEmpty())
         {
@@ -200,11 +196,11 @@ public class DeviceHandler
         }
 
         // Validate all device IDs are valid UUIDs
-        for (int i = 0; i < deviceIds.size(); i++)
+        for (var i = 0; i < deviceIds.size(); i++)
         {
             try
             {
-                String deviceId = deviceIds.getString(i);
+                var deviceId = deviceIds.getString(i);
 
                 UUID.fromString(deviceId);
             }
@@ -234,9 +230,9 @@ public class DeviceHandler
      */
     public void updateDeviceConfig(RoutingContext ctx)
     {
-        String deviceId = ctx.pathParam("id");
+        var deviceId = ctx.pathParam("id");
 
-        JsonObject body = ctx.body().asJsonObject();
+        var body = ctx.body().asJsonObject();
 
         // ===== VALIDATION =====
         // 1) Validate path parameter

@@ -102,7 +102,7 @@ public class DiscoveryProfileHandler
      */
     public void createDiscoveryProfile(RoutingContext ctx)
     {
-        JsonObject requestBody = ctx.body().asJsonObject();
+        var requestBody = ctx.body().asJsonObject();
 
         // Validate all discovery profile basic fields
         if (!ValidationUtil.DiscoveryProfile.validateCreate(ctx, requestBody))
@@ -110,13 +110,13 @@ public class DiscoveryProfileHandler
             return; // Validation failed, response already sent
         }
 
-        String ipAddress = requestBody.getString("ip_address");
+        var ipAddress = requestBody.getString("ip_address");
 
-        Boolean isRange = requestBody.getBoolean("is_range", false);
+        var isRange = requestBody.getBoolean("is_range", false);
 
-        String deviceTypeId = requestBody.getString("device_type_id");
+        var deviceTypeId = requestBody.getString("device_type_id");
 
-        JsonArray credentialProfileIds = requestBody.getJsonArray("credential_profile_ids");
+        var credentialProfileIds = requestBody.getJsonArray("credential_profile_ids");
 
         logger.info("🔧 Creating discovery profile for {} (range: {})", ipAddress, isRange);
 
@@ -140,7 +140,7 @@ public class DiscoveryProfileHandler
                     // Step 3: Set default port if not provided
                     if (!requestBody.containsKey("port") || requestBody.getValue("port") == null)
                     {
-                        Integer defaultPort = deviceType.getInteger("default_port");
+                        var defaultPort = deviceType.getInteger("default_port");
 
                         if (defaultPort != null)
                         {
@@ -181,13 +181,13 @@ public class DiscoveryProfileHandler
                                                      Handler<AsyncResult<Void>> resultHandler)
     {
         // Use Atomic Variables to track validation progress
-        AtomicInteger validatedCount = new AtomicInteger(0);
+        var validatedCount = new AtomicInteger(0);
 
-        AtomicBoolean hasError = new AtomicBoolean(false);
+        var hasError = new AtomicBoolean(false);
 
-        for (int i = 0; i < credentialProfileIds.size(); i++)
+        for (var i = 0; i < credentialProfileIds.size(); i++)
         {
-            String credentialId = credentialProfileIds.getString(i);
+            var credentialId = credentialProfileIds.getString(i);
 
             credentialService.credentialGetById(credentialId)
                 .onSuccess(result ->
@@ -261,7 +261,7 @@ public class DiscoveryProfileHandler
      */
     public void deleteDiscoveryProfile(RoutingContext ctx)
     {
-        String profileId = ctx.pathParam("id");
+        var profileId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
         if (!ValidationUtil.validatePathParameterUUID(ctx, profileId, "Discovery profile ID"))
@@ -289,7 +289,7 @@ public class DiscoveryProfileHandler
      */
     public void testDiscovery(RoutingContext ctx)
     {
-        JsonObject requestBody = ctx.body().asJsonObject();
+        var requestBody = ctx.body().asJsonObject();
 
         // Validate required fields
         if (!ValidationUtil.validateRequiredFields(ctx, requestBody, "profile_id"))
@@ -297,7 +297,7 @@ public class DiscoveryProfileHandler
             return;
         }
 
-        String profileId = requestBody.getString("profile_id");
+        var profileId = requestBody.getString("profile_id");
 
         logger.info("🧪 Starting test discovery for profile: {}", profileId);
 
@@ -305,7 +305,7 @@ public class DiscoveryProfileHandler
         vertx.eventBus().request("discovery.test_profile", new JsonObject().put("profile_id", profileId))
             .onSuccess(reply ->
             {
-                JsonObject result = (JsonObject) reply.body();
+                var result = (JsonObject) reply.body();
 
                 logger.info("✅ Test discovery completed for profile {}: {} devices discovered, {} failed",
                            profileId,

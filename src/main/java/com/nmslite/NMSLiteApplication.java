@@ -142,7 +142,7 @@ public class NMSLiteApplication
         logger.info("🚀 Deploying all verticles - 4-Verticle Architecture");
 
         // Deploy DatabaseVerticle
-        DeploymentOptions dbOptions = new DeploymentOptions()
+        var dbOptions = new DeploymentOptions()
             .setConfig(config.getJsonObject("database", new JsonObject()));
 
         return vertx.deployVerticle(new DatabaseVerticle(), dbOptions)
@@ -153,7 +153,7 @@ public class NMSLiteApplication
                 logger.info("✅ DatabaseVerticle deployed: {}", dbId);
 
                 // Deploy ServerVerticle
-                DeploymentOptions serverOptions = new DeploymentOptions()
+                var serverOptions = new DeploymentOptions()
                     .setConfig(config.getJsonObject("server", new JsonObject()));
 
                 return vertx.deployVerticle(new ServerVerticle(), serverOptions);
@@ -165,7 +165,7 @@ public class NMSLiteApplication
                 logger.info("✅ ServerVerticle deployed: {}", serverId);
 
                 // Deploy PollingMetricsVerticle
-                DeploymentOptions pollingOptions = new DeploymentOptions()
+                var pollingOptions = new DeploymentOptions()
                     .setConfig(config);
 
                 return vertx.deployVerticle(new PollingMetricsVerticle(), pollingOptions);
@@ -177,7 +177,7 @@ public class NMSLiteApplication
                 logger.info("✅ PollingMetricsVerticle deployed: {}", pollingId);
 
                 // Deploy DiscoveryVerticle
-                DeploymentOptions discoveryOptions = new DeploymentOptions()
+                var discoveryOptions = new DeploymentOptions()
                     .setConfig(config.getJsonObject("discovery", new JsonObject()));
 
                 return vertx.deployVerticle(new DiscoveryVerticle(), discoveryOptions);
@@ -225,11 +225,11 @@ public class NMSLiteApplication
         }
 
         // Undeploy all verticles
-        List<Future<Void>> undeployFutures = new ArrayList<>();
+        var undeployFutures = new ArrayList<Future<Void>>();
 
-        for (String deploymentId : deployedVerticleIds)
+        for (var deploymentId : deployedVerticleIds)
         {
-            Future<Void> undeployFuture = vertx.undeploy(deploymentId)
+            var undeployFuture = vertx.undeploy(deploymentId)
                 .onSuccess(v -> logger.info("✅ Verticle undeploy: {}", deploymentId))
                 .onFailure(cause -> logger.error("❌ Failed to undeploy verticle: {}", deploymentId, cause));
 
@@ -281,7 +281,7 @@ public class NMSLiteApplication
     private static void setupWorkerExecutor(JsonObject config)
     {
         // Get worker pool configuration from config or use defaults
-        int workerPoolSize = config.getInteger("worker.pool.size", 10);
+        var workerPoolSize = config.getInteger("worker.pool.size", 10);
 
         // Create shared worker executor for all blocking operations
         workerExecutor = vertx.createSharedWorkerExecutor("nmslite-worker", workerPoolSize);
@@ -296,17 +296,17 @@ public class NMSLiteApplication
      */
     private static Future<JsonObject> loadConfiguration()
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // Configure to load from application.conf file
-        ConfigStoreOptions fileStore = new ConfigStoreOptions()
+        var fileStore = new ConfigStoreOptions()
             .setType("file")
             .setFormat("hocon")
             .setConfig(new JsonObject().put("path", "application.conf"));
 
-        ConfigRetrieverOptions options = new ConfigRetrieverOptions().addStore(fileStore);
+        var options = new ConfigRetrieverOptions().addStore(fileStore);
 
-        ConfigRetriever retriever = ConfigRetriever.create(vertx, options);
+        var retriever = ConfigRetriever.create(vertx, options);
 
         retriever.getConfig()
             .onSuccess(config ->

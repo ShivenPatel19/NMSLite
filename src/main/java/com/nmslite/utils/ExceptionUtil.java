@@ -42,9 +42,9 @@ public class ExceptionUtil
      */
     public static void handleHttp(RoutingContext context, Throwable cause, String defaultMessage)
     {
-        String message = getMessage(cause, defaultMessage);
+        var message = getMessage(cause, defaultMessage);
 
-        JsonObject errorResponse = new JsonObject()
+        var errorResponse = new JsonObject()
             .put("success", false)
             .put("error", message)
             .put("timestamp", System.currentTimeMillis());
@@ -70,7 +70,7 @@ public class ExceptionUtil
             return defaultMessage;
         }
 
-        String message = cause.getMessage();
+        var message = cause.getMessage();
 
         return (message != null && !message.trim().isEmpty()) ? message : defaultMessage;
     }

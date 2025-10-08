@@ -10,8 +10,6 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Pool;
 
-import io.vertx.sqlclient.Row;
-
 import io.vertx.sqlclient.Tuple;
 
 import org.slf4j.Logger;
@@ -56,9 +54,9 @@ public class AvailabilityServiceImpl implements AvailabilityService
     @Override
     public Future<JsonObject> availabilityGetByDevice(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
                        da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
                        da.current_status, da.status_since, da.updated_at,
@@ -79,16 +77,16 @@ public class AvailabilityServiceImpl implements AvailabilityService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    String ipAddr = row.getString("ip_address");
+                    var ipAddr = row.getString("ip_address");
 
                     if (ipAddr != null && ipAddr.contains("/"))
                     {
                         ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
                     }
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("found", true)
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("device_name", row.getString("device_name"))
@@ -134,10 +132,10 @@ public class AvailabilityServiceImpl implements AvailabilityService
     @Override
     public Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // Normalize status to lowercase
-        String normalizedStatus = status.toLowerCase();
+        var normalizedStatus = status.toLowerCase();
 
         if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down"))
         {
@@ -147,7 +145,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
         }
 
         // First verify device exists and is active
-        String deviceCheckSql = """
+        var deviceCheckSql = """
                 SELECT device_name, ip_address::text as ip_address
                 FROM devices
                 WHERE device_id = $1 AND is_deleted = false
@@ -164,24 +162,24 @@ public class AvailabilityServiceImpl implements AvailabilityService
                         return;
                     }
 
-                    Row deviceRow = deviceRows.iterator().next();
+                    var deviceRow = deviceRows.iterator().next();
 
-                    String deviceName = deviceRow.getString("device_name");
+                    var deviceName = deviceRow.getString("device_name");
 
-                    String ipAddressRaw = deviceRow.getString("ip_address");
+                    var ipAddressRaw = deviceRow.getString("ip_address");
 
-                    final String ipAddress = (ipAddressRaw != null && ipAddressRaw.contains("/"))
+                    final var ipAddress = (ipAddressRaw != null && ipAddressRaw.contains("/"))
                             ? ipAddressRaw.split("/")[0]  // Remove CIDR notation
                             : ipAddressRaw;
 
-                    LocalDateTime now = LocalDateTime.now();
+                    var now = LocalDateTime.now();
 
-                    int successfulIncrement = normalizedStatus.equals("up") ? 1 : 0;
+                    var successfulIncrement = normalizedStatus.equals("up") ? 1 : 0;
 
-                    int failedIncrement = normalizedStatus.equals("down") ? 1 : 0;
+                    var failedIncrement = normalizedStatus.equals("down") ? 1 : 0;
 
                     // Update availability record
-                    String updateSql = """
+                    var updateSql = """
                             UPDATE device_availability SET
                                 total_checks = total_checks + 1,
                                 successful_checks = successful_checks + $1,
@@ -216,9 +214,9 @@ public class AvailabilityServiceImpl implements AvailabilityService
                                     return;
                                 }
 
-                                Row row = rows.iterator().next();
+                                var row = rows.iterator().next();
 
-                                JsonObject result = new JsonObject()
+                                var result = new JsonObject()
                                         .put("success", true)
                                         .put("device_id", row.getUUID("device_id").toString())
                                         .put("device_name", deviceName)
@@ -262,9 +260,9 @@ public class AvailabilityServiceImpl implements AvailabilityService
     @Override
     public Future<JsonObject> availabilityDeleteByDevice(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 DELETE FROM device_availability
                 WHERE device_id = $1
                 """;
@@ -273,9 +271,9 @@ public class AvailabilityServiceImpl implements AvailabilityService
                 .execute(Tuple.of(UUID.fromString(deviceId)))
                 .onSuccess(rows ->
                 {
-                    int deletedCount = rows.rowCount();
+                    var deletedCount = rows.rowCount();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("device_id", deviceId)
                             .put("deleted", deletedCount > 0)

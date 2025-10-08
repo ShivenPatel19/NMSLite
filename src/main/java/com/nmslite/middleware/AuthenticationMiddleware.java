@@ -46,7 +46,7 @@ public class AuthenticationMiddleware
             try
             {
                 // Extract token from Authorization header
-                String authHeader = ctx.request().getHeader("Authorization");
+                var authHeader = ctx.request().getHeader("Authorization");
 
                 if (authHeader == null || authHeader.trim().isEmpty())
                 {
@@ -67,12 +67,12 @@ public class AuthenticationMiddleware
                     return;
                 }
 
-                String token = authHeader.substring(7); // Remove "Bearer " prefix
+                var token = authHeader.substring(7); // Remove "Bearer " prefix
 
                 logger.debug("🔍 Extracted token for validation: {}", token.substring(0, Math.min(20, token.length())) + "...");
 
                 // Validate JWT token
-                JsonObject userInfo = jwtUtil.validateToken(token);
+                var userInfo = jwtUtil.validateToken(token);
 
                 if (userInfo == null)
                 {
@@ -84,7 +84,7 @@ public class AuthenticationMiddleware
                 }
 
                 // Check if user is active
-                boolean isActive = userInfo.getBoolean("is_active", false);
+                var isActive = userInfo.getBoolean("is_active", false);
 
                 if (!isActive)
                 {
@@ -127,7 +127,7 @@ public class AuthenticationMiddleware
      */
     private void handleUnauthorized(RoutingContext ctx, String message)
     {
-        JsonObject errorResponse = new JsonObject()
+        var errorResponse = new JsonObject()
             .put("success", false)
             .put("error", "Unauthorized")
             .put("message", message)

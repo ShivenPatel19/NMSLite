@@ -62,7 +62,7 @@ public class NetworkConnectivityUtil
      */
     public static Future<Map<String, Boolean>> batchFpingCheck(Vertx vertx, List<String> ipAddresses, JsonObject config)
     {
-        Promise<Map<String, Boolean>> promise = Promise.promise();
+        var promise = Promise.<Map<String, Boolean>>promise();
 
         if (ipAddresses == null || ipAddresses.isEmpty())
         {
@@ -71,31 +71,31 @@ public class NetworkConnectivityUtil
             return promise.future();
         }
 
-        String fpingPath = config.getString("tools.fping.path", "fping");
+        var fpingPath = config.getString("tools.fping.path", "fping");
 
         // Level 2: Per-IP timeout (fping -t parameter)
-        int perIpTimeoutSeconds = config.getInteger("tools.fping.timeout.seconds", 5);
+        var perIpTimeoutSeconds = config.getInteger("tools.fping.timeout.seconds", 5);
 
         // Level 1: Batch operation timeout (process.waitFor)
-        int batchTimeoutSeconds = config.getInteger("fping.batch.blocking.timeout.seconds", 180);
+        var batchTimeoutSeconds = config.getInteger("fping.batch.blocking.timeout.seconds", 180);
 
         vertx.executeBlocking(() ->
         {
-            Map<String, Boolean> results = new HashMap<>();
+            var results = new HashMap<String, Boolean>();
 
             try
             {
                 // fping batch mode: -a (show alive), -q (quiet), -t (timeout in ms)
-                ProcessBuilder pb = new ProcessBuilder(
+                var pb = new ProcessBuilder(
                     fpingPath, "-a", "-q", "-t", String.valueOf(perIpTimeoutSeconds * 1000)
                 );
 
-                Process process = pb.start();
+                var process = pb.start();
 
                 // Write all IPs to stdin
                 try (var writer = process.outputWriter())
                 {
-                    for (String ip : ipAddresses)
+                    for (var ip : ipAddresses)
                     {
                         writer.write(ip + "\n");
 
@@ -104,7 +104,7 @@ public class NetworkConnectivityUtil
                 } // Writer closed here, signals EOF to fping
 
                 // Wait for process to complete using configured batch timeout
-                boolean finished = process.waitFor(batchTimeoutSeconds, TimeUnit.SECONDS);
+                var finished = process.waitFor(batchTimeoutSeconds, TimeUnit.SECONDS);
 
                 if (!finished)
                 {
@@ -116,13 +116,13 @@ public class NetworkConnectivityUtil
                 }
 
                 // Read alive IPs from stdout
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
+                try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
                 {
                     String line;
 
                     while ((line = reader.readLine()) != null)
                     {
-                        String aliveIp = line.trim();
+                        var aliveIp = line.trim();
 
                         if (results.containsKey(aliveIp))
                         {
@@ -142,7 +142,7 @@ public class NetworkConnectivityUtil
                 logger.error("Batch fping failed", exception);
 
                 // Mark all as unreachable on error
-                for (String ip : ipAddresses)
+                for (var ip : ipAddresses)
                 {
                     results.put(ip, false);
                 }
@@ -155,9 +155,9 @@ public class NetworkConnectivityUtil
         {
             logger.error("Batch fping executeBlocking failed", cause);
 
-            Map<String, Boolean> results = new HashMap<>();
+            var results = new HashMap<String, Boolean>();
 
-            for (String ip : ipAddresses)
+            for (var ip : ipAddresses)
             {
                 results.put(ip, false);
             }
@@ -186,7 +186,7 @@ public class NetworkConnectivityUtil
      */
     public static Future<Map<String, Boolean>> batchPortCheck(Vertx vertx, List<String> ipAddresses, int port, JsonObject config)
     {
-        Promise<Map<String, Boolean>> promise = Promise.promise();
+        var promise = Promise.<Map<String, Boolean>>promise();
 
         if (ipAddresses == null || ipAddresses.isEmpty())
         {
@@ -196,18 +196,18 @@ public class NetworkConnectivityUtil
         }
 
         // Level 2: Per-socket timeout (TCP connection timeout)
-        int perSocketTimeoutSeconds = config.getInteger("tools.port.check.timeout.seconds", 5);
+        var perSocketTimeoutSeconds = config.getInteger("tools.port.check.timeout.seconds", 5);
 
         vertx.executeBlocking(() ->
         {
-            Map<String, Boolean> results = new HashMap<>();
+            var results = new HashMap<String, Boolean>();
 
             // Use parallel stream for concurrent port checks
             ipAddresses.parallelStream().forEach(ip ->
             {
-                boolean portOpen = false;
+                var portOpen = false;
 
-                try (Socket socket = new Socket())
+                try (var socket = new Socket())
                 {
                     socket.connect(new InetSocketAddress(ip, port), perSocketTimeoutSeconds * 1000);
 
@@ -238,9 +238,9 @@ public class NetworkConnectivityUtil
         {
             logger.error("Batch port check executeBlocking failed", cause);
 
-            Map<String, Boolean> results = new HashMap<>();
+            var results = new HashMap<String, Boolean>();
 
-            for (String ip : ipAddresses)
+            for (var ip : ipAddresses)
             {
                 results.put(ip, false);
             }

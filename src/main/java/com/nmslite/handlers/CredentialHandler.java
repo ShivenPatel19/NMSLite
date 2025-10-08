@@ -63,7 +63,7 @@ public class CredentialHandler
      */
     public void createCredentials(RoutingContext ctx)
     {
-        JsonObject requestBody = ctx.body().asJsonObject();
+        var requestBody = ctx.body().asJsonObject();
 
         // ===== COMPREHENSIVE HANDLER VALIDATION =====
         // Using common validation methods to reduce code redundancy
@@ -86,9 +86,9 @@ public class CredentialHandler
      */
     public void updateCredentials(RoutingContext ctx)
     {
-        String credentialId = ctx.pathParam("id");
+        var credentialId = ctx.pathParam("id");
 
-        JsonObject requestBody = ctx.body().asJsonObject();
+        var requestBody = ctx.body().asJsonObject();
 
         // ===== COMPREHENSIVE HANDLER VALIDATION =====
         // Using common validation methods to reduce code redundancy
@@ -134,7 +134,7 @@ public class CredentialHandler
      */
     public void deleteCredentials(RoutingContext ctx)
     {
-        String credentialId = ctx.pathParam("id");
+        var credentialId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
         if (credentialId == null || credentialId.trim().isEmpty())

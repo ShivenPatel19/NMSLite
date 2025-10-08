@@ -82,7 +82,7 @@ public class ValidationUtil
     {
         if (value != null)
         {
-            double doubleValue = value.doubleValue();
+            var doubleValue = value.doubleValue();
 
             if (doubleValue < 0.0 || doubleValue > 100.0)
             {
@@ -136,9 +136,9 @@ public class ValidationUtil
             return false;
         }
 
-        boolean hasValidField = false;
+        var hasValidField = false;
 
-        for (String field : allowedFields)
+        for (var field : allowedFields)
         {
             if (json.containsKey(field))
             {
@@ -150,7 +150,7 @@ public class ValidationUtil
 
         if (!hasValidField)
         {
-            String allowedFieldsList = String.join(", ", allowedFields);
+            var allowedFieldsList = String.join(", ", allowedFields);
 
             ExceptionUtil.handleHttp(context, new IllegalArgumentException(
                 "At least one field must be provided: " + allowedFieldsList));
@@ -158,11 +158,11 @@ public class ValidationUtil
             return false;
         }
 
-        for (String field : allowedFields)
+        for (var field : allowedFields)
         {
             if (json.containsKey(field))
             {
-                Object value = json.getValue(field);
+                var value = json.getValue(field);
 
                 if (value == null)
                 {
@@ -197,7 +197,7 @@ public class ValidationUtil
     {
         if (json.containsKey(field))
         {
-            Integer value = json.getInteger(field);
+            var value = json.getInteger(field);
 
             if (value != null && (value < min || value > max))
             {
@@ -308,9 +308,9 @@ public class ValidationUtil
                 return false;
             }
 
-            String username = userData.getString("username");
+            var username = userData.getString("username");
 
-            String password = userData.getString("password");
+            var password = userData.getString("password");
 
             if (!validateUsernameFormat(ctx, username))
             {
@@ -403,7 +403,7 @@ public class ValidationUtil
 
             if (requestBody.containsKey("username"))
             {
-                String username = requestBody.getString("username");
+                var username = requestBody.getString("username");
 
                 if (!validateUsernameFormat(ctx, username))
                 {
@@ -413,7 +413,7 @@ public class ValidationUtil
 
             if (requestBody.containsKey("password"))
             {
-                String password = requestBody.getString("password");
+                var password = requestBody.getString("password");
 
                 if (!validatePasswordStrength(ctx, password))
                 {
@@ -583,9 +583,9 @@ public class ValidationUtil
                 return false;
             }
 
-            String ipAddress = profileData.getString("ip_address");
+            var ipAddress = profileData.getString("ip_address");
 
-            Boolean isRange = profileData.getBoolean("is_range", false);
+            var isRange = profileData.getBoolean("is_range", false);
 
             return validateIPFormat(ctx, ipAddress, isRange);
         }
@@ -599,7 +599,7 @@ public class ValidationUtil
          */
         private static boolean validateCredentialProfileIds(RoutingContext ctx, JsonObject profileData)
         {
-            Object credentialProfileIdsObj = profileData.getValue("credential_profile_ids");
+            var credentialProfileIdsObj = profileData.getValue("credential_profile_ids");
 
             if (!(credentialProfileIdsObj instanceof JsonArray))
             {
@@ -609,7 +609,7 @@ public class ValidationUtil
                 return false;
             }
 
-            JsonArray credentialProfileIds = (JsonArray) credentialProfileIdsObj;
+            var credentialProfileIds = (JsonArray) credentialProfileIdsObj;
 
             if (credentialProfileIds.isEmpty())
             {

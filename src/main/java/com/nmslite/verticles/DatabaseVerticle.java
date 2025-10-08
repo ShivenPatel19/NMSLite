@@ -113,23 +113,23 @@ public class DatabaseVerticle extends AbstractVerticle
      */
     private Future<Pool> setupDatabaseConnection()
     {
-        Promise<Pool> promise = Promise.promise();
+        var promise = Promise.<Pool>promise();
 
         try
         {
             // Get database configuration
-            PgConnectOptions connectOptions = new PgConnectOptions()
+            var connectOptions = new PgConnectOptions()
                 .setPort(config().getInteger("port", 5432))
                 .setHost(config().getString("host", "localhost"))
                 .setDatabase(config().getString("database", "nmslite"))
                 .setUser(config().getString("user", "nmslite"))
                 .setPassword(config().getString("password", "nmslite"));
 
-            PoolOptions poolOptions = new PoolOptions()
+            var poolOptions = new PoolOptions()
                 .setMaxSize(config().getInteger("maxSize", 20));
 
             // Create PostgresSQL connection pool
-            Pool pool = PgBuilder.pool()
+            var pool = PgBuilder.pool()
                 .with(poolOptions)
                 .connectingTo(connectOptions)
                 .using(vertx)
@@ -271,9 +271,9 @@ public class DatabaseVerticle extends AbstractVerticle
     {
         logger.info("🛑 Stopping DatabaseVerticle");
 
-        Promise<Void> closePoolPromise = Promise.promise();
+        var closePoolPromise = Promise.<Void>promise();
 
-        Promise<Void> unregisterServicePromise = Promise.promise();
+        var unregisterServicePromise = Promise.<Void>promise();
 
         // Close database pool
         if (pgPool != null)

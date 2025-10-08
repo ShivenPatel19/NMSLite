@@ -39,17 +39,17 @@ public class LoggingConfigurator
      */
     public static void configure(JsonObject config)
     {
-        JsonObject loggingConfig = config.getJsonObject("logging", new JsonObject());
+        var loggingConfig = config.getJsonObject("logging", new JsonObject());
 
-        boolean loggingEnabled = loggingConfig.getBoolean("enabled", true);
+        var loggingEnabled = loggingConfig.getBoolean("enabled", true);
 
-        String logLevel = loggingConfig.getString("level", "INFO");
+        var logLevel = loggingConfig.getString("level", "INFO");
 
-        boolean fileEnabled = loggingConfig.getBoolean("file.enabled", true);
+        var fileEnabled = loggingConfig.getBoolean("file.enabled", true);
 
-        boolean consoleEnabled = loggingConfig.getBoolean("console.enabled", true);
+        var consoleEnabled = loggingConfig.getBoolean("console.enabled", true);
 
-        String filePath = loggingConfig.getString("file.path", "logs/nmslite.log");
+        var filePath = loggingConfig.getString("file.path", "logs/nmslite.log");
 
         // Set system properties for logback.xml
         System.setProperty("nmslite.log.level", loggingEnabled ? logLevel : "OFF");
@@ -76,10 +76,10 @@ public class LoggingConfigurator
         }
 
         // Programmatically configure logback
-        LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+        var loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
 
         // Set root logger level
-        Logger rootLogger = loggerContext.getLogger(Logger.ROOT_LOGGER_NAME);
+        var rootLogger = loggerContext.getLogger(Logger.ROOT_LOGGER_NAME);
 
         if (loggingEnabled)
         {
@@ -91,7 +91,7 @@ public class LoggingConfigurator
         }
 
         // Set application logger level
-        Logger appLogger = loggerContext.getLogger("com.nmslite");
+        var appLogger = loggerContext.getLogger("com.nmslite");
 
         if (loggingEnabled)
         {
@@ -105,9 +105,9 @@ public class LoggingConfigurator
         // Create logs directory if file logging is enabled
         if (fileEnabled && loggingEnabled)
         {
-            java.io.File logFile = new java.io.File(filePath);
+            var logFile = new java.io.File(filePath);
 
-            java.io.File logDir = logFile.getParentFile();
+            var logDir = logFile.getParentFile();
 
             if (logDir != null && !logDir.exists())
             {
@@ -118,7 +118,7 @@ public class LoggingConfigurator
         // Log configuration summary
         if (loggingEnabled)
         {
-            org.slf4j.Logger logger = LoggerFactory.getLogger(LoggingConfigurator.class);
+            var logger = LoggerFactory.getLogger(LoggingConfigurator.class);
 
             logger.info("=".repeat(60));
 

@@ -12,8 +12,6 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Pool;
 
-import io.vertx.sqlclient.Row;
-
 import io.vertx.sqlclient.Tuple;
 
 import org.slf4j.Logger;
@@ -56,10 +54,10 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     @Override
     public Future<JsonArray> discoveryList()
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
         // Get discovery profiles with device type info
-        String sql = """
+        var sql = """
                 SELECT dp.profile_id, dp.discovery_name, dp.ip_address, dp.is_range, dp.credential_profile_ids,
                        dp.port, dp.protocol, dp.created_at, dp.updated_at,
                        dt.device_type_name, dt.default_port
@@ -72,21 +70,21 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                 .execute()
                 .onSuccess(rows ->
                 {
-                    JsonArray profiles = new JsonArray();
+                    var profiles = new JsonArray();
 
-                    for (Row row : rows)
+                    for (var row : rows)
                     {
-                        UUID[] credentialIds = (UUID[]) row.getValue("credential_profile_ids");
+                        var credentialIds = (UUID[]) row.getValue("credential_profile_ids");
 
                         // Convert UUID array to JsonArray
-                        io.vertx.core.json.JsonArray credentialIdsArray = new io.vertx.core.json.JsonArray();
+                        var credentialIdsArray = new io.vertx.core.json.JsonArray();
 
-                        for (UUID credId : credentialIds)
+                        for (var credId : credentialIds)
                         {
                             credentialIdsArray.add(credId.toString());
                         }
 
-                        JsonObject profile = new JsonObject()
+                        var profile = new JsonObject()
                                 .put("profile_id", row.getUUID("profile_id").toString())
                                 .put("discovery_name", row.getString("discovery_name"))
                                 .put("ip_address", row.getString("ip_address"))
@@ -125,26 +123,26 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     @Override
     public Future<JsonObject> discoveryCreate(JsonObject profileData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String discoveryName = profileData.getString("discovery_name");
+        var discoveryName = profileData.getString("discovery_name");
 
-        String ipAddress = profileData.getString("ip_address");
+        var ipAddress = profileData.getString("ip_address");
 
-        Boolean isRange = profileData.getBoolean("is_range", false);  // Default to false for backward compatibility
+        var isRange = profileData.getBoolean("is_range", false);  // Default to false for backward compatibility
 
-        String deviceTypeId = profileData.getString("device_type_id");
+        var deviceTypeId = profileData.getString("device_type_id");
 
-        io.vertx.core.json.JsonArray credentialProfileIds = profileData.getJsonArray("credential_profile_ids");
+        var credentialProfileIds = profileData.getJsonArray("credential_profile_ids");
 
-        Integer port = profileData.getInteger("port");
+        var port = profileData.getInteger("port");
 
-        String protocol = profileData.getString("protocol");
+        var protocol = profileData.getString("protocol");
 
         // Convert JsonArray to UUID array for PostgresSQL
-        UUID[] credentialUUIDs = new UUID[credentialProfileIds.size()];
+        var credentialUUIDs = new UUID[credentialProfileIds.size()];
 
-        for (int i = 0; i < credentialProfileIds.size(); i++)
+        for (var i = 0; i < credentialProfileIds.size(); i++)
         {
             credentialUUIDs[i] = UUID.fromString(credentialProfileIds.getString(i));
         }
@@ -153,7 +151,7 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
         // No validation here - handler has already validated all input
         // Service focuses purely on database operations
 
-        String sql = """
+        var sql = """
                 INSERT INTO discovery_profiles (discovery_name, ip_address, is_range, device_type_id, credential_profile_ids,
                                                port, protocol)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -165,9 +163,9 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                                 credentialUUIDs, port, protocol))
                 .onSuccess(rows ->
                 {
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("profile_id", row.getUUID("profile_id").toString())
                             .put("discovery_name", row.getString("discovery_name"))
@@ -221,10 +219,10 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     @Override
     public Future<JsonObject> discoveryDelete(String profileId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // Hard delete the discovery profile
-        String sql = """
+        var sql = """
                 DELETE FROM discovery_profiles
                 WHERE profile_id = $1
                 """;
@@ -240,7 +238,7 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                         return;
                     }
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("profile_id", profileId)
                             .put("message", "Discovery profile deleted successfully");
@@ -266,10 +264,10 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     @Override
     public Future<JsonObject> discoveryGetById(String profileId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // First get the discovery profile basic info
-        String profileSql = """
+        var profileSql = """
                 SELECT dp.profile_id, dp.discovery_name, dp.ip_address, dp.is_range, dp.device_type_id, dp.credential_profile_ids,
                        dp.port, dp.protocol, dp.created_at, dp.updated_at,
                        dt.device_type_name, dt.default_port
@@ -289,20 +287,20 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                         return;
                     }
 
-                    Row profileRow = profileRows.iterator().next();
+                    var profileRow = profileRows.iterator().next();
 
-                    UUID[] credentialIds = (UUID[]) profileRow.getValue("credential_profile_ids");
+                    var credentialIds = (UUID[]) profileRow.getValue("credential_profile_ids");
 
                     // Convert UUID array to JsonArray for response
-                    io.vertx.core.json.JsonArray credentialIdsArray = new io.vertx.core.json.JsonArray();
+                    var credentialIdsArray = new io.vertx.core.json.JsonArray();
 
-                    for (UUID credId : credentialIds)
+                    for (var credId : credentialIds)
                     {
                         credentialIdsArray.add(credId.toString());
                     }
 
                     // Get credential profiles details
-                    String credentialSql = """
+                    var credentialSql = """
                             SELECT credential_profile_id, profile_name, username
                             FROM credential_profiles
                             WHERE credential_profile_id = ANY($1)
@@ -313,11 +311,11 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                             .execute(Tuple.of(credentialIds))
                             .onSuccess(credentialRows ->
                             {
-                                io.vertx.core.json.JsonArray credentialProfiles = new io.vertx.core.json.JsonArray();
+                                var credentialProfiles = new io.vertx.core.json.JsonArray();
 
-                                for (Row credRow : credentialRows)
+                                for (var credRow : credentialRows)
                                 {
-                                    JsonObject credProfile = new JsonObject()
+                                    var credProfile = new JsonObject()
                                             .put("credential_profile_id", credRow.getUUID("credential_profile_id").toString())
                                             .put("profile_name", credRow.getString("profile_name"))
                                             .put("username", credRow.getString("username"));
@@ -325,7 +323,7 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                                     credentialProfiles.add(credProfile);
                                 }
 
-                                JsonObject result = new JsonObject()
+                                var result = new JsonObject()
                                         .put("found", true)
                                         .put("profile_id", profileRow.getUUID("profile_id").toString())
                                         .put("discovery_name", profileRow.getString("discovery_name"))

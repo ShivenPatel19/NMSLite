@@ -126,7 +126,7 @@ public abstract class QueueBatchProcessor<T>
             return;
         }
 
-        List<T> currentBatch = pollBatchFromQueue();
+        var currentBatch = pollBatchFromQueue();
 
         if (currentBatch.isEmpty())
         {
@@ -139,7 +139,7 @@ public abstract class QueueBatchProcessor<T>
 
         processedBatches++;
 
-        int remainingCount = remainingItems.size();
+        var remainingCount = remainingItems.size();
 
         logger.info("🔄 Processing batch {} ({} items, {} remaining in queue)",
 
@@ -150,7 +150,7 @@ public abstract class QueueBatchProcessor<T>
             {
                 if (batchResults != null)
                 {
-                    for (Object result : batchResults)
+                    for (var result : batchResults)
                     {
                         allResults.add(result);
                     }
@@ -189,11 +189,11 @@ public abstract class QueueBatchProcessor<T>
      */
     private List<T> pollBatchFromQueue()
     {
-        List<T> batch = new ArrayList<>();
+        var batch = new ArrayList<T>();
 
-        for (int i = 0; i < batchSize && !remainingItems.isEmpty(); i++)
+        for (var i = 0; i < batchSize && !remainingItems.isEmpty(); i++)
         {
-            T item = remainingItems.poll();
+            var item = remainingItems.poll();
 
             if (item != null)
             {

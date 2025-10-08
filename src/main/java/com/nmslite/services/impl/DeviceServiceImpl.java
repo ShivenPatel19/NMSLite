@@ -14,8 +14,6 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Pool;
 
-import io.vertx.sqlclient.Row;
-
 import io.vertx.sqlclient.Tuple;
 
 import org.slf4j.Logger;
@@ -23,8 +21,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-
-import java.util.List;
 
 import java.util.UUID;
 
@@ -159,9 +155,9 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonArray> deviceListByProvisioned(boolean isProvisioned)
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
-        String sql = """
+        var sql = """
                 SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
                        d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
                        d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
@@ -177,11 +173,11 @@ public class DeviceServiceImpl implements DeviceService
                 .execute(Tuple.of(isProvisioned))
                 .onSuccess(rows ->
                 {
-                    JsonArray devices = new JsonArray();
+                    var devices = new JsonArray();
 
-                    for (Row row : rows)
+                    for (var row : rows)
                     {
-                        JsonObject device = new JsonObject()
+                        var device = new JsonObject()
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
                                 .put("ip_address", row.getString("ip_address"))
@@ -231,9 +227,9 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceDelete(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 UPDATE devices
                 SET is_deleted = true, deleted_at = CURRENT_TIMESTAMP
                 WHERE device_id = $1 AND is_deleted = false
@@ -251,9 +247,9 @@ public class DeviceServiceImpl implements DeviceService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("device_name", row.getString("device_name"))
@@ -280,9 +276,9 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceRestore(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 UPDATE devices
                 SET is_deleted = false, deleted_at = NULL
                 WHERE device_id = $1 AND is_deleted = true
@@ -300,9 +296,9 @@ public class DeviceServiceImpl implements DeviceService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("device_name", row.getString("device_name"))
@@ -329,9 +325,9 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceGetById(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
                        d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name, cp.password_encrypted,
                        d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
@@ -353,9 +349,9 @@ public class DeviceServiceImpl implements DeviceService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("found", true)
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("device_name", row.getString("device_name"))
@@ -409,9 +405,9 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceFindByIp(String ipAddress, boolean includeDeleted)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
                        d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
                        d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
@@ -433,16 +429,16 @@ public class DeviceServiceImpl implements DeviceService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    String ipAddr = row.getString("ip_address");
+                    var ipAddr = row.getString("ip_address");
 
                     if (ipAddr != null && ipAddr.contains("/"))
                     {
                         ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
                     }
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("found", true)
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("device_name", row.getString("device_name"))
@@ -494,10 +490,10 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceEnableMonitoring(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // First check if device is provisioned
-        String checkSql = """
+        var checkSql = """
                 SELECT is_provisioned, is_deleted
                 FROM devices
                 WHERE device_id = $1
@@ -516,11 +512,11 @@ public class DeviceServiceImpl implements DeviceService
                         return;
                     }
 
-                    Row checkRow = checkRows.iterator().next();
+                    var checkRow = checkRows.iterator().next();
 
-                    boolean isDeleted = checkRow.getBoolean("is_deleted");
+                    var isDeleted = checkRow.getBoolean("is_deleted");
 
-                    boolean isProvisioned = checkRow.getBoolean("is_provisioned");
+                    var isProvisioned = checkRow.getBoolean("is_provisioned");
 
                     if (isDeleted)
                     {
@@ -541,7 +537,7 @@ public class DeviceServiceImpl implements DeviceService
                     }
 
                     // Device is provisioned, proceed with enabling monitoring
-                    String sql = """
+                    var sql = """
                             UPDATE devices
                             SET is_monitoring_enabled = true,
                                 monitoring_enabled_at = COALESCE(monitoring_enabled_at, NOW())
@@ -562,9 +558,9 @@ public class DeviceServiceImpl implements DeviceService
                                     return;
                                 }
 
-                                Row row = rows.iterator().next();
+                                var row = rows.iterator().next();
 
-                                JsonObject result = new JsonObject()
+                                var result = new JsonObject()
                                         .put("updated", true)
                                         .put("device_id", row.getUUID("device_id").toString())
                                         .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
@@ -605,9 +601,9 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceDisableMonitoring(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 UPDATE devices
                 SET is_monitoring_enabled = false
                 WHERE device_id = $1 AND is_deleted = false
@@ -627,9 +623,9 @@ public class DeviceServiceImpl implements DeviceService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("updated", true)
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
@@ -663,15 +659,15 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonArray> deviceProvisionAndEnableMonitoring(JsonArray deviceIds)
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
-        JsonArray results = new JsonArray();
+        var results = new JsonArray();
 
-        List<Future<JsonObject>> futures = new ArrayList<>();
+        var futures = new ArrayList<Future<JsonObject>>();
 
-        for (int i = 0; i < deviceIds.size(); i++)
+        for (var i = 0; i < deviceIds.size(); i++)
         {
-            String deviceId = deviceIds.getString(i);
+            var deviceId = deviceIds.getString(i);
 
             futures.add(provisionSingleDevice(deviceId));
         }
@@ -703,9 +699,9 @@ public class DeviceServiceImpl implements DeviceService
      */
     private Future<JsonObject> provisionSingleDevice(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        JsonObject deviceResult = new JsonObject().put("device_id", deviceId);
+        var deviceResult = new JsonObject().put("device_id", deviceId);
 
         try
         {
@@ -713,7 +709,7 @@ public class DeviceServiceImpl implements DeviceService
             UUID.fromString(deviceId);
 
             // Check if device exists and is unprovisioned
-            String checkSql = """
+            var checkSql = """
                     SELECT device_id, is_provisioned, is_deleted, device_name
                     FROM devices
                     WHERE device_id = $1
@@ -733,13 +729,13 @@ public class DeviceServiceImpl implements DeviceService
                             return;
                         }
 
-                        Row checkRow = checkRows.iterator().next();
+                        var checkRow = checkRows.iterator().next();
 
-                        boolean isDeleted = checkRow.getBoolean("is_deleted");
+                        var isDeleted = checkRow.getBoolean("is_deleted");
 
-                        boolean isProvisioned = checkRow.getBoolean("is_provisioned");
+                        var isProvisioned = checkRow.getBoolean("is_provisioned");
 
-                        String deviceName = checkRow.getString("device_name");
+                        var deviceName = checkRow.getString("device_name");
 
                         if (isDeleted)
                         {
@@ -764,7 +760,7 @@ public class DeviceServiceImpl implements DeviceService
                         }
 
                         // Provision and enable monitoring
-                        String updateSql = """
+                        var updateSql = """
                                 UPDATE devices
                                 SET is_provisioned = true,
                                     is_monitoring_enabled = true,
@@ -779,7 +775,7 @@ public class DeviceServiceImpl implements DeviceService
                                 {
                                     if (updateRows.size() > 0)
                                     {
-                                        Row row = updateRows.iterator().next();
+                                        var row = updateRows.iterator().next();
 
                                         deviceResult.put("success", true)
                                                 .put("device_name", row.getString("device_name"))
@@ -789,7 +785,7 @@ public class DeviceServiceImpl implements DeviceService
                                                         row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
                                         // Initialize device availability record with "unknown" status
-                                        String initAvailabilitySql = """
+                                        var initAvailabilitySql = """
                                                 INSERT INTO device_availability (device_id, current_status)
                                                 VALUES ($1, 'unknown')
                                                 ON CONFLICT (device_id) DO NOTHING
@@ -863,9 +859,9 @@ public class DeviceServiceImpl implements DeviceService
      */
     public Future<JsonArray> deviceListProvisionedAndMonitoringEnabled()
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
-        String sql = """
+        var sql = """
                 SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
                        d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
                        d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk,
@@ -882,11 +878,11 @@ public class DeviceServiceImpl implements DeviceService
                 .execute()
                 .onSuccess(rows ->
                 {
-                    JsonArray devices = new JsonArray();
+                    var devices = new JsonArray();
 
-                    for (Row row : rows)
+                    for (var row : rows)
                     {
-                        JsonObject device = new JsonObject()
+                        var device = new JsonObject()
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
                                 .put("ip_address", row.getString("ip_address"))
@@ -935,28 +931,28 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceCreateFromDiscovery(JsonObject deviceData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // ===== TRUST HANDLER VALIDATION =====
         // No validation here - handler has already validated all input
 
-        String deviceName = deviceData.getString("device_name");
+        var deviceName = deviceData.getString("device_name");
 
-        String ipAddress = deviceData.getString("ip_address");
+        var ipAddress = deviceData.getString("ip_address");
 
-        String deviceType = deviceData.getString("device_type");
+        var deviceType = deviceData.getString("device_type");
 
-        Integer port = deviceData.getInteger("port");
+        var port = deviceData.getInteger("port");
 
-        String protocol = deviceData.getString("protocol");
+        var protocol = deviceData.getString("protocol");
 
-        String credentialProfileId = deviceData.getString("credential_profile_id");
+        var credentialProfileId = deviceData.getString("credential_profile_id");
 
-        String hostName = deviceData.getString("host_name");
+        var hostName = deviceData.getString("host_name");
 
         // Create device with discovery defaults: is_provisioned = false, is_monitoring_enabled = false
         // device_name = host_name initially (user can change later)
-        String sql = """
+        var sql = """
                 INSERT INTO devices (device_name, ip_address, device_type, port, protocol, credential_profile_id,
                                    timeout_seconds, retry_count, is_monitoring_enabled, alert_threshold_cpu,
                                    alert_threshold_memory, alert_threshold_disk, polling_interval_seconds,
@@ -972,9 +968,9 @@ public class DeviceServiceImpl implements DeviceService
                                 getDefaultPollingInterval(), hostName, false)) // is_provisioned = false
                 .onSuccess(rows ->
                 {
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("device_name", row.getString("device_name"))
@@ -1014,10 +1010,10 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceUpdateConfig(String deviceId, JsonObject updateFields)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // Basic existence and deletion check
-        String checkSql = """
+        var checkSql = """
                 SELECT device_id, is_deleted
                 FROM devices
                 WHERE device_id = $1
@@ -1034,7 +1030,7 @@ public class DeviceServiceImpl implements DeviceService
                         return;
                     }
 
-                    Row checkRow = checkRows.iterator().next();
+                    var checkRow = checkRows.iterator().next();
 
                     if (Boolean.TRUE.equals(checkRow.getBoolean("is_deleted")))
                     {
@@ -1044,11 +1040,11 @@ public class DeviceServiceImpl implements DeviceService
                     }
 
                     // Build dynamic update for allowed fields only
-                    StringBuilder sqlBuilder = new StringBuilder("UPDATE devices SET ");
+                    var sqlBuilder = new StringBuilder("UPDATE devices SET ");
 
-                    JsonArray params = new JsonArray();
+                    var params = new JsonArray();
 
-                    int paramIndex = 1;
+                    var paramIndex = 1;
 
                     if (updateFields.containsKey("device_name"))
                     {
@@ -1113,14 +1109,14 @@ public class DeviceServiceImpl implements DeviceService
                         return;
                     }
 
-                    String sqlStr = sqlBuilder.toString();
+                    var sqlStr = sqlBuilder.toString();
 
                     if (sqlStr.endsWith(", "))
                     {
                         sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
                     }
 
-                    String sql = sqlStr + " WHERE device_id = $" + paramIndex + " AND is_deleted = false" +
+                    var sql = sqlStr + " WHERE device_id = $" + paramIndex + " AND is_deleted = false" +
                             " RETURNING device_id, device_name, port, polling_interval_seconds, timeout_seconds, retry_count, " +
                             "alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk, is_provisioned, is_monitoring_enabled";
 
@@ -1137,9 +1133,9 @@ public class DeviceServiceImpl implements DeviceService
                                     return;
                                 }
 
-                                Row row = rows.iterator().next();
+                                var row = rows.iterator().next();
 
-                                JsonObject result = new JsonObject()
+                                var result = new JsonObject()
                                         .put("success", true)
                                         .put("device_id", row.getUUID("device_id").toString())
                                         .put("device_name", row.getString("device_name"))

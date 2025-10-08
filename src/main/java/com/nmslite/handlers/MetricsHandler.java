@@ -38,7 +38,7 @@ public class MetricsHandler
      */
     public void getDeviceMetrics(RoutingContext context)
     {
-        String deviceId = context.pathParam("deviceId");
+        var deviceId = context.pathParam("deviceId");
 
         if (!ValidationUtil.validatePathParameterUUID(context, deviceId, "deviceId"))
         {

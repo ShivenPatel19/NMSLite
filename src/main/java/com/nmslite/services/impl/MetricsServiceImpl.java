@@ -12,8 +12,6 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Pool;
 
-import io.vertx.sqlclient.Row;
-
 import io.vertx.sqlclient.Tuple;
 
 import org.slf4j.Logger;
@@ -56,31 +54,31 @@ public class MetricsServiceImpl implements MetricsService
     @Override
     public Future<JsonObject> metricsCreate(JsonObject metricsData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String deviceId = metricsData.getString("device_id");
+        var deviceId = metricsData.getString("device_id");
 
-        Integer durationMs = metricsData.getInteger("duration_ms");
+        var durationMs = metricsData.getInteger("duration_ms");
 
-        Double cpuUsage = metricsData.getDouble("cpu_usage_percent");
+        var cpuUsage = metricsData.getDouble("cpu_usage_percent");
 
-        Double memoryUsage = metricsData.getDouble("memory_usage_percent");
+        var memoryUsage = metricsData.getDouble("memory_usage_percent");
 
-        Long memoryTotal = metricsData.getLong("memory_total_bytes");
+        var memoryTotal = metricsData.getLong("memory_total_bytes");
 
-        Long memoryUsed = metricsData.getLong("memory_used_bytes");
+        var memoryUsed = metricsData.getLong("memory_used_bytes");
 
-        Long memoryFree = metricsData.getLong("memory_free_bytes");
+        var memoryFree = metricsData.getLong("memory_free_bytes");
 
-        Double diskUsage = metricsData.getDouble("disk_usage_percent");
+        var diskUsage = metricsData.getDouble("disk_usage_percent");
 
-        Long diskTotal = metricsData.getLong("disk_total_bytes");
+        var diskTotal = metricsData.getLong("disk_total_bytes");
 
-        Long diskUsed = metricsData.getLong("disk_used_bytes");
+        var diskUsed = metricsData.getLong("disk_used_bytes");
 
-        Long diskFree = metricsData.getLong("disk_free_bytes");
+        var diskFree = metricsData.getLong("disk_free_bytes");
 
-        String sql = """
+        var sql = """
                 INSERT INTO metrics (device_id, duration_ms, cpu_usage_percent, memory_usage_percent,
                                    memory_total_bytes, memory_used_bytes, memory_free_bytes, disk_usage_percent,
                                    disk_total_bytes, disk_used_bytes, disk_free_bytes)
@@ -94,9 +92,9 @@ public class MetricsServiceImpl implements MetricsService
                                 memoryTotal, memoryUsed, memoryFree, diskUsage, diskTotal, diskUsed, diskFree))
                 .onSuccess(rows ->
                 {
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("metric_id", row.getUUID("metric_id").toString())
                             .put("device_id", row.getUUID("device_id").toString())
@@ -145,9 +143,9 @@ public class MetricsServiceImpl implements MetricsService
     @Override
     public Future<JsonArray> metricsGetAllByDevice(String deviceId)
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
-        String sql = """
+        var sql = """
                 SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
                        m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
                        m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
@@ -163,18 +161,18 @@ public class MetricsServiceImpl implements MetricsService
                 .execute(Tuple.of(UUID.fromString(deviceId)))
                 .onSuccess(rows ->
                 {
-                    JsonArray metrics = new JsonArray();
+                    var metrics = new JsonArray();
 
-                    for (Row row : rows)
+                    for (var row : rows)
                     {
-                        String ipAddr = row.getString("ip_address");
+                        var ipAddr = row.getString("ip_address");
 
                         if (ipAddr != null && ipAddr.contains("/"))
                         {
                             ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
                         }
 
-                        JsonObject metric = new JsonObject()
+                        var metric = new JsonObject()
                                 .put("metric_id", row.getUUID("metric_id").toString())
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
@@ -216,9 +214,9 @@ public class MetricsServiceImpl implements MetricsService
     @Override
     public Future<JsonObject> metricsDeleteAllByDevice(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 DELETE FROM metrics
                 WHERE device_id = $1
                 """;
@@ -227,9 +225,9 @@ public class MetricsServiceImpl implements MetricsService
                 .execute(Tuple.of(UUID.fromString(deviceId)))
                 .onSuccess(rows ->
                 {
-                    int deletedCount = rows.rowCount();
+                    var deletedCount = rows.rowCount();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("device_id", deviceId)
                             .put("deleted_count", deletedCount)

@@ -113,14 +113,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
         logger.info("📈 Starting PollingMetricsVerticle - Continuous Monitoring");
 
         // Load configuration from tools and polling sections
-        JsonObject toolsConfig = config().getJsonObject("tools", new JsonObject());
+        var toolsConfig = config().getJsonObject("tools", new JsonObject());
 
-        JsonObject pollingConfig = config().getJsonObject("polling", new JsonObject());
+        var pollingConfig = config().getJsonObject("polling", new JsonObject());
 
         goEnginePath = toolsConfig.getString("goengine.path", "./goengine/goengine");
 
         // Load fping configuration
-        JsonObject fpingConfig = toolsConfig.getJsonObject("fping", new JsonObject());
+        var fpingConfig = toolsConfig.getJsonObject("fping", new JsonObject());
 
         fpingPath = fpingConfig.getString("path", "fping");
 
@@ -129,7 +129,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         fpingBatchTimeoutSeconds = fpingConfig.getInteger("batch.blocking.timeout.seconds", 180);
 
         // Load port check configuration
-        JsonObject portCheckConfig = toolsConfig.getJsonObject("port.check", new JsonObject());
+        var portCheckConfig = toolsConfig.getJsonObject("port.check", new JsonObject());
 
         portCheckTimeoutSeconds = portCheckConfig.getInteger("timeout.seconds", 5);
 
@@ -145,7 +145,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         blockingTimeoutGoEngine = pollingConfig.getInteger("blocking.timeout.goengine", 330);
 
         // Load device defaults for connection timeout
-        JsonObject deviceDefaults = config().getJsonObject("device", new JsonObject())
+        var deviceDefaults = config().getJsonObject("device", new JsonObject())
                                            .getJsonObject("defaults", new JsonObject());
 
         defaultConnectionTimeoutSeconds = deviceDefaults.getInteger("connection.timeout.seconds", 10);
@@ -224,22 +224,22 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Future<Integer> loadDevicesIntoCache()
     {
-        Promise<Integer> promise = Promise.promise();
+        var promise = Promise.<Integer>promise();
 
         logger.info("📦 Loading devices into cache...");
 
         deviceService.deviceListProvisionedAndMonitoringEnabled()
             .onSuccess(devices ->
             {
-                int count = 0;
+                var count = 0;
 
-                for (Object obj : devices)
+                for (var obj : devices)
                 {
-                    JsonObject deviceData = (JsonObject) obj;
+                    var deviceData = (JsonObject) obj;
 
                     try
                     {
-                        PollingDevice pd = createPollingDeviceFromJson(deviceData);
+                        var pd = createPollingDeviceFromJson(deviceData);
 
                         deviceCache.put(pd.deviceId, pd);
 
@@ -279,7 +279,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private PollingDevice createPollingDeviceFromJson(JsonObject deviceData)
     {
-        PollingDevice pd = new PollingDevice();
+        var pd = new PollingDevice();
 
         // Identity
         pd.deviceId = deviceData.getString("device_id");
@@ -288,7 +288,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         // GoEngine required fields
         // Strip CIDR notation from IP address (e.g., "192.168.1.1/32" → "192.168.1.1")
-        String ipWithCidr = deviceData.getString("ip_address");
+        var ipWithCidr = deviceData.getString("ip_address");
 
         pd.address = ipWithCidr.contains("/") ? ipWithCidr.split("/")[0] : ipWithCidr;
 
@@ -313,13 +313,13 @@ public class PollingMetricsVerticle extends AbstractVerticle
         pd.connectionTimeoutSeconds = defaultConnectionTimeoutSeconds;
 
         // Timestamps (PostgresSQL returns timestamps without 'Z', need to append it for ISO-8601)
-        String monitoringEnabledAtStr = deviceData.getString("monitoring_enabled_at");
+        var monitoringEnabledAtStr = deviceData.getString("monitoring_enabled_at");
 
         pd.monitoringEnabledAt = monitoringEnabledAtStr != null
             ? Instant.parse(monitoringEnabledAtStr + "Z")
             : Instant.parse(deviceData.getString("created_at") + "Z");
 
-        String lastPolledAtStr = deviceData.getString("last_polled_at");
+        var lastPolledAtStr = deviceData.getString("last_polled_at");
 
         pd.lastPolledAt = lastPolledAtStr != null
             ? Instant.parse(lastPolledAtStr + "Z")
@@ -363,11 +363,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Instant computeAlignedNext(Instant anchor, Instant now, long intervalSeconds)
     {
-        long elapsedSeconds = now.getEpochSecond() - anchor.getEpochSecond();
+        var elapsedSeconds = now.getEpochSecond() - anchor.getEpochSecond();
 
-        long cyclesPassed = elapsedSeconds / intervalSeconds;
+        var cyclesPassed = elapsedSeconds / intervalSeconds;
 
-        long nextCycle = cyclesPassed + 1;
+        var nextCycle = cyclesPassed + 1;
 
         return anchor.plusSeconds(nextCycle * intervalSeconds);
     }
@@ -390,21 +390,21 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Future<List<PollingDevice>> executePhaseBatchProcessing(List<PollingDevice> dueDevices)
     {
-        Promise<List<PollingDevice>> promise = Promise.promise();
+        var promise = Promise.<List<PollingDevice>>promise();
 
         logger.info("📦 Phase 1: Batch Processing - {} devices", dueDevices.size());
 
         // Use QueueBatchProcessor for sequential batch processing
-        PollingBatchProcessor processor = new PollingBatchProcessor(dueDevices);
+        var processor = new PollingBatchProcessor(dueDevices);
 
-        Promise<JsonArray> batchPromise = Promise.promise();
+        var batchPromise = Promise.<JsonArray>promise();
 
         processor.processNext(batchPromise);
 
         batchPromise.future()
             .onSuccess(results ->
             {
-                List<PollingDevice> failedDevices = processor.getFailedDevices();
+                var failedDevices = processor.getFailedDevices();
 
                 logger.info("📦 Phase 1 completed: {} devices processed, {} failed",
 
@@ -422,34 +422,34 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Future<List<PollingDevice>> processSingleBatch(List<PollingDevice> batch)
     {
-        Promise<List<PollingDevice>> promise = Promise.promise();
+        var promise = Promise.<List<PollingDevice>>promise();
 
         vertx.executeBlocking(() ->
         {
-            List<PollingDevice> batchFailures = new ArrayList<>();
+            var batchFailures = new ArrayList<PollingDevice>();
 
             // Step 1: Batch fping connectivity check (ICMP)
-            List<String> ips = batch.stream().map(pd -> pd.address).collect(Collectors.toList());
+            var ips = batch.stream().map(pd -> pd.address).collect(Collectors.toList());
 
-            Map<String, Boolean> connectivityResults = executeBatchFping(ips);
+            var connectivityResults = executeBatchFping(ips);
 
             // Step 2: Port reachability check (TCP) for devices that passed fping
-            List<PollingDevice> pingAliveDevices = batch.stream()
+            var pingAliveDevices = batch.stream()
                 .filter(pd -> connectivityResults.getOrDefault(pd.address, false))
                 .collect(Collectors.toList());
 
-            Map<String, Boolean> portCheckResults = executeBatchPortCheck(pingAliveDevices);
+            var portCheckResults = executeBatchPortCheck(pingAliveDevices);
 
             // Step 3: Separate alive and dead devices (both ICMP and TCP must pass)
-            List<PollingDevice> aliveDevices = new ArrayList<>();
+            var aliveDevices = new ArrayList<PollingDevice>();
 
-            List<PollingDevice> deadDevices = new ArrayList<>();
+            var deadDevices = new ArrayList<PollingDevice>();
 
-            for (PollingDevice pd : batch)
+            for (var pd : batch)
             {
-                boolean pingAlive = connectivityResults.getOrDefault(pd.address, false);
+                var pingAlive = connectivityResults.getOrDefault(pd.address, false);
 
-                boolean portOpen = portCheckResults.getOrDefault(pd.deviceId, false);
+                var portOpen = portCheckResults.getOrDefault(pd.deviceId, false);
 
                 if (pingAlive && portOpen)
                 {
@@ -475,7 +475,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             logger.info("📊 Batch connectivity: {} alive (ICMP+TCP), {} dead", aliveDevices.size(), deadDevices.size());
 
             // Step 3: Process dead devices (record connectivity failure)
-            for (PollingDevice pd : deadDevices)
+            for (var pd : deadDevices)
             {
                 pd.incrementFailures();
 
@@ -485,12 +485,12 @@ public class PollingMetricsVerticle extends AbstractVerticle
             // Step 4: Process alive devices (GoEngine metrics in batch with streaming results)
             if (!aliveDevices.isEmpty())
             {
-                Map<String, Boolean> metricsResults = pollDeviceMetricsBatch(aliveDevices);
+                var metricsResults = pollDeviceMetricsBatch(aliveDevices);
 
                 // Process results for each device
-                for (PollingDevice pd : aliveDevices)
+                for (var pd : aliveDevices)
                 {
-                    boolean success = metricsResults.getOrDefault(pd.deviceId, false);
+                    var success = metricsResults.getOrDefault(pd.deviceId, false);
 
                     if (success)
                     {
@@ -552,43 +552,43 @@ public class PollingMetricsVerticle extends AbstractVerticle
         try
         {
             // Build GoEngine JSON input array
-            JsonArray devicesArray = new JsonArray();
+            var devicesArray = new JsonArray();
 
-            for (PollingDevice pd : devices)
+            for (var pd : devices)
             {
                 devicesArray.add(pd.toGoEngineJson());
             }
 
             // Generate request ID
-            String requestId = "POLL_BATCH_" + System.currentTimeMillis();
+            var requestId = "POLL_BATCH_" + System.currentTimeMillis();
 
             logger.debug("🚀 Starting GoEngine batch poll for {} devices", devices.size());
 
             // Execute GoEngine with batch input
-            ProcessBuilder pb = new ProcessBuilder(
+            var pb = new ProcessBuilder(
                 goEnginePath,
                 "--mode", "metrics",
                 "--devices", devicesArray.encode(),
                 "--request-id", requestId
             );
 
-            Process process = pb.start();
+            var process = pb.start();
 
             // Create a map for quick device lookup by IP address
-            Map<String, PollingDevice> devicesByIp = new HashMap<>();
+            var devicesByIp = new HashMap<String, PollingDevice>();
 
-            for (PollingDevice pd : devices)
+            for (var pd : devices)
             {
                 devicesByIp.put(pd.address, pd);
             }
 
             // Read streaming output line by line and process results as they arrive
-            StringBuilder errorOutput = new StringBuilder();
+            var errorOutput = new StringBuilder();
 
-            int processedCount = 0;
+            var processedCount = 0;
 
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                 BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
+            try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                 var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
             {
                 String line;
 
@@ -597,14 +597,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     try
                     {
                         // Parse JSON result for this device
-                        JsonObject result = new JsonObject(line);
+                        var result = new JsonObject(line);
 
-                        String deviceAddress = result.getString("device_address");
+                        var deviceAddress = result.getString("device_address");
 
-                        boolean success = result.getBoolean("success", false);
+                        var success = result.getBoolean("success", false);
 
                         // Find the device by IP address
-                        PollingDevice pd = devicesByIp.get(deviceAddress);
+                        var pd = devicesByIp.get(deviceAddress);
 
                         if (pd == null)
                         {
@@ -628,7 +628,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         }
                         else
                         {
-                            String error = result.getString("error", "Unknown error");
+                            var error = result.getString("error", "Unknown error");
 
                             updateDeviceAvailability(pd.deviceId, false);
 
@@ -654,7 +654,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             }
 
             // Wait for process to complete (timeout handled by Vert.x blocking timeout)
-            boolean finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
+            var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
 
             if (!finished)
             {
@@ -665,7 +665,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 return results;
             }
 
-            int exitCode = process.exitValue();
+            var exitCode = process.exitValue();
 
             if (exitCode != 0)
             {
@@ -700,7 +700,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Future<List<PollingDevice>> executePhaseRetryFailures(List<PollingDevice> failedDevices)
     {
-        Promise<List<PollingDevice>> promise = Promise.promise();
+        var promise = Promise.<List<PollingDevice>>promise();
 
         if (failedDevices.isEmpty())
         {
@@ -715,16 +715,16 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         vertx.executeBlocking(() ->
         {
-            List<PollingDevice> exhaustedDevices = new ArrayList<>();
+            var exhaustedDevices = new ArrayList<PollingDevice>();
 
             // Retry using batch method (same as Phase 1)
             // Note: We do one retry attempt for all devices in batch mode
             // Individual retry_count is handled by consecutive_failures tracking
-            Map<String, Boolean> retryResults = pollDeviceMetricsBatch(failedDevices);
+            var retryResults = pollDeviceMetricsBatch(failedDevices);
 
-            for (PollingDevice pd : failedDevices)
+            for (var pd : failedDevices)
             {
-                boolean success = retryResults.getOrDefault(pd.deviceId, false);
+                var success = retryResults.getOrDefault(pd.deviceId, false);
 
                 if (success)
                 {
@@ -761,7 +761,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Future<Void> executePhaseLogFailures(List<PollingDevice> exhaustedDevices)
     {
-        Promise<Void> promise = Promise.promise();
+        var promise = Promise.<Void>promise();
 
         if (exhaustedDevices.isEmpty())
         {
@@ -776,19 +776,19 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         vertx.executeBlocking(() ->
         {
-            File logFile = new File(failureLogPath);
+            var logFile = new File(failureLogPath);
 
             logFile.getParentFile().mkdirs(); // Create directory if needed
 
-            try (FileWriter fw = new FileWriter(logFile, true);
-                 BufferedWriter bw = new BufferedWriter(fw);
-                 PrintWriter out = new PrintWriter(bw))
+            try (var fw = new FileWriter(logFile, true);
+                 var bw = new BufferedWriter(fw);
+                 var out = new PrintWriter(bw))
             {
-                String timestamp = Instant.now().toString();
+                var timestamp = Instant.now().toString();
 
-                for (PollingDevice pd : exhaustedDevices)
+                for (var pd : exhaustedDevices)
                 {
-                    String logEntry = String.format("%s | %s | %s | %s | failures=%d",
+                    var logEntry = String.format("%s | %s | %s | %s | failures=%d",
                         timestamp, pd.deviceId, pd.deviceName, pd.address, pd.consecutiveFailures);
 
                     out.println(logEntry);
@@ -820,11 +820,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Future<Void> executePhaseAutoDisable()
     {
-        Promise<Void> promise = Promise.promise();
+        var promise = Promise.<Void>promise();
 
         logger.info("🔍 Phase 4: Checking for devices to auto-disable");
 
-        List<PollingDevice> devicesToDisable = deviceCache.values().stream()
+        var devicesToDisable = deviceCache.values().stream()
             .filter(pd -> pd.shouldAutoDisable(maxCyclesSkipped))
             .collect(Collectors.toList());
 
@@ -856,7 +856,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             return;
         }
 
-        PollingDevice pd = devices.get(index);
+        var pd = devices.get(index);
 
         logger.warn("🚫 Auto-disabling device: {} (consecutive failures: {})", pd.deviceName, pd.consecutiveFailures);
 
@@ -892,14 +892,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
     private void storeMetrics(String deviceId, JsonObject goEngineResult)
     {
         // Extract nested metrics from GoEngine response
-        JsonObject cpu = goEngineResult.getJsonObject("cpu");
+        var cpu = goEngineResult.getJsonObject("cpu");
 
-        JsonObject memory = goEngineResult.getJsonObject("memory");
+        var memory = goEngineResult.getJsonObject("memory");
 
-        JsonObject disk = goEngineResult.getJsonObject("disk");
+        var disk = goEngineResult.getJsonObject("disk");
 
         // Transform to database schema format
-        JsonObject metricsData = new JsonObject()
+        var metricsData = new JsonObject()
             .put("device_id", deviceId)
             .put("duration_ms", goEngineResult.getInteger("duration_ms"))
             .put("cpu_usage_percent", cpu.getDouble("usage_percent"))
@@ -924,9 +924,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private void updateDeviceAvailability(String deviceId, boolean isAvailable)
     {
-        String status = isAvailable ? "UP" : "DOWN";
+        var status = isAvailable ? "UP" : "DOWN";
 
-        Long responseTime = isAvailable ? 100L : null; // Simple response time
+        var responseTime = isAvailable ? 100L : null; // Simple response time
 
         availabilityService.availabilityUpdateDeviceStatus(deviceId, status, responseTime)
             .onFailure(cause ->
@@ -938,27 +938,27 @@ public class PollingMetricsVerticle extends AbstractVerticle
         // Cache update consumers
         vertx.eventBus().consumer("device.monitoring.enabled", msg ->
         {
-            JsonObject data = (JsonObject) msg.body();
+            var data = (JsonObject) msg.body();
 
-            String deviceId = data.getString("device_id");
+            var deviceId = data.getString("device_id");
 
             onDeviceMonitoringEnabled(deviceId);
         });
 
         vertx.eventBus().consumer("device.monitoring.disabled", msg ->
         {
-            JsonObject data = (JsonObject) msg.body();
+            var data = (JsonObject) msg.body();
 
-            String deviceId = data.getString("device_id");
+            var deviceId = data.getString("device_id");
 
             onDeviceMonitoringDisabled(deviceId);
         });
 
         vertx.eventBus().consumer("device.config.updated", msg ->
         {
-            JsonObject data = (JsonObject) msg.body();
+            var data = (JsonObject) msg.body();
 
-            String deviceId = data.getString("device_id");
+            var deviceId = data.getString("device_id");
 
             onDeviceConfigUpdated(deviceId);
         });
@@ -993,7 +993,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                 try
                 {
-                    PollingDevice pd = createPollingDeviceFromJson(deviceData);
+                    var pd = createPollingDeviceFromJson(deviceData);
 
                     deviceCache.put(pd.deviceId, pd);
 
@@ -1017,7 +1017,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
     {
         logger.info("📤 Device monitoring disabled event: {}", deviceId);
 
-        PollingDevice removed = deviceCache.remove(deviceId);
+        var removed = deviceCache.remove(deviceId);
 
         if (removed != null)
         {
@@ -1049,7 +1049,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                 try
                 {
-                    PollingDevice pd = createPollingDeviceFromJson(deviceData);
+                    var pd = createPollingDeviceFromJson(deviceData);
 
                     deviceCache.put(pd.deviceId, pd);
 
@@ -1093,14 +1093,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private void executePollingCycle()
     {
-        long startTime = System.currentTimeMillis();
+        var startTime = System.currentTimeMillis();
 
-        Instant now = Instant.now();
+        var now = Instant.now();
 
         logger.debug("🔄 Polling cycle check at {}", now);
 
         // Get devices due for polling from cache
-        List<PollingDevice> dueDevices = deviceCache.values().stream()
+        var dueDevices = deviceCache.values().stream()
             .filter(pd -> pd.isDue(now))
             .collect(Collectors.toList());
 
@@ -1109,7 +1109,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             deviceCache.values().forEach(pd ->
             {
-                boolean isDue = pd.isDue(now);
+                var isDue = pd.isDue(now);
 
                 logger.debug("  Device: {} | Next: {} | Due: {}",
                     pd.deviceName, pd.nextScheduledAt, isDue ? "YES" : "NO");
@@ -1142,7 +1142,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             })
             .onComplete(result ->
             {
-                long duration = System.currentTimeMillis() - startTime;
+                var duration = System.currentTimeMillis() - startTime;
 
                 if (result.succeeded())
                 {
@@ -1170,22 +1170,22 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Map<String, Boolean> executeBatchFping(List<String> ips)
     {
-        Map<String, Boolean> results = new HashMap<>();
+        var results = new HashMap<String, Boolean>();
 
         try
         {
-            List<String> command = Arrays.asList(
+            var command = Arrays.asList(
                 fpingPath, "-a", "-q", "-t", String.valueOf(fpingTimeoutSeconds * 1000) // -a: show alive, -q: quiet, -t: timeout in ms
             );
 
-            ProcessBuilder pb = new ProcessBuilder(command);
+            var pb = new ProcessBuilder(command);
 
-            Process process = pb.start();
+            var process = pb.start();
 
             // Write IPs to stdin and close it
             try (var writer = process.outputWriter())
             {
-                for (String ip : ips)
+                for (var ip : ips)
                 {
                     writer.write(ip + "\n");
 
@@ -1194,7 +1194,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             } // Writer is closed here, signaling EOF to fping
 
             // Wait for process to complete with timeout
-            boolean finished = process.waitFor(fpingBatchTimeoutSeconds, TimeUnit.SECONDS);
+            var finished = process.waitFor(fpingBatchTimeoutSeconds, TimeUnit.SECONDS);
 
             if (!finished)
             {
@@ -1206,13 +1206,13 @@ public class PollingMetricsVerticle extends AbstractVerticle
             }
 
             // Read alive IPs from stdout (after process completes)
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
+            try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
             {
                 String line;
 
                 while ((line = reader.readLine()) != null)
                 {
-                    String aliveIp = line.trim();
+                    var aliveIp = line.trim();
 
                     if (results.containsKey(aliveIp))
                     {
@@ -1227,7 +1227,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             logger.error("fping execution failed during polling", exception);
 
             // Fallback: mark all as dead
-            for (String ip : ips)
+            for (var ip : ips)
             {
                 results.put(ip, false);
             }
@@ -1247,7 +1247,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Map<String, Boolean> executeBatchPortCheck(List<PollingDevice> devices)
     {
-        Map<String, Boolean> results = new HashMap<>();
+        var results = new HashMap<String, Boolean>();
 
         if (devices.isEmpty())
         {
@@ -1255,17 +1255,17 @@ public class PollingMetricsVerticle extends AbstractVerticle
         }
 
         // Port check timeout (from config)
-        int portCheckTimeoutMs = portCheckTimeoutSeconds * 1000;
+        var portCheckTimeoutMs = portCheckTimeoutSeconds * 1000;
 
         // Use parallel stream for concurrent port checks
         devices.parallelStream().forEach(pd ->
         {
-            boolean portOpen = false;
+            var portOpen = false;
 
             try
             {
                 // Try to connect to the port
-                try (java.net.Socket socket = new java.net.Socket())
+                try (var socket = new java.net.Socket())
                 {
                     socket.connect(
                         new java.net.InetSocketAddress(pd.address, pd.port),
@@ -1292,7 +1292,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             }
         });
 
-        long successCount = results.values().stream().filter(v -> v).count();
+        var successCount = results.values().stream().filter(v -> v).count();
 
         logger.info("📊 Port check results: {}/{} ports reachable", successCount, devices.size());
 

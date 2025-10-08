@@ -35,9 +35,9 @@ public class PasswordUtil
     {
         try
         {
-            MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
+            var digest = MessageDigest.getInstance(HASH_ALGORITHM);
 
-            byte[] hash = digest.digest(password.getBytes(StandardCharsets.UTF_8));
+            var hash = digest.digest(password.getBytes(StandardCharsets.UTF_8));
 
             return Base64.getEncoder().encodeToString(hash);
         }
@@ -56,7 +56,7 @@ public class PasswordUtil
      */
     public static boolean verifyPassword(String password, String hashedPassword)
     {
-        String newHash = hashPassword(password);
+        var newHash = hashPassword(password);
 
         return newHash.equals(hashedPassword);
     }
@@ -71,16 +71,16 @@ public class PasswordUtil
     {
         try
         {
-            SecretKeySpec secretKey = new SecretKeySpec(
+            var secretKey = new SecretKeySpec(
                 ENCRYPTION_KEY.getBytes(StandardCharsets.UTF_8),
                 ENCRYPTION_ALGORITHM
             );
 
-            Cipher cipher = Cipher.getInstance(ENCRYPTION_ALGORITHM);
+            var cipher = Cipher.getInstance(ENCRYPTION_ALGORITHM);
 
             cipher.init(Cipher.ENCRYPT_MODE, secretKey);
 
-            byte[] encryptedBytes = cipher.doFinal(password.getBytes(StandardCharsets.UTF_8));
+            var encryptedBytes = cipher.doFinal(password.getBytes(StandardCharsets.UTF_8));
 
             return Base64.getEncoder().encodeToString(encryptedBytes);
 
@@ -101,16 +101,16 @@ public class PasswordUtil
     {
         try
         {
-            SecretKeySpec secretKey = new SecretKeySpec(
+            var secretKey = new SecretKeySpec(
                 ENCRYPTION_KEY.getBytes(StandardCharsets.UTF_8),
                 ENCRYPTION_ALGORITHM
             );
 
-            Cipher cipher = Cipher.getInstance(ENCRYPTION_ALGORITHM);
+            var cipher = Cipher.getInstance(ENCRYPTION_ALGORITHM);
 
             cipher.init(Cipher.DECRYPT_MODE, secretKey);
 
-            byte[] decryptedBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedPassword));
+            var decryptedBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedPassword));
 
             return new String(decryptedBytes, StandardCharsets.UTF_8);
 

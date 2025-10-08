@@ -48,7 +48,7 @@ public class IPRangeUtil
 
         ipAddress = ipAddress.trim();
 
-        List<String> ipList = new ArrayList<>();
+        List<String> ipList;
 
         if (!isRange)
         {
@@ -57,6 +57,8 @@ public class IPRangeUtil
             {
                 throw new IllegalArgumentException("Invalid IP address format: " + ipAddress);
             }
+
+            ipList = new ArrayList<>();
 
             ipList.add(ipAddress);
         }
@@ -115,16 +117,16 @@ public class IPRangeUtil
         try
         {
             // Parse and validate range
-            String[] parts = ipRange.split("-");
+            var parts = ipRange.split("-");
 
             if (parts.length != 2)
             {
                 return false;
             }
 
-            String baseIP = parts[0];
+            var baseIP = parts[0];
 
-            int endOctet = Integer.parseInt(parts[1]);
+            var endOctet = Integer.parseInt(parts[1]);
 
             // Validate base IP
             if (!isValidSingleIP(baseIP))
@@ -133,9 +135,9 @@ public class IPRangeUtil
             }
 
             // Extract last octet from base IP
-            String[] ipParts = baseIP.split("\\.");
+            var ipParts = baseIP.split("\\.");
 
-            int startOctet = Integer.parseInt(ipParts[3]);
+            var startOctet = Integer.parseInt(ipParts[3]);
 
             // Validate range
             if (startOctet > endOctet)
@@ -165,25 +167,25 @@ public class IPRangeUtil
      */
     private static List<String> expandIPRange(String ipRange)
     {
-        List<String> ipList = new ArrayList<>();
+        var ipList = new ArrayList<String>();
 
         try
         {
-            String[] parts = ipRange.split("-");
+            var parts = ipRange.split("-");
 
-            String baseIP = parts[0];
+            var baseIP = parts[0];
 
-            int endOctet = Integer.parseInt(parts[1]);
+            var endOctet = Integer.parseInt(parts[1]);
 
             // Extract IP base and start octet
-            String[] ipParts = baseIP.split("\\.");
+            var ipParts = baseIP.split("\\.");
 
-            String ipBase = ipParts[0] + "." + ipParts[1] + "." + ipParts[2] + ".";
+            var ipBase = ipParts[0] + "." + ipParts[1] + "." + ipParts[2] + ".";
 
-            int startOctet = Integer.parseInt(ipParts[3]);
+            var startOctet = Integer.parseInt(ipParts[3]);
 
             // Generate IP addresses in range
-            for (int i = startOctet; i <= endOctet; i++)
+            for (var i = startOctet; i <= endOctet; i++)
             {
                 ipList.add(ipBase + i);
             }
@@ -197,27 +199,4 @@ public class IPRangeUtil
         return ipList;
     }
 
-    /**
-     * Validate IP address or range based on the isRange flag
-     *
-     * @param ipAddress The IP address or range string
-     * @param isRange Flag indicating if this should be treated as a range
-     * @return true if valid, false otherwise
-     */
-    public static boolean validateIPFormat(String ipAddress, boolean isRange)
-    {
-        if (ipAddress == null || ipAddress.trim().isEmpty())
-        {
-            return false;
-        }
-
-        if (isRange)
-        {
-            return isValidIPRange(ipAddress);
-        }
-        else
-        {
-            return isValidSingleIP(ipAddress);
-        }
-    }
 }

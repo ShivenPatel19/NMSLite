@@ -14,8 +14,6 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Pool;
 
-import io.vertx.sqlclient.Row;
-
 import io.vertx.sqlclient.Tuple;
 
 import org.slf4j.Logger;
@@ -58,9 +56,9 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonArray> userList(boolean includeInactive)
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
-        String sql = """
+        var sql = """
             SELECT user_id, username, is_active
             FROM users
             """ + (includeInactive ? "" : "WHERE is_active = true ") + """
@@ -71,11 +69,11 @@ public class UserServiceImpl implements UserService
             .execute()
             .onSuccess(rows ->
             {
-                JsonArray users = new JsonArray();
+                var users = new JsonArray();
 
-                for (Row row : rows)
+                for (var row : rows)
                 {
-                    JsonObject user = new JsonObject()
+                    var user = new JsonObject()
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
                         .put("is_active", row.getBoolean("is_active"));
@@ -104,21 +102,21 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userCreate(JsonObject userData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String username = userData.getString("username");
+        var username = userData.getString("username");
 
-        String password = userData.getString("password");
+        var password = userData.getString("password");
 
-        Boolean isActive = userData.getBoolean("is_active", true);
+        var isActive = userData.getBoolean("is_active", true);
 
         // Hash password for user authentication
-        String passwordHash = PasswordUtil.hashPassword(password);
+        var passwordHash = PasswordUtil.hashPassword(password);
 
         // ===== TRUST HANDLER VALIDATION =====
         // No validation here - handler has already validated all input
 
-        String sql = """
+        var sql = """
             INSERT INTO users (username, password_hash, is_active)
             VALUES ($1, $2, $3)
             RETURNING user_id, username, is_active
@@ -128,9 +126,9 @@ public class UserServiceImpl implements UserService
             .execute(Tuple.of(username, passwordHash, isActive))
             .onSuccess(rows ->
             {
-                Row row = rows.iterator().next();
+                var row = rows.iterator().next();
 
-                JsonObject result = new JsonObject()
+                var result = new JsonObject()
                     .put("success", true)
                     .put("user_id", row.getUUID("user_id").toString())
                     .put("username", row.getString("username"))
@@ -166,22 +164,22 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userUpdate(String userId, JsonObject userData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String username = userData.getString("username");
+        var username = userData.getString("username");
 
-        String password = userData.getString("password");
+        var password = userData.getString("password");
 
-        Boolean isActive = userData.getBoolean("is_active");
+        var isActive = userData.getBoolean("is_active");
 
         // ===== TRUST HANDLER VALIDATION =====
         // No validation here - handler has already validated all input
 
-        StringBuilder sqlBuilder = new StringBuilder("UPDATE users SET ");
+        var sqlBuilder = new StringBuilder("UPDATE users SET ");
 
-        JsonArray params = new JsonArray();
+        var params = new JsonArray();
 
-        int paramIndex = 1;
+        var paramIndex = 1;
 
         if (username != null)
         {
@@ -192,7 +190,7 @@ public class UserServiceImpl implements UserService
 
         if (password != null)
         {
-            String passwordHash = PasswordUtil.hashPassword(password);
+            var passwordHash = PasswordUtil.hashPassword(password);
 
             sqlBuilder.append("password_hash = $").append(paramIndex++).append(", ");
 
@@ -207,14 +205,14 @@ public class UserServiceImpl implements UserService
         }
 
         // Remove trailing comma and space, add WHERE clause
-        String sqlStr = sqlBuilder.toString();
+        var sqlStr = sqlBuilder.toString();
 
         if (sqlStr.endsWith(", "))
         {
             sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
         }
 
-        String sql = sqlStr + " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active";
+        var sql = sqlStr + " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active";
 
         params.add(UUID.fromString(userId));
 
@@ -229,9 +227,9 @@ public class UserServiceImpl implements UserService
                     return;
                 }
 
-                Row row = rows.iterator().next();
+                var row = rows.iterator().next();
 
-                JsonObject result = new JsonObject()
+                var result = new JsonObject()
                     .put("success", true)
                     .put("user_id", row.getUUID("user_id").toString())
                     .put("username", row.getString("username"))
@@ -266,9 +264,9 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userDelete(String userId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
             DELETE FROM users
             WHERE user_id = $1
             RETURNING user_id, username
@@ -285,9 +283,9 @@ public class UserServiceImpl implements UserService
                     return;
                 }
 
-                Row row = rows.iterator().next();
+                var row = rows.iterator().next();
 
-                JsonObject result = new JsonObject()
+                var result = new JsonObject()
                     .put("success", true)
                     .put("user_id", row.getUUID("user_id").toString())
                     .put("username", row.getString("username"))
@@ -315,9 +313,9 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userAuthenticate(String username, String password)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
             SELECT user_id, username, password_hash, is_active
             FROM users
             WHERE username = $1 AND is_active = true
@@ -336,13 +334,13 @@ public class UserServiceImpl implements UserService
                     return;
                 }
 
-                Row row = rows.iterator().next();
+                var row = rows.iterator().next();
 
-                String storedPasswordHash = row.getString("password_hash");
+                var storedPasswordHash = row.getString("password_hash");
 
                 if (PasswordUtil.verifyPassword(password, storedPasswordHash))
                 {
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                         .put("authenticated", true)
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
@@ -377,9 +375,9 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userGetById(String userId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
             SELECT user_id, username, is_active
             FROM users
             WHERE user_id = $1
@@ -396,9 +394,9 @@ public class UserServiceImpl implements UserService
                     return;
                 }
 
-                Row row = rows.iterator().next();
+                var row = rows.iterator().next();
 
-                JsonObject result = new JsonObject()
+                var result = new JsonObject()
                     .put("found", true)
                     .put("user_id", row.getUUID("user_id").toString())
                     .put("username", row.getString("username"))
@@ -426,9 +424,9 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userSetActive(String userId, boolean isActive)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
             UPDATE users
             SET is_active = $1
             WHERE user_id = $2
@@ -446,9 +444,9 @@ public class UserServiceImpl implements UserService
                     return;
                 }
 
-                Row row = rows.iterator().next();
+                var row = rows.iterator().next();
 
-                JsonObject result = new JsonObject()
+                var result = new JsonObject()
                     .put("success", true)
                     .put("user_id", row.getUUID("user_id").toString())
                     .put("username", row.getString("username"))

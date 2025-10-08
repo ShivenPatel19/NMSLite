@@ -86,24 +86,24 @@ public class DiscoveryVerticle extends AbstractVerticle
         logger.info("🔍 Starting DiscoveryVerticle - Device Discovery");
 
         // Load configuration from tools and discovery sections
-        JsonObject toolsConfig = config().getJsonObject("tools", new JsonObject());
+        var toolsConfig = config().getJsonObject("tools", new JsonObject());
 
-        JsonObject discoveryConfig = config().getJsonObject("discovery", new JsonObject());
+        var discoveryConfig = config().getJsonObject("discovery", new JsonObject());
 
-        JsonObject goEngineConfig = discoveryConfig.getJsonObject("goengine", new JsonObject());
+        var goEngineConfig = discoveryConfig.getJsonObject("goengine", new JsonObject());
 
         goEnginePath = toolsConfig.getString("goengine.path", "./goengine/goengine");
 
-        String fpingPath = toolsConfig.getString("fping.path", "fping");
+        var fpingPath = toolsConfig.getString("fping.path", "fping");
 
         // GoEngine v7.0.0 configuration parameters
         timeoutSeconds = goEngineConfig.getInteger("timeout.seconds", 30);
 
         connectionTimeoutSeconds = goEngineConfig.getInteger("connection.timeout.seconds", 10);
 
-        int retryCount = goEngineConfig.getInteger("retry.count", 2);
+        var retryCount = goEngineConfig.getInteger("retry.count", 2);
 
-        int fpingTimeoutSeconds = toolsConfig.getInteger("fping.batch.blocking.timeout.seconds", 180);
+        var fpingTimeoutSeconds = toolsConfig.getInteger("fping.batch.blocking.timeout.seconds", 180);
 
         discoveryBatchSize = discoveryConfig.getInteger("batch.size", 100);
 
@@ -150,7 +150,7 @@ public class DiscoveryVerticle extends AbstractVerticle
         // Handle test discovery from profile
         vertx.eventBus().consumer("discovery.test_profile", message ->
         {
-            JsonObject request = (JsonObject) message.body();
+            var request = (JsonObject) message.body();
 
             handleTestDiscoveryFromProfile(message, request);
         });
@@ -189,7 +189,7 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private void handleTestDiscoveryFromProfile(Message<Object> message, JsonObject request)
     {
-        String profileId = request.getString("profile_id");
+        var profileId = request.getString("profile_id");
 
         logger.info("🧪 Starting test discovery for profile: {}", profileId);
 
@@ -249,7 +249,7 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonObject> getDiscoveryProfileWithCredentials(String profileId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // Get discovery profile using DiscoveryProfileService
         discoveryProfileService.discoveryGetById(profileId)
@@ -262,13 +262,13 @@ public class DiscoveryVerticle extends AbstractVerticle
                     return;
                 }
 
-                JsonArray credentialIds = profileResponse.getJsonArray("credential_profile_ids");
+                var credentialIds = profileResponse.getJsonArray("credential_profile_ids");
 
                 // Get credential profiles using CredentialProfileService
                 credentialProfileService.credentialGetByIds(credentialIds)
                     .onSuccess(credentialResponse ->
                     {
-                        JsonArray credentials = credentialResponse.getJsonArray("credentials");
+                        var credentials = credentialResponse.getJsonArray("credentials");
 
                         profileResponse.put("credentials", credentials);
 
@@ -305,21 +305,21 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonObject> parseDiscoveryTargetsForTest(JsonObject profile)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // Execute IP range parsing in worker thread to avoid blocking event loop
         vertx.executeBlocking(() ->
         {
-            String ipAddress = profile.getString("ip_address");
+            var ipAddress = profile.getString("ip_address");
 
-            boolean isRange = profile.getBoolean("is_range", false);
+            var isRange = profile.getBoolean("is_range", false);
 
-            JsonArray targetIps = new JsonArray();
+            var targetIps = new JsonArray();
 
             // Use IPRangeUtil for parsing both single IP and ranges
-            List<String> ipList = IPRangeUtil.parseIPRange(ipAddress, isRange);
+            var ipList = IPRangeUtil.parseIPRange(ipAddress, isRange);
 
-            for (String ip : ipList)
+            for (var ip : ipList)
             {
                 targetIps.add(ip);
             }
@@ -368,13 +368,13 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonObject> checkExistingDevicesAndFilter(JsonObject profileData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        JsonArray targetIps = profileData.getJsonArray("target_ips");
+        var targetIps = profileData.getJsonArray("target_ips");
 
-        JsonArray existingDevices = new JsonArray();
+        var existingDevices = new JsonArray();
 
-        JsonArray newTargets = new JsonArray();
+        var newTargets = new JsonArray();
 
         if (targetIps.isEmpty())
         {
@@ -384,13 +384,13 @@ public class DiscoveryVerticle extends AbstractVerticle
         }
 
         // Check which IPs already exist in devices table using DeviceService
-        List<Future<JsonObject>> deviceCheckFutures = new ArrayList<>();
+        var deviceCheckFutures = new ArrayList<Future<JsonObject>>();
 
-        for (Object ipObj : targetIps)
+        for (var ipObj : targetIps)
         {
-            String ip = (String) ipObj;
+            var ip = (String) ipObj;
 
-            Promise<JsonObject> devicePromise = Promise.promise();
+            var devicePromise = Promise.<JsonObject>promise();
 
             // Check with includeDeleted = true to get all devices including soft deleted ones
             deviceService.deviceFindByIp(ip, true)
@@ -401,17 +401,17 @@ public class DiscoveryVerticle extends AbstractVerticle
                     if (deviceResult.getBoolean("found", false))
                     {
                         // Device exists - deviceResult contains the device data directly
-                        boolean isProvisioned = deviceResult.getBoolean("is_provisioned", false);
+                        var isProvisioned = deviceResult.getBoolean("is_provisioned", false);
 
-                        boolean isMonitoring = deviceResult.getBoolean("is_monitoring_enabled", false);
+                        var isMonitoring = deviceResult.getBoolean("is_monitoring_enabled", false);
 
-                        boolean isDeleted = deviceResult.getBoolean("is_deleted", false);
+                        var isDeleted = deviceResult.getBoolean("is_deleted", false);
 
                         String status;
 
                         String message;
 
-                        boolean proceedWithDiscovery = false;
+                        var proceedWithDiscovery = false;
 
                         if (isDeleted)
                         {
@@ -486,11 +486,11 @@ public class DiscoveryVerticle extends AbstractVerticle
             .onSuccess(compositeFuture ->
             {
                 // Process results
-                for (int i = 0; i < compositeFuture.size(); i++)
+                for (var i = 0; i < compositeFuture.size(); i++)
                 {
-                    JsonObject deviceCheck = compositeFuture.resultAt(i);
+                    var deviceCheck = compositeFuture.<JsonObject>resultAt(i);
 
-                    String ip = deviceCheck.getString("ip_address");
+                    var ip = deviceCheck.getString("ip_address");
 
                     if (deviceCheck.getBoolean("exists", false))
                     {
@@ -562,9 +562,9 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonObject> executeSequentialBatchDiscovery(JsonObject profileData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        JsonArray newTargets = profileData.getJsonArray("new_targets");
+        var newTargets = profileData.getJsonArray("new_targets");
 
         if (newTargets.isEmpty())
         {
@@ -577,17 +577,17 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         logger.info("🚀 Starting sequential batch discovery for {} targets", newTargets.size());
 
-        int totalTargets = newTargets.size();
+        var totalTargets = newTargets.size();
 
-        int totalBatches = (int) Math.ceil((double) totalTargets / discoveryBatchSize);
+        var totalBatches = (int) Math.ceil((double) totalTargets / discoveryBatchSize);
 
         logger.info("📦 Will process {} targets in {} batches of max {} IPs (GoEngine credential iteration)",
                    totalTargets, totalBatches, discoveryBatchSize);
 
         // Use QueueBatchProcessor for sequential batch discovery
-        DiscoveryBatchProcessor processor = new DiscoveryBatchProcessor(profileData, newTargets);
+        var processor = new DiscoveryBatchProcessor(profileData, newTargets);
 
-        Promise<JsonArray> arrayPromise = Promise.promise();
+        var arrayPromise = Promise.<JsonArray>promise();
 
         processor.processNext(arrayPromise);
 
@@ -622,7 +622,7 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonArray> executeGoEngineDiscovery(JsonObject profileData, JsonArray targetIps)
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
         if (targetIps.isEmpty())
         {
@@ -631,9 +631,9 @@ public class DiscoveryVerticle extends AbstractVerticle
             return promise.future();
         }
 
-        String requestId = "DISC_" + System.currentTimeMillis();
+        var requestId = "DISC_" + System.currentTimeMillis();
 
-        String batchId = "batch-" + System.currentTimeMillis();
+        var batchId = "batch-" + System.currentTimeMillis();
 
         logger.info("🚀 Starting discovery for {} IPs with connectivity pre-check", targetIps.size());
 
@@ -641,9 +641,9 @@ public class DiscoveryVerticle extends AbstractVerticle
         performConnectivityChecks(targetIps, profileData)
             .compose(connectivityResults ->
             {
-                JsonArray reachableIPs = connectivityResults.getJsonArray("reachable");
+                var reachableIPs = connectivityResults.getJsonArray("reachable");
 
-                JsonArray unreachableIPs = connectivityResults.getJsonArray("unreachable");
+                var unreachableIPs = connectivityResults.getJsonArray("unreachable");
 
                 logger.info("🏓 Connectivity check completed: {}/{} IPs reachable",
                            reachableIPs.size(), targetIps.size());
@@ -653,13 +653,13 @@ public class DiscoveryVerticle extends AbstractVerticle
                     logger.info("❌ No reachable IPs found, skipping GoEngine discovery");
 
                     // Create failed results inline
-                    JsonArray failedResults = new JsonArray();
+                    var failedResults = new JsonArray();
 
-                    for (int i = 0; i < targetIps.size(); i++)
+                    for (var i = 0; i < targetIps.size(); i++)
                     {
-                        String ipAddress = targetIps.getString(i);
+                        var ipAddress = targetIps.getString(i);
 
-                        JsonObject failedResult = new JsonObject()
+                        var failedResult = new JsonObject()
                             .put("ip_address", ipAddress)
                             .put("success", false)
                             .put("error", "No connectivity")
@@ -712,17 +712,17 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonObject> performConnectivityChecks(JsonArray targetIps, JsonObject profileData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // Convert JsonArray to List<String>
-        List<String> ipList = new ArrayList<>();
+        var ipList = new ArrayList<String>();
 
-        for (int i = 0; i < targetIps.size(); i++)
+        for (var i = 0; i < targetIps.size(); i++)
         {
             ipList.add(targetIps.getString(i));
         }
 
-        Integer port = profileData.getInteger("port", 22);
+        var port = profileData.getInteger("port", 22);
 
         logger.debug("🔍 Starting batch connectivity checks for {} IPs", ipList.size());
 
@@ -731,7 +731,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             .compose(fpingResults ->
             {
                 // Filter IPs that passed fping
-                List<String> pingAliveIps = ipList.stream()
+                var pingAliveIps = ipList.stream()
                     .filter(ip -> fpingResults.getOrDefault(ip, false))
                     .collect(Collectors.toList());
 
@@ -740,11 +740,11 @@ public class DiscoveryVerticle extends AbstractVerticle
                 if (pingAliveIps.isEmpty())
                 {
                     // All IPs failed fping, no need for port check
-                    JsonArray unreachableIPs = new JsonArray();
+                    var unreachableIPs = new JsonArray();
 
                     ipList.forEach(unreachableIPs::add);
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                         .put("reachable", new JsonArray())
                         .put("unreachable", unreachableIPs)
                         .put("total_checked", ipList.size());
@@ -756,16 +756,16 @@ public class DiscoveryVerticle extends AbstractVerticle
                 return NetworkConnectivityUtil.batchPortCheck(vertx, pingAliveIps, port, config())
                     .map(portResults ->
                     {
-                        JsonArray reachableIPs = new JsonArray();
+                        var reachableIPs = new JsonArray();
 
-                        JsonArray unreachableIPs = new JsonArray();
+                        var unreachableIPs = new JsonArray();
 
                         // Classify IPs based on both fping and port check results
-                        for (String ip : ipList)
+                        for (var ip : ipList)
                         {
-                            boolean pingAlive = fpingResults.getOrDefault(ip, false);
+                            var pingAlive = fpingResults.getOrDefault(ip, false);
 
-                            boolean portOpen = portResults.getOrDefault(ip, false);
+                            var portOpen = portResults.getOrDefault(ip, false);
 
                             if (pingAlive && portOpen)
                             {
@@ -798,15 +798,15 @@ public class DiscoveryVerticle extends AbstractVerticle
     private Future<JsonArray> executeGoEngineForReachableIPs(JsonObject profileData, JsonArray reachableIPs,
                                                              JsonArray unreachableIPs, String batchId, String requestId)
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
         vertx.executeBlocking(() ->
         {
             // Create GoEngine discovery_request format for reachable IPs only
-            JsonObject discoveryRequest = createDiscoveryRequest(profileData, reachableIPs, batchId);
+            var discoveryRequest = createDiscoveryRequest(profileData, reachableIPs, batchId);
 
             // Prepare GoEngine command
-            List<String> command = Arrays.asList(
+            var command = Arrays.asList(
                 goEnginePath,
                 "--mode", "discovery",
                 "--targets", discoveryRequest.encode(),
@@ -815,14 +815,14 @@ public class DiscoveryVerticle extends AbstractVerticle
 
             logger.info("📋 GoEngine discovery request: {}", discoveryRequest.encodePrettily());
 
-            ProcessBuilder pb = new ProcessBuilder(command);
+            var pb = new ProcessBuilder(command);
 
-            Process process = pb.start();
+            var process = pb.start();
 
-            JsonArray results = new JsonArray();
+            var results = new JsonArray();
 
             // Read results from stdout line by line
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
+            try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
             {
                 String line;
 
@@ -830,7 +830,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                 {
                     try
                     {
-                        JsonObject result = new JsonObject(line);
+                        var result = new JsonObject(line);
 
                         if (result.containsKey("ip_address"))
                         {  // uses ip_address instead of device_address
@@ -845,7 +845,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             }
 
             // Process timeout handled by Vert.x blocking timeout (blockingTimeoutGoEngine)
-            boolean finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
+            var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
 
             if (!finished)
             {
@@ -854,25 +854,25 @@ public class DiscoveryVerticle extends AbstractVerticle
                 throw new RuntimeException("GoEngine discovery process timed out after " + blockingTimeoutGoEngine + " seconds");
             }
 
-            int exitCode = process.exitValue();
+            var exitCode = process.exitValue();
 
             logger.info("🏁 GoEngine v7.0.0 discovery completed with exit code: {}, {} results", exitCode, results.size());
 
             // Combine GoEngine results with unreachable IPs
-            JsonArray finalResults = new JsonArray();
+            var finalResults = new JsonArray();
 
             // Add GoEngine results
-            for (Object obj : results)
+            for (var obj : results)
             {
                 finalResults.add(obj);
             }
 
             // Add failed results for unreachable IPs
-            for (int i = 0; i < unreachableIPs.size(); i++)
+            for (var i = 0; i < unreachableIPs.size(); i++)
             {
-                String unreachableIP = unreachableIPs.getString(i);
+                var unreachableIP = unreachableIPs.getString(i);
 
-                JsonObject failedResult = new JsonObject()
+                var failedResult = new JsonObject()
                     .put("ip_address", unreachableIP)
                     .put("success", false)
                     .put("error", "Device unreachable - connectivity check failed")
@@ -901,23 +901,23 @@ public class DiscoveryVerticle extends AbstractVerticle
     private JsonObject createDiscoveryRequest(JsonObject profileData, JsonArray targetIps, String batchId)
     {
         // Convert target IPs to string array
-        JsonArray targetIpArray = new JsonArray();
+        var targetIpArray = new JsonArray();
 
-        for (Object ip : targetIps)
+        for (var ip : targetIps)
         {
             targetIpArray.add(ip.toString());
         }
 
         // Convert credentials to GoEngine format
-        JsonArray credentials = new JsonArray();
+        var credentials = new JsonArray();
 
-        JsonArray profileCredentials = profileData.getJsonArray("credentials");
+        var profileCredentials = profileData.getJsonArray("credentials");
 
-        for (Object credObj : profileCredentials)
+        for (var credObj : profileCredentials)
         {
-            JsonObject credential = (JsonObject) credObj;
+            var credential = (JsonObject) credObj;
 
-            JsonObject goEngineCredential = new JsonObject()
+            var goEngineCredential = new JsonObject()
                 .put("credential_id", credential.getString("credential_profile_id"))
                 .put("username", credential.getString("username"))
                 .put("password", credential.getString("password_encrypted")); // Password is stored encrypted
@@ -926,12 +926,12 @@ public class DiscoveryVerticle extends AbstractVerticle
         }
 
         // Map device type from database format to GoEngine format
-        String deviceTypeName = profileData.getString("device_type_name");
+        var deviceTypeName = profileData.getString("device_type_name");
 
-        String goEngineDeviceType = mapDeviceTypeToGoEngine(deviceTypeName);
+        var goEngineDeviceType = mapDeviceTypeToGoEngine(deviceTypeName);
 
         // Create discovery_config
-        JsonObject discoveryConfig = new JsonObject()
+        var discoveryConfig = new JsonObject()
             .put("device_type", goEngineDeviceType)
             .put("port", profileData.getInteger("port"))
             .put("protocol", profileData.getString("protocol"))
@@ -972,20 +972,20 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonObject> processTestDiscoveryResults(JsonObject profileData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        JsonArray discoveryResults = profileData.getJsonArray("discovery_results", new JsonArray());
+        var discoveryResults = profileData.getJsonArray("discovery_results", new JsonArray());
 
-        JsonArray existingDevices = profileData.getJsonArray("existing_devices", new JsonArray());
+        var existingDevices = profileData.getJsonArray("existing_devices", new JsonArray());
 
-        JsonArray successfulDevices = new JsonArray();
+        var successfulDevices = new JsonArray();
 
-        JsonArray failedDevices = new JsonArray();
+        var failedDevices = new JsonArray();
 
         // Separate successful and failed discoveries
-        for (Object obj : discoveryResults)
+        for (var obj : discoveryResults)
         {
-            JsonObject result = (JsonObject) obj;
+            var result = (JsonObject) obj;
 
             if (result.getBoolean("success", false))
             {
@@ -1027,7 +1027,7 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonArray> createDevicesFromTestDiscoveries(JsonArray successfulDiscoveries)
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
         if (successfulDiscoveries.isEmpty())
         {
@@ -1036,15 +1036,15 @@ public class DiscoveryVerticle extends AbstractVerticle
             return promise.future();
         }
 
-        JsonArray createdDevices = new JsonArray();
+        var createdDevices = new JsonArray();
 
-        List<Future<JsonObject>> deviceCreationFutures = new ArrayList<>();
+        var deviceCreationFutures = new ArrayList<Future<JsonObject>>();
 
-        for (Object obj : successfulDiscoveries)
+        for (var obj : successfulDiscoveries)
         {
-            JsonObject discovery = (JsonObject) obj;
+            var discovery = (JsonObject) obj;
 
-            Future<JsonObject> deviceFuture = createSingleDeviceFromTestDiscovery(discovery);
+            var deviceFuture = createSingleDeviceFromTestDiscovery(discovery);
 
             deviceCreationFutures.add(deviceFuture);
         }
@@ -1053,7 +1053,7 @@ public class DiscoveryVerticle extends AbstractVerticle
         Future.all(deviceCreationFutures)
             .onSuccess(compositeFuture ->
             {
-                for (Future<JsonObject> future : deviceCreationFutures)
+                for (var future : deviceCreationFutures)
                 {
                     if (future.result() != null)
                     {
@@ -1076,10 +1076,10 @@ public class DiscoveryVerticle extends AbstractVerticle
      */
     private Future<JsonObject> createSingleDeviceFromTestDiscovery(JsonObject discovery)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         // Prepare device data for DeviceService.deviceCreateFromDiscovery
-        JsonObject deviceData = new JsonObject()
+        var deviceData = new JsonObject()
             .put("device_name", discovery.getString("hostname", discovery.getString("ip_address")))
             .put("ip_address", discovery.getString("ip_address"))
             .put("device_type", discovery.getString("device_type"))
@@ -1175,7 +1175,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
             this.profileData = profileData;
 
-            JsonArray credentials = profileData.getJsonArray("credentials");
+            var credentials = profileData.getJsonArray("credentials");
 
             logger.info("📋 Discovery batch processor initialized: {} credentials, {} IPs",
 
@@ -1194,7 +1194,7 @@ public class DiscoveryVerticle extends AbstractVerticle
         @Override
         protected Future<JsonArray> processBatch(List<String> batch)
         {
-            JsonArray ipArray = new JsonArray(batch);
+            var ipArray = new JsonArray(batch);
 
             logger.info("🔄 Executing GoEngine discovery for {} IPs (credential iteration)", batch.size());
 

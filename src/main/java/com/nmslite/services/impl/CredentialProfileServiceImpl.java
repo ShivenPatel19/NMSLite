@@ -14,8 +14,6 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Pool;
 
-import io.vertx.sqlclient.Row;
-
 import io.vertx.sqlclient.Tuple;
 
 import org.slf4j.Logger;
@@ -56,9 +54,9 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonArray> credentialList()
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
-        String sql = """
+        var sql = """
                 SELECT credential_profile_id, profile_name, username, created_at, updated_at
                 FROM credential_profiles
                 ORDER BY profile_name
@@ -68,11 +66,11 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                 .execute()
                 .onSuccess(rows ->
                 {
-                    JsonArray credentials = new JsonArray();
+                    var credentials = new JsonArray();
 
-                    for (Row row : rows)
+                    for (var row : rows)
                     {
-                        JsonObject credential = new JsonObject()
+                        var credential = new JsonObject()
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("profile_name", row.getString("profile_name"))
                                 .put("username", row.getString("username"))
@@ -104,21 +102,21 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialCreate(JsonObject credentialData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String profileName = credentialData.getString("profile_name");
+        var profileName = credentialData.getString("profile_name");
 
-        String username = credentialData.getString("username");
+        var username = credentialData.getString("username");
 
-        String password = credentialData.getString("password");
+        var password = credentialData.getString("password");
 
         // ===== TRUST HANDLER VALIDATION =====
         // No validation here - handler has already validated all input
 
         // Encrypt password for secure storage
-        String encryptedPassword = PasswordUtil.encryptPassword(password);
+        var encryptedPassword = PasswordUtil.encryptPassword(password);
 
-        String sql = """
+        var sql = """
                 INSERT INTO credential_profiles (profile_name, username, password_encrypted)
                 VALUES ($1, $2, $3)
                 RETURNING credential_profile_id, profile_name, username, created_at
@@ -128,9 +126,9 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                 .execute(Tuple.of(profileName, username, encryptedPassword))
                 .onSuccess(rows ->
                 {
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                             .put("profile_name", row.getString("profile_name"))
@@ -167,19 +165,19 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialUpdate(String credentialId, JsonObject credentialData)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String profileName = credentialData.getString("profile_name");
+        var profileName = credentialData.getString("profile_name");
 
-        String username = credentialData.getString("username");
+        var username = credentialData.getString("username");
 
-        String password = credentialData.getString("password");
+        var password = credentialData.getString("password");
 
-        StringBuilder sqlBuilder = new StringBuilder("UPDATE credential_profiles SET ");
+        var sqlBuilder = new StringBuilder("UPDATE credential_profiles SET ");
 
-        JsonArray params = new JsonArray();
+        var params = new JsonArray();
 
-        int paramIndex = 1;
+        var paramIndex = 1;
 
         if (profileName != null)
         {
@@ -197,7 +195,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
 
         if (password != null)
         {
-            String encryptedPassword = PasswordUtil.encryptPassword(password);
+            var encryptedPassword = PasswordUtil.encryptPassword(password);
 
             sqlBuilder.append("password_encrypted = $").append(paramIndex++).append(", ");
 
@@ -208,14 +206,14 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
         // No validation here - handler has already validated all input
 
         // Remove trailing comma and space, add WHERE clause
-        String sqlStr = sqlBuilder.toString();
+        var sqlStr = sqlBuilder.toString();
 
         if (sqlStr.endsWith(", "))
         {
             sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
         }
 
-        String sql = sqlStr + " WHERE credential_profile_id = $" + paramIndex +
+        var sql = sqlStr + " WHERE credential_profile_id = $" + paramIndex +
                 " RETURNING credential_profile_id, profile_name, username";
 
         params.add(UUID.fromString(credentialId));
@@ -231,9 +229,9 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                             .put("profile_name", row.getString("profile_name"))
@@ -268,12 +266,12 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialDelete(String credentialId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        UUID credentialUuid = UUID.fromString(credentialId);
+        var credentialUuid = UUID.fromString(credentialId);
 
         // Step 1: Check if credential is used in devices table
-        String checkDevicesSql = """
+        var checkDevicesSql = """
                 SELECT COUNT(*) as device_count
                 FROM devices
                 WHERE credential_profile_id = $1 AND is_deleted = false
@@ -283,11 +281,11 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                 .execute(Tuple.of(credentialUuid))
                 .onSuccess(deviceRows ->
                 {
-                    long deviceCount = deviceRows.iterator().next().getLong("device_count");
+                    var deviceCount = deviceRows.iterator().next().getLong("device_count");
 
                     if (deviceCount > 0)
                     {
-                        String errorMsg = String.format(
+                        var errorMsg = String.format(
                             "Cannot delete credential profile - it is currently in use by %d device(s). " +
                             "Please remove or reassign these devices before deleting the credential profile.",
                             deviceCount
@@ -299,7 +297,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                     }
 
                     // Step 2: Check if credential is used in discovery_profiles table
-                    String checkDiscoverySql = """
+                    var checkDiscoverySql = """
                             SELECT COUNT(*) as discovery_count
                             FROM discovery_profiles
                             WHERE $1 = ANY(credential_profile_ids)
@@ -309,11 +307,11 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                             .execute(Tuple.of(credentialUuid))
                             .onSuccess(discoveryRows ->
                             {
-                                long discoveryCount = discoveryRows.iterator().next().getLong("discovery_count");
+                                var discoveryCount = discoveryRows.iterator().next().getLong("discovery_count");
 
                                 if (discoveryCount > 0)
                                 {
-                                    String errorMsg = String.format(
+                                    var errorMsg = String.format(
                                         "Cannot delete credential profile - it is currently in use by %d discovery profile(s). " +
                                         "Please remove it from these discovery profiles before deleting.",
                                         discoveryCount
@@ -325,7 +323,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                 }
 
                                 // Step 3: No usage found, proceed with deletion
-                                String deleteSql = """
+                                var deleteSql = """
                                         DELETE FROM credential_profiles
                                         WHERE credential_profile_id = $1
                                         """;
@@ -341,7 +339,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                                 return;
                                             }
 
-                                            JsonObject result = new JsonObject()
+                                            var result = new JsonObject()
                                                     .put("success", true)
                                                     .put("credential_profile_id", credentialId)
                                                     .put("message", "Credential profile deleted successfully");
@@ -381,9 +379,9 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialGetById(String credentialId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
                 FROM credential_profiles
                 WHERE credential_profile_id = $1
@@ -400,12 +398,12 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
                     // Decrypt password for response (be careful with this in production)
-                    String decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
+                    var decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("found", true)
                             .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                             .put("profile_name", row.getString("profile_name"))
@@ -436,7 +434,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialGetByIds(JsonArray credentialIds)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
         if (credentialIds.isEmpty())
         {
@@ -448,14 +446,14 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
         }
 
         // Convert JsonArray to UUID array for PostgresSQL
-        UUID[] uuidArray = new UUID[credentialIds.size()];
+        var uuidArray = new UUID[credentialIds.size()];
 
-        for (int i = 0; i < credentialIds.size(); i++)
+        for (var i = 0; i < credentialIds.size(); i++)
         {
             uuidArray[i] = UUID.fromString(credentialIds.getString(i));
         }
 
-        String sql = """
+        var sql = """
                 SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
                 FROM credential_profiles
                 WHERE credential_profile_id = ANY($1)
@@ -465,14 +463,14 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                 .execute(Tuple.of(uuidArray))
                 .onSuccess(rows ->
                 {
-                    JsonArray credentials = new JsonArray();
+                    var credentials = new JsonArray();
 
-                    for (Row row : rows)
+                    for (var row : rows)
                     {
                         // Decrypt password for discovery use
-                        String decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
+                        var decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
 
-                        JsonObject credential = new JsonObject()
+                        var credential = new JsonObject()
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("profile_name", row.getString("profile_name"))
                                 .put("username", row.getString("username"))
@@ -484,7 +482,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                         credentials.add(credential);
                     }
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("success", true)
                             .put("data", new JsonObject().put("credentials", credentials));
 

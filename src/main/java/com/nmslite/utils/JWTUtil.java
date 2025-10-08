@@ -22,10 +22,6 @@ import com.auth0.jwt.algorithms.Algorithm;
 
 import com.auth0.jwt.exceptions.JWTVerificationException;
 
-import com.auth0.jwt.interfaces.DecodedJWT;
-
-import com.auth0.jwt.interfaces.JWTVerifier;
-
 /**
  * JWT Utility class for token generation and validation
  * Handles JWT token creation, validation, and user authentication
@@ -52,7 +48,7 @@ public class JWTUtil
     public JWTUtil(Vertx vertx)
     {
         // Configure JWT authentication
-        JWTAuthOptions config = new JWTAuthOptions()
+        var config = new JWTAuthOptions()
             .addPubSecKey(new PubSecKeyOptions()
                 .setAlgorithm(JWT_ALGORITHM)
                 .setBuffer(JWT_SECRET));
@@ -74,19 +70,19 @@ public class JWTUtil
     {
         try
         {
-            JsonObject claims = new JsonObject()
+            var claims = new JsonObject()
                 .put("user_id", userId)
                 .put("username", username)
                 .put("is_active", isActive)
                 .put("iat", System.currentTimeMillis() / 1000) // Issued at
                 .put("iss", "NMSLite"); // Issuer
 
-            JWTOptions options = new JWTOptions()
+            var options = new JWTOptions()
                 .setExpiresInMinutes(TOKEN_EXPIRY_HOURS * 60) // Convert hours to minutes
                 .setIssuer("NMSLite")
                 .setSubject(userId);
 
-            String token = jwtAuth.generateToken(claims, options);
+            var token = jwtAuth.generateToken(claims, options);
 
             logger.info("🔑 JWT token generated for user: {} (expires in {} hours)", username, TOKEN_EXPIRY_HOURS);
 
@@ -123,16 +119,16 @@ public class JWTUtil
             // Use Auth0 JWT library for validation
             try
             {
-                Algorithm algorithm = Algorithm.HMAC256(JWT_SECRET);
+                var algorithm = Algorithm.HMAC256(JWT_SECRET);
 
-                JWTVerifier verifier = JWT.require(algorithm)
+                var verifier = JWT.require(algorithm)
                     .withIssuer("NMSLite")
                     .build();
 
-                DecodedJWT decodedJWT = verifier.verify(token);
+                var decodedJWT = verifier.verify(token);
 
                 // Extract user information from token
-                JsonObject userInfo = new JsonObject()
+                var userInfo = new JsonObject()
                     .put("user_id", decodedJWT.getClaim("user_id").asString())
                     .put("username", decodedJWT.getClaim("username").asString())
                     .put("is_active", decodedJWT.getClaim("is_active").asBoolean())

@@ -23,7 +23,7 @@ public class ResponseUtil
      */
     public static void handleSuccess(RoutingContext context, Object result)
     {
-        JsonObject successResponse = new JsonObject()
+        var successResponse = new JsonObject()
             .put("success", true)
             .put("data", result)
             .put("timestamp", System.currentTimeMillis());

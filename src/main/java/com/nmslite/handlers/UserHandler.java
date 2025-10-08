@@ -64,9 +64,9 @@ public class UserHandler
     public void getUsers(RoutingContext ctx)
     {
         // ===== QUERY PARAMETER VALIDATION =====
-        String includeInactiveParam = ctx.request().getParam("includeInactive");
+        var includeInactiveParam = ctx.request().getParam("includeInactive");
 
-        boolean includeInactive = false;
+        var includeInactive = false;
 
         if (includeInactiveParam != null)
         {
@@ -97,14 +97,14 @@ public class UserHandler
      */
     public void createUser(RoutingContext ctx)
     {
-        JsonObject body = ctx.body().asJsonObject();
+        var body = ctx.body().asJsonObject();
 
         if (!ValidationUtil.User.validateCreate(ctx, body))
         {
             return; // Validation failed, response already sent
         }
 
-        JsonObject userData = new JsonObject()
+        var userData = new JsonObject()
             .put("username", body.getString("username"))
             .put("password", body.getString("password"))
             .put("is_active", body.getBoolean("is_active", true));
@@ -123,9 +123,9 @@ public class UserHandler
      */
     public void updateUser(RoutingContext ctx)
     {
-        String userId = ctx.pathParam("id");
+        var userId = ctx.pathParam("id");
 
-        JsonObject body = ctx.body().asJsonObject();
+        var body = ctx.body().asJsonObject();
 
         // 1. Validate path parameter
         if (userId == null || userId.trim().isEmpty())
@@ -168,7 +168,7 @@ public class UserHandler
      */
     public void deleteUser(RoutingContext ctx)
     {
-        String userId = ctx.pathParam("id");
+        var userId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
         if (userId == null || userId.trim().isEmpty())
@@ -209,37 +209,37 @@ public class UserHandler
      */
     public void authenticateUser(RoutingContext ctx)
     {
-        JsonObject body = ctx.body().asJsonObject();
+        var body = ctx.body().asJsonObject();
 
         if (!ValidationUtil.User.validateAuthentication(ctx, body))
         {
             return; // Validation failed, response already sent
         }
 
-        String username = body.getString("username");
+        var username = body.getString("username");
 
-        String password = body.getString("password");
+        var password = body.getString("password");
 
         userService.userAuthenticate(username, password)
             .onSuccess(authResult ->
             {
-                boolean authenticated = authResult.getBoolean("authenticated", false);
+                var authenticated = authResult.getBoolean("authenticated", false);
 
                 if (authenticated)
                 {
                     // Generate JWT token for successful authentication
-                    String userId = authResult.getString("user_id");
+                    var userId = authResult.getString("user_id");
 
-                    String authenticatedUsername = authResult.getString("username");
+                    var authenticatedUsername = authResult.getString("username");
 
-                    boolean isActive = authResult.getBoolean("is_active", false);
+                    var isActive = authResult.getBoolean("is_active", false);
 
                     try
                     {
-                        String jwtToken = jwtUtil.generateToken(userId, authenticatedUsername, isActive);
+                        var jwtToken = jwtUtil.generateToken(userId, authenticatedUsername, isActive);
 
                         // Add JWT token to response
-                        JsonObject enhancedResult = authResult.copy()
+                        var enhancedResult = authResult.copy()
                             .put("jwt_token", jwtToken)
                             .put("token_type", "Bearer")
                             .put("expires_in_hours", JWTUtil.getTokenExpiryHours())
@@ -278,13 +278,13 @@ public class UserHandler
     public void logoutUser(RoutingContext ctx)
     {
         // Extract user info from JWT token (set by auth middleware)
-        JsonObject user = ctx.get("user");
+        var user = ctx.<JsonObject>get("user");
 
-        String username = user != null ? user.getString("username") : "unknown";
+        var username = user != null ? user.getString("username") : "unknown";
 
         logger.info("🚪 User logout request: {}", username);
 
-        JsonObject response = new JsonObject()
+        var response = new JsonObject()
             .put("success", true)
             .put("message", "Logout successful - please discard your JWT token");
 

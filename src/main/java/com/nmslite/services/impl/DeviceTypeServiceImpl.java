@@ -12,8 +12,6 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Pool;
 
-import io.vertx.sqlclient.Row;
-
 import io.vertx.sqlclient.Tuple;
 
 import org.slf4j.Logger;
@@ -58,9 +56,9 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
     @Override
     public Future<JsonArray> deviceTypeList(boolean includeInactive)
     {
-        Promise<JsonArray> promise = Promise.promise();
+        var promise = Promise.<JsonArray>promise();
 
-        String sql = """
+        var sql = """
                 SELECT device_type_id, device_type_name, default_port, is_active, created_at
                 FROM device_types
                 """ + (includeInactive ? "" : "WHERE is_active = true ") + """
@@ -71,11 +69,11 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
                 .execute()
                 .onSuccess(rows ->
                 {
-                    JsonArray deviceTypes = new JsonArray();
+                    var deviceTypes = new JsonArray();
 
-                    for (Row row : rows)
+                    for (var row : rows)
                     {
-                        JsonObject deviceType = new JsonObject()
+                        var deviceType = new JsonObject()
                                 .put("device_type_id", row.getUUID("device_type_id").toString())
                                 .put("device_type_name", row.getString("device_type_name"))
                                 .put("default_port", row.getInteger("default_port"))
@@ -106,9 +104,9 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
     @Override
     public Future<JsonObject> deviceTypeGetById(String deviceTypeId)
     {
-        Promise<JsonObject> promise = Promise.promise();
+        var promise = Promise.<JsonObject>promise();
 
-        String sql = """
+        var sql = """
                 SELECT device_type_id, device_type_name, default_port, is_active, created_at
                 FROM device_types
                 WHERE device_type_id = $1
@@ -125,9 +123,9 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
                         return;
                     }
 
-                    Row row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
+                    var result = new JsonObject()
                             .put("found", true)
                             .put("device_type_id", row.getUUID("device_type_id").toString())
                             .put("device_type_name", row.getString("device_type_name"))
