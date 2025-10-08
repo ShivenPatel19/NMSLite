@@ -16,8 +16,6 @@ import io.vertx.config.ConfigRetrieverOptions;
 
 import io.vertx.config.ConfigStoreOptions;
 
-import io.vertx.core.CompositeFuture;
-
 import io.vertx.core.DeploymentOptions;
 
 import io.vertx.core.Future;
@@ -39,19 +37,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * NMSLite Application - Main Entry Point (Vert.x 4.5.10)
- *
+ * NMSLite Application - Main Entry Point (Vert.x 5.0.4)
+
  * 4-Verticle Architecture:
  * - DatabaseVerticle: All database operations (ProxyGen enabled)
  * - ServerVerticle: HTTP API server
  * - PollingMetricsVerticle: Continuous device monitoring
  * - DiscoveryVerticle: Device discovery workflow
- *
+
  * Features:
  * - Single method to deploy all verticles
  * - Graceful deployment failure cleanup
  * - Comprehensive shutdown handling
- *
+
  * Communication: Event Bus driven with async messaging + ProxyGen services
  */
 public class NMSLiteApplication
@@ -199,9 +197,7 @@ public class NMSLiteApplication
                 return Future.<Void>succeededFuture();
             })
             .onFailure(cause ->
-            {
-                logger.error("❌ Failed to deploy verticles", cause);
-            });
+                    logger.error("❌ Failed to deploy verticles", cause));
     }
 
     /**
@@ -234,7 +230,7 @@ public class NMSLiteApplication
         for (String deploymentId : deployedVerticleIds)
         {
             Future<Void> undeployFuture = vertx.undeploy(deploymentId)
-                .onSuccess(v -> logger.info("✅ Verticle undeployed: {}", deploymentId))
+                .onSuccess(v -> logger.info("✅ Verticle undeploy: {}", deploymentId))
                 .onFailure(cause -> logger.error("❌ Failed to undeploy verticle: {}", deploymentId, cause));
 
             undeployFutures.add(undeployFuture);
@@ -244,7 +240,7 @@ public class NMSLiteApplication
         return Future.join(undeployFutures)
             .compose(result ->
             {
-                logger.info("✅ All verticles undeployed successfully");
+                logger.info("✅ All verticles undeploy successfully");
 
                 deployedVerticleIds.clear();
 
@@ -272,7 +268,7 @@ public class NMSLiteApplication
                     logger.info("✅ Worker executor closed (with errors)");
                 }
 
-                return Future.<Void>succeededFuture();
+                return Future.succeededFuture();
             });
     }
 

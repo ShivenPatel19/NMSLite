@@ -4,9 +4,7 @@ import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
-import io.vertx.core.AsyncResult;
-
-import io.vertx.core.Handler;
+import io.vertx.core.Future;
 
 import io.vertx.core.Vertx;
 
@@ -18,7 +16,7 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
  * MetricsService - Device metrics management operations with ProxyGen
- *
+
  * This interface provides:
  * - Metrics CRUD operations
  * - Time-series data management
@@ -56,9 +54,9 @@ public interface MetricsService
      * Store new metrics data
      *
      * @param metricsData JsonObject containing metrics data (device_id, cpu_usage, memory_usage, disk_usage, network_in, network_out, response_time)
-     * @param resultHandler Handler for the async result containing JsonObject with creation result
+     * @return Future containing JsonObject with creation result
      */
-    void metricsCreate(JsonObject metricsData, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> metricsCreate(JsonObject metricsData);
 
     /**
      * Get all metrics (paginated) - only for active, non-deleted devices
@@ -66,34 +64,34 @@ public interface MetricsService
      * @param page Page number (0-based)
      * @param pageSize Number of records per page
      * @param deviceId Optional device ID filter (must be active, non-deleted device)
-     * @param resultHandler Handler for the async result containing JsonObject with paginated metrics data
+     * @return Future containing JsonObject with paginated metrics data
      */
-    void metricsList(int page, int pageSize, String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> metricsList(int page, int pageSize, String deviceId);
 
     /**
      * Get specific metric by ID
      *
      * @param metricId Metric ID
-     * @param resultHandler Handler for the async result containing JsonObject with metric data or not found
+     * @return Future containing JsonObject with metric data or not found
      */
-    void metricsGet(String metricId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> metricsGet(String metricId);
 
     /**
      * Delete metrics older than specified days
      *
      * @param olderThanDays Number of days to keep metrics
-     * @param resultHandler Handler for the async result containing JsonObject with cleanup result
+     * @return Future containing JsonObject with cleanup result
      */
-    void metricsDeleteOlderThan(int olderThanDays, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> metricsDeleteOlderThan(int olderThanDays);
 
     /**
      * Delete ALL metrics for a specific device (when device is soft deleted)
      * This ensures no metrics data exists for deleted devices
      *
      * @param deviceId Device ID whose metrics should be completely removed
-     * @param resultHandler Handler for the async result containing JsonObject with deletion result
+     * @return Future containing JsonObject with deletion result
      */
-    void metricsDeleteAllByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> metricsDeleteAllByDevice(String deviceId);
 
     /**
      * Get all metrics for specific device (device must be active, non-deleted)
@@ -101,24 +99,24 @@ public interface MetricsService
      * @param deviceId Device ID (must be active, non-deleted)
      * @param page Page number (0-based)
      * @param pageSize Number of records per page
-     * @param resultHandler Handler for the async result containing JsonObject with paginated device metrics
+     * @return Future containing JsonObject with paginated device metrics
      */
-    void metricsListByDevice(String deviceId, int page, int pageSize, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> metricsListByDevice(String deviceId, int page, int pageSize);
 
     /**
      * Get latest metric for specific device (device must be active, non-deleted)
      *
      * @param deviceId Device ID (must be active, non-deleted)
-     * @param resultHandler Handler for the async result containing JsonObject with latest metric data or not found
+     * @return Future containing JsonObject with latest metric data or not found
      */
-    void metricsGetLatestByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> metricsGetLatestByDevice(String deviceId);
 
     /**
      * Get latest metrics for all active, non-deleted devices (dashboard view)
      *
-     * @param resultHandler Handler for the async result containing JsonArray of latest metrics for all active devices
+     * @return Future containing JsonArray of latest metrics for all active devices
      */
-    void metricsGetLatestAllDevices(Handler<AsyncResult<JsonArray>> resultHandler);
+    Future<JsonArray> metricsGetLatestAllDevices();
 
     /**
      * Get metrics for device within time range (device must be active, non-deleted)
@@ -126,8 +124,8 @@ public interface MetricsService
      * @param deviceId Device ID (must be active, non-deleted)
      * @param startTime Start time (ISO 8601 format)
      * @param endTime End time (ISO 8601 format)
-     * @param resultHandler Handler for the async result containing JsonArray of metrics within time range
+     * @return Future containing JsonArray of metrics within time range
      */
-    void metricsGetByDeviceTimeRange(String deviceId, String startTime, String endTime, Handler<AsyncResult<JsonArray>> resultHandler);
+    Future<JsonArray> metricsGetByDeviceTimeRange(String deviceId, String startTime, String endTime);
 
 }

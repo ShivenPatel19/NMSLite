@@ -6,16 +6,16 @@ import java.time.Instant;
 
 /**
  * In-memory cache model for polling scheduler.
- *
+
  * This class combines:
  * 1. Persistent device data (from database)
  * 2. Runtime scheduling state (computed/tracked in-memory)
- *
+
  * Data Sources:
  * - Database: devices table + credential_profiles table (via JOIN)
  * - Computed: nextScheduledAt (aligned scheduling)
  * - Tracked: consecutiveFailures (failure counter)
- *
+
  * Lifecycle:
  * - Loaded on startup from database
  * - Updated reactively via event bus when device config changes
@@ -67,7 +67,7 @@ public class PollingDevice
 
     /**
      * Converts the PollingDevice to GoEngine JSON format for metrics collection.
-     *
+
      * GoEngine  expects:
      * {
      *   "address": "10.0.0.1",
@@ -78,7 +78,7 @@ public class PollingDevice
      *   "timeout_seconds": 60,
      *   "connection_timeout": 10
      * }
-     *
+
      * Note: retry_count is handled by Java backend, not passed to GoEngine 
      *
      * @return JsonObject formatted for GoEngine consumption
@@ -97,7 +97,7 @@ public class PollingDevice
 
     /**
      * Checks if the device is due for polling based on the current time.
-     *
+
      * A device is due when:
      * - Current time >= nextScheduledAt
      *
@@ -111,10 +111,10 @@ public class PollingDevice
 
     /**
      * Advances the device to the next scheduled poll time (aligned).
-     *
+
      * This maintains fixed cadence:
      * - nextScheduledAt = nextScheduledAt + pollingIntervalSeconds
-     *
+
      * Never uses last_polled_at to avoid drift.
      */
     public void advanceSchedule()

@@ -4,9 +4,7 @@ import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
-import io.vertx.core.AsyncResult;
-
-import io.vertx.core.Handler;
+import io.vertx.core.Future;
 
 import io.vertx.core.Vertx;
 
@@ -18,7 +16,7 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
  * UserService - User management operations with ProxyGen
- *
+
  * This interface provides:
  * - User CRUD operations
  * - Password hashing and validation
@@ -54,59 +52,59 @@ public interface UserService
      * Get all users
      *
      * @param includeInactive Include inactive users (false = active users only, true = all users)
-     * @param resultHandler Handler for the async result containing JsonArray of users
+     * @return Future containing JsonArray of users
      */
-    void userList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler);
+    Future<JsonArray> userList(boolean includeInactive);
 
     /**
      * Create a new user
      *
      * @param userData JsonObject containing user data (username, password, is_active)
-     * @param resultHandler Handler for the async result containing JsonObject with creation result
+     * @return Future containing JsonObject with creation result
      */
-    void userCreate(JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> userCreate(JsonObject userData);
 
     /**
      * Update user information
      *
      * @param userId User ID to update
      * @param userData JsonObject containing fields to update
-     * @param resultHandler Handler for the async result containing JsonObject with update result
+     * @return Future containing JsonObject with update result
      */
-    void userUpdate(String userId, JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> userUpdate(String userId, JsonObject userData);
 
     /**
      * Delete a user
      *
      * @param userId User ID to delete
-     * @param resultHandler Handler for the async result containing JsonObject with deletion result
+     * @return Future containing JsonObject with deletion result
      */
-    void userDelete(String userId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> userDelete(String userId);
 
     /**
      * Authenticate user with username and password
      *
      * @param username Username
      * @param password Plain text password
-     * @param resultHandler Handler for the async result containing JsonObject with authentication result
+     * @return Future containing JsonObject with authentication result
      */
-    void userAuthenticate(String username, String password, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> userAuthenticate(String username, String password);
 
     /**
      * Get user by ID
      *
      * @param userId User ID
-     * @param resultHandler Handler for the async result containing JsonObject with user data or not found
+     * @return Future containing JsonObject with user data or not found
      */
-    void userGetById(String userId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> userGetById(String userId);
 
     /**
      * Activate or deactivate user
      *
      * @param userId User ID
      * @param isActive Active status
-     * @param resultHandler Handler for the async result containing JsonObject with update result
+     * @return Future containing JsonObject with update result
      */
-    void userSetActive(String userId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> userSetActive(String userId, boolean isActive);
 
 }

@@ -4,9 +4,7 @@ import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
-import io.vertx.core.AsyncResult;
-
-import io.vertx.core.Handler;
+import io.vertx.core.Future;
 
 import io.vertx.core.Vertx;
 
@@ -18,7 +16,7 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
  * DiscoveryService - Discovery profile management operations with ProxyGen
- *
+
  * This interface provides:
  * - Discovery profile CRUD operations
  * - IP address conflict detection
@@ -54,32 +52,32 @@ public interface DiscoveryProfileService
     /**
      * Get all discovery profiles with full details (including device type and credential info)
      *
-     * @param resultHandler Handler for the async result containing JsonArray of discovery profiles
+     * @return Future containing JsonArray of discovery profiles
      */
-    void discoveryList(Handler<AsyncResult<JsonArray>> resultHandler);
+    Future<JsonArray> discoveryList();
 
     /**
      * Create a new discovery profile
      *
      * @param profileData JsonObject containing discovery profile data (discovery_name, ip_address, is_range, device_type_id, credential_profile_ids, port, protocol)
-     * @param resultHandler Handler for the async result containing JsonObject with creation result
+     * @return Future containing JsonObject with creation result
      */
-    void discoveryCreate(JsonObject profileData, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> discoveryCreate(JsonObject profileData);
 
     /**
      * Delete a discovery profile (hard delete)
      *
      * @param profileId Discovery profile ID to delete
-     * @param resultHandler Handler for the async result containing JsonObject with deletion result
+     * @return Future containing JsonObject with deletion result
      */
-    void discoveryDelete(String profileId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> discoveryDelete(String profileId);
 
     /**
      * Get discovery profile by ID
      *
      * @param profileId Discovery profile ID
-     * @param resultHandler Handler for the async result containing JsonObject with discovery profile data or not found
+     * @return Future containing JsonObject with discovery profile data or not found
      */
-    void discoveryGetById(String profileId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> discoveryGetById(String profileId);
 
 }

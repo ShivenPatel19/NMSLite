@@ -4,9 +4,7 @@ import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
-import io.vertx.core.AsyncResult;
-
-import io.vertx.core.Handler;
+import io.vertx.core.Future;
 
 import io.vertx.core.Vertx;
 
@@ -18,7 +16,7 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
  * CredentialService - Credential profile management operations with ProxyGen
- *
+
  * This interface provides:
  * - Credential profile CRUD operations
  * - Password encryption/decryption
@@ -53,49 +51,49 @@ public interface CredentialProfileService
     /**
      * Get all credential profiles
      *
-     * @param resultHandler Handler for the async result containing JsonArray of credential profiles
+     * @return Future containing JsonArray of credential profiles
      */
-    void credentialList(Handler<AsyncResult<JsonArray>> resultHandler);
+    Future<JsonArray> credentialList();
 
     /**
      * Create a new credential profile
      *
      * @param credentialData JsonObject containing credential data (profile_name, username, password, protocol)
-     * @param resultHandler Handler for the async result containing JsonObject with creation result
+     * @return Future containing JsonObject with creation result
      */
-    void credentialCreate(JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> credentialCreate(JsonObject credentialData);
 
     /**
      * Update credential profile information
      *
      * @param credentialId Credential profile ID to update
      * @param credentialData JsonObject containing fields to update
-     * @param resultHandler Handler for the async result containing JsonObject with update result
+     * @return Future containing JsonObject with update result
      */
-    void credentialUpdate(String credentialId, JsonObject credentialData, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> credentialUpdate(String credentialId, JsonObject credentialData);
 
     /**
      * Delete a credential profile (hard delete)
      *
      * @param credentialId Credential profile ID to delete
-     * @param resultHandler Handler for the async result containing JsonObject with deletion result
+     * @return Future containing JsonObject with deletion result
      */
-    void credentialDelete(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> credentialDelete(String credentialId);
 
     /**
      * Get credential profile by ID
      *
      * @param credentialId Credential profile ID
-     * @param resultHandler Handler for the async result containing JsonObject with credential profile data or not found
+     * @return Future containing JsonObject with credential profile data or not found
      */
-    void credentialGetById(String credentialId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> credentialGetById(String credentialId);
 
     /**
      * Get multiple credential profiles by IDs
      *
      * @param credentialIds JsonArray containing credential profile IDs
-     * @param resultHandler Handler for the async result containing JsonObject with credentials array
+     * @return Future containing JsonObject with credentials array
      */
-    void credentialGetByIds(JsonArray credentialIds, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> credentialGetByIds(JsonArray credentialIds);
 
 }

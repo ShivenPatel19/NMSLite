@@ -194,12 +194,10 @@ public class ServerVerticle extends AbstractVerticle
 
         // 404 handler for unmatched routes
         router.route("/*").handler(ctx ->
-        {
-            ctx.response()
-                .setStatusCode(404)
-                .putHeader("content-type", "application/json")
-                .end(new JsonObject().put("error", "Not Found").encode());
-        });
+                ctx.response()
+                    .setStatusCode(404)
+                    .putHeader("content-type", "application/json")
+                    .end(new JsonObject().put("error", "Not Found").encode()));
 
         return router;
     }

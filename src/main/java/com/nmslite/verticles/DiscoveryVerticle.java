@@ -252,54 +252,31 @@ public class DiscoveryVerticle extends AbstractVerticle
         Promise<JsonObject> promise = Promise.promise();
 
         // Get discovery profile using DiscoveryProfileService
-        discoveryProfileService.discoveryGetById(profileId, profileResult ->
-        {
-            if (profileResult.failed())
+        discoveryProfileService.discoveryGetById(profileId)
+            .onSuccess(profileResponse ->
             {
-                promise.fail("Failed to get discovery profile: " + profileResult.cause().getMessage());
-
-                return;
-            }
-
-            JsonObject profileResponse = profileResult.result();
-
-            if (!profileResponse.getBoolean("found", false))
-            {
-                promise.fail("Discovery profile not found: " + profileId);
-
-                return;
-            }
-
-            JsonArray credentialIds = profileResponse.getJsonArray("credential_profile_ids");
-
-            // Get credential profiles using CredentialProfileService
-            credentialProfileService.credentialGetByIds(credentialIds, credentialResult ->
-            {
-                if (credentialResult.failed())
+                if (!profileResponse.getBoolean("found", false))
                 {
-                    promise.fail("Failed to get credentials: " + credentialResult.cause().getMessage());
+                    promise.fail("Discovery profile not found: " + profileId);
 
                     return;
                 }
 
-                JsonObject credentialResponse = credentialResult.result();
+                JsonArray credentialIds = profileResponse.getJsonArray("credential_profile_ids");
 
-                if (!credentialResponse.getBoolean("success", false))
-                {
-                    promise.fail("Failed to get credential profiles");
+                // Get credential profiles using CredentialProfileService
+                credentialProfileService.credentialGetByIds(credentialIds)
+                    .onSuccess(credentialResponse ->
+                    {
+                        JsonArray credentials = credentialResponse.getJsonArray("credentials");
 
-                    return;
-                }
+                        profileResponse.put("credentials", credentials);
 
-                JsonObject dataObject = credentialResponse.getJsonObject("data");
-
-                JsonArray credentials = dataObject.getJsonArray("credentials");
-
-                profileResponse.put("credentials", credentials);
-
-                promise.complete(profileResponse);
-            });
-        });
+                        promise.complete(profileResponse);
+                    })
+                    .onFailure(cause -> promise.fail("Failed to get credentials: " + cause.getMessage()));
+            })
+            .onFailure(cause -> promise.fail("Failed to get discovery profile: " + cause.getMessage()));
 
         return promise.future();
     }
@@ -331,43 +308,38 @@ public class DiscoveryVerticle extends AbstractVerticle
         Promise<JsonObject> promise = Promise.promise();
 
         // Execute IP range parsing in worker thread to avoid blocking event loop
-        vertx.executeBlocking(blockingPromise ->
+        vertx.executeBlocking(() ->
         {
-            try
+            String ipAddress = profile.getString("ip_address");
+
+            boolean isRange = profile.getBoolean("is_range", false);
+
+            JsonArray targetIps = new JsonArray();
+
+            // Use IPRangeUtil for parsing both single IP and ranges
+            List<String> ipList = IPRangeUtil.parseIPRange(ipAddress, isRange);
+
+            for (String ip : ipList)
             {
-                String ipAddress = profile.getString("ip_address");
-
-                boolean isRange = profile.getBoolean("is_range", false);
-
-                JsonArray targetIps = new JsonArray();
-
-                // Use IPRangeUtil for parsing both single IP and ranges
-                List<String> ipList = IPRangeUtil.parseIPRange(ipAddress, isRange);
-
-                for (String ip : ipList)
-                {
-                    targetIps.add(ip);
-                }
-
-                logger.info("📋 Discovery targets: {} ({} {})", ipAddress, targetIps.size(),
-                           isRange ? "IPs from range" : "single IP");
-
-                // Create result with profile data and target IPs
-                JsonObject result = profile.copy()
-                    .put("target_ips", targetIps)
-                    .put("total_targets", targetIps.size());
-
-                blockingPromise.complete(result);
-
-            }
-            catch (Exception exception)
-            {
-                logger.error("❌ Failed to parse discovery targets: {}", exception.getMessage());
-
-                blockingPromise.fail("Failed to parse discovery targets: " + exception.getMessage());
+                targetIps.add(ip);
             }
 
-        }, false, promise);
+            logger.info("📋 Discovery targets: {} ({} {})", ipAddress, targetIps.size(),
+                       isRange ? "IPs from range" : "single IP");
+
+            // Create result with profile data and target IPs
+            return profile.copy()
+                .put("target_ips", targetIps)
+                .put("total_targets", targetIps.size());
+
+        }, false)
+        .onSuccess(promise::complete)
+        .onFailure(cause ->
+        {
+            logger.error("❌ Failed to parse discovery targets: {}", cause.getMessage());
+
+            promise.fail("Failed to parse discovery targets: " + cause.getMessage());
+        });
 
         return promise.future();
     }
@@ -421,12 +393,9 @@ public class DiscoveryVerticle extends AbstractVerticle
             Promise<JsonObject> devicePromise = Promise.promise();
 
             // Check with includeDeleted = true to get all devices including soft deleted ones
-            deviceService.deviceFindByIp(ip, true, result ->
-            {
-                if (result.succeeded())
+            deviceService.deviceFindByIp(ip, true)
+                .onSuccess(deviceResult ->
                 {
-                    JsonObject deviceResult = result.result();
-
                     logger.info("🔍 Device lookup for IP {}: {}", ip, deviceResult.encodePrettily());
 
                     if (deviceResult.getBoolean("found", false))
@@ -499,16 +468,15 @@ public class DiscoveryVerticle extends AbstractVerticle
                             .put("exists", false)
                             .put("proceed_with_discovery", true));
                     }
-                }
-                else
+                })
+                .onFailure(cause ->
                 {
                     // Error checking device, assume it doesn't exist
                     devicePromise.complete(new JsonObject()
                         .put("ip_address", ip)
                         .put("exists", false)
                         .put("proceed_with_discovery", true));
-                }
-            });
+                });
 
             deviceCheckFutures.add(devicePromise.future());
         }
@@ -832,99 +800,97 @@ public class DiscoveryVerticle extends AbstractVerticle
     {
         Promise<JsonArray> promise = Promise.promise();
 
-        vertx.executeBlocking(blockingPromise ->
+        vertx.executeBlocking(() ->
         {
-            try
+            // Create GoEngine discovery_request format for reachable IPs only
+            JsonObject discoveryRequest = createDiscoveryRequest(profileData, reachableIPs, batchId);
+
+            // Prepare GoEngine command
+            List<String> command = Arrays.asList(
+                goEnginePath,
+                "--mode", "discovery",
+                "--targets", discoveryRequest.encode(),
+                "--request-id", requestId
+            );
+
+            logger.info("📋 GoEngine discovery request: {}", discoveryRequest.encodePrettily());
+
+            ProcessBuilder pb = new ProcessBuilder(command);
+
+            Process process = pb.start();
+
+            JsonArray results = new JsonArray();
+
+            // Read results from stdout line by line
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
             {
-                // Create GoEngine discovery_request format for reachable IPs only
-                JsonObject discoveryRequest = createDiscoveryRequest(profileData, reachableIPs, batchId);
+                String line;
 
-                // Prepare GoEngine command
-                List<String> command = Arrays.asList(
-                    goEnginePath,
-                    "--mode", "discovery",
-                    "--targets", discoveryRequest.encode(),
-                    "--request-id", requestId
-                );
-
-                logger.info("📋 GoEngine discovery request: {}", discoveryRequest.encodePrettily());
-
-                ProcessBuilder pb = new ProcessBuilder(command);
-
-                Process process = pb.start();
-
-                JsonArray results = new JsonArray();
-
-                // Read results from stdout line by line
-                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
+                while ((line = reader.readLine()) != null)
                 {
-                    String line;
-
-                    while ((line = reader.readLine()) != null)
+                    try
                     {
-                        try
-                        {
-                            JsonObject result = new JsonObject(line);
+                        JsonObject result = new JsonObject(line);
 
-                            if (result.containsKey("ip_address"))
-                            {  // uses ip_address instead of device_address
-                                results.add(result);
-                            }
-                        }
-                        catch (Exception exception)
-                        {
-                            logger.warn("Failed to parse GoEngine result line: {}", line);
+                        if (result.containsKey("ip_address"))
+                        {  // uses ip_address instead of device_address
+                            results.add(result);
                         }
                     }
+                    catch (Exception exception)
+                    {
+                        logger.warn("Failed to parse GoEngine result line: {}", line);
+                    }
                 }
-
-                // Process timeout handled by Vert.x blocking timeout (blockingTimeoutGoEngine)
-                boolean finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
-
-                if (!finished)
-                {
-                    process.destroyForcibly();
-
-                    throw new RuntimeException("GoEngine discovery process timed out after " + blockingTimeoutGoEngine + " seconds");
-                }
-
-                int exitCode = process.exitValue();
-
-                logger.info("🏁 GoEngine v7.0.0 discovery completed with exit code: {}, {} results", exitCode, results.size());
-
-                // Combine GoEngine results with unreachable IPs
-                JsonArray finalResults = new JsonArray();
-
-                // Add GoEngine results
-                for (Object obj : results)
-                {
-                    finalResults.add(obj);
-                }
-
-                // Add failed results for unreachable IPs
-                for (int i = 0; i < unreachableIPs.size(); i++)
-                {
-                    String unreachableIP = unreachableIPs.getString(i);
-
-                    JsonObject failedResult = new JsonObject()
-                        .put("ip_address", unreachableIP)
-                        .put("success", false)
-                        .put("error", "Device unreachable - connectivity check failed")
-                        .put("timestamp", System.currentTimeMillis());
-
-                    finalResults.add(failedResult);
-                }
-
-                blockingPromise.complete(finalResults);
-
             }
-            catch (Exception exception)
+
+            // Process timeout handled by Vert.x blocking timeout (blockingTimeoutGoEngine)
+            boolean finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
+
+            if (!finished)
             {
-                logger.error("GoEngine discovery execution failed", exception);
+                process.destroyForcibly();
 
-                blockingPromise.fail(exception);
+                throw new RuntimeException("GoEngine discovery process timed out after " + blockingTimeoutGoEngine + " seconds");
             }
-        }, false, promise);
+
+            int exitCode = process.exitValue();
+
+            logger.info("🏁 GoEngine v7.0.0 discovery completed with exit code: {}, {} results", exitCode, results.size());
+
+            // Combine GoEngine results with unreachable IPs
+            JsonArray finalResults = new JsonArray();
+
+            // Add GoEngine results
+            for (Object obj : results)
+            {
+                finalResults.add(obj);
+            }
+
+            // Add failed results for unreachable IPs
+            for (int i = 0; i < unreachableIPs.size(); i++)
+            {
+                String unreachableIP = unreachableIPs.getString(i);
+
+                JsonObject failedResult = new JsonObject()
+                    .put("ip_address", unreachableIP)
+                    .put("success", false)
+                    .put("error", "Device unreachable - connectivity check failed")
+                    .put("timestamp", System.currentTimeMillis());
+
+                finalResults.add(failedResult);
+            }
+
+            return finalResults;
+
+        }, false)
+        .onSuccess(promise::complete)
+        .onFailure(cause ->
+        {
+            logger.error("GoEngine discovery execution failed", cause);
+
+            promise.fail(cause);
+        });
 
         return promise.future();
     }
@@ -1124,12 +1090,9 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         logger.info("🔧 Creating device from test discovery: {}", deviceData.getString("ip_address"));
 
-        deviceService.deviceCreateFromDiscovery(deviceData, ar ->
-        {
-            if (ar.succeeded())
+        deviceService.deviceCreateFromDiscovery(deviceData)
+            .onSuccess(result ->
             {
-                JsonObject result = ar.result();
-
                 logger.info("✅ Device created from test discovery: {}", result.getString("device_id"));
 
                 // Return device info for response
@@ -1139,14 +1102,13 @@ public class DiscoveryVerticle extends AbstractVerticle
                     .put("device_id", result.getString("device_id"))
                     .put("device_name", deviceData.getString("device_name"))
                     .put("success", true));
-            }
-            else
+            })
+            .onFailure(cause ->
             {
-                logger.error("❌ Failed to create device from test discovery: {}", ar.cause().getMessage());
+                logger.error("❌ Failed to create device from test discovery: {}", cause.getMessage());
 
                 promise.complete(null); // Return null for failed creation
-            }
-        });
+            });
 
         return promise.future();
     }

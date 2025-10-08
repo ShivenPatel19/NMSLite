@@ -21,13 +21,13 @@ import org.slf4j.LoggerFactory;
 
 /**
  * UserHandler - Handles all user-related HTTP requests
- *
+
  * This handler manages:
  * - User CRUD operations
  * - User authentication
  * - Password management
  * - User status management
- *
+
  * Uses UserService for all database operations via ProxyGen
  */
 public class UserHandler
@@ -83,17 +83,11 @@ public class UserHandler
             }
         }
 
-        userService.userList(includeInactive, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, new JsonObject().put("users", ar.result()));
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to get users");
-            }
-        });
+        userService.userList(includeInactive)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, new JsonObject().put("users", result)))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get users"));
     }
 
     /**
@@ -115,17 +109,11 @@ public class UserHandler
             .put("password", body.getString("password"))
             .put("is_active", body.getBoolean("is_active", true));
 
-        userService.userCreate(userData, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to create user");
-            }
-        });
+        userService.userCreate(userData)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to create user"));
     }
 
     /**
@@ -166,17 +154,11 @@ public class UserHandler
             return; // Validation failed, response already sent
         }
 
-        userService.userUpdate(userId, body, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to update user");
-            }
-        });
+        userService.userUpdate(userId, body)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to update user"));
     }
 
     /**
@@ -209,17 +191,11 @@ public class UserHandler
             return;
         }
 
-        userService.userDelete(userId, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to delete user");
-            }
-        });
+        userService.userDelete(userId)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to delete user"));
     }
 
     // ========================================
@@ -244,12 +220,9 @@ public class UserHandler
 
         String password = body.getString("password");
 
-        userService.userAuthenticate(username, password, ar ->
-        {
-            if (ar.succeeded())
+        userService.userAuthenticate(username, password)
+            .onSuccess(authResult ->
             {
-                JsonObject authResult = ar.result();
-
                 boolean authenticated = authResult.getBoolean("authenticated", false);
 
                 if (authenticated)
@@ -289,17 +262,14 @@ public class UserHandler
                     // Authentication failed - no token generation
                     ResponseUtil.handleSuccess(ctx, authResult);
                 }
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to authenticate user");
-            }
-        });
+            })
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to authenticate user"));
     }
 
     /**
      * Logout a user (client-side token invalidation).
-     *
+
      * Since JWT tokens are stateless, this endpoint simply returns a success response.
      * The client should discard the JWT token upon receiving this response.
      *

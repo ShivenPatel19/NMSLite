@@ -6,22 +6,18 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.ext.web.RoutingContext;
 
-import org.slf4j.Logger;
-
-import org.slf4j.LoggerFactory;
-
 import java.util.UUID;
 
 /**
  * ValidationUtil - Centralized validation utility for all API requests
- *
+
  * Organized with nested static classes for domain-specific validations:
  * - Common validations (outer class): Shared validation methods
  * - User: User-related validations
  * - Device: Device-related validations
  * - Credential: Credential profile validations
  * - DiscoveryProfile: Discovery profile validations
- *
+
  * All methods return true if validation passes, false if validation fails
  * (with HTTP response already sent to client)
  */

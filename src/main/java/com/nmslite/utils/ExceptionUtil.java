@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * ExceptionUtil - Generic Exception Handling Utility
- *
+
  * Provides consistent error handling across all verticles and APIs
  * - HTTP response formatting
  * - Event Bus error handling

@@ -20,11 +20,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Generic queue-based batch processor for sequential batch processing.
- *
+
  * This class provides a memory-efficient, fail-tolerant approach to processing
  * large datasets in configurable batch sizes. It uses a queue-based pull model
  * where batches are created on-demand rather than pre-partitioning all data.
- *
+
  * Features:
  * - Memory efficient: Only current batch held in memory at any time
  * - Fail-tolerant: Continues processing remaining batches on failure
@@ -32,14 +32,14 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * - Recursive pattern: Functional programming style with tail recursion
  * - Generic: Reusable across different batch processing scenarios
  * - Thread-safe: Uses ConcurrentLinkedQueue for queue operations
- *
+
  * Usage Pattern:
  * 1. Extend this class and implement processBatch() method
  * 2. Optionally override handleBatchFailure() for custom error handling
  * 3. Create instance with items to process and batch size
  * 4. Call processNext() to start batch processing
  * 5. Promise completes when all batches processed or queue empty
- *
+
  * Example:
  * <pre>
  * class MyBatchProcessor extends QueueBatchProcessor&lt;String&gt; {
@@ -72,7 +72,7 @@ public abstract class QueueBatchProcessor<T>
 
     /**
      * Constructs a new QueueBatchProcessor with the given items and batch size.
-     *
+
      * Initializes the internal queue with all items and prepares for batch processing.
      * Items are added to a thread-safe ConcurrentLinkedQueue for sequential polling.
      *
@@ -96,18 +96,18 @@ public abstract class QueueBatchProcessor<T>
 
     /**
      * Process the next batch from the queue recursively.
-     *
+
      * This method implements the core batch processing loop using tail recursion.
      * It polls items from the queue, processes them as a batch, and recursively
      * calls itself to process the next batch until the queue is empty.
-     *
+
      * Processing flow:
      * 1. Check if queue is empty → complete promise if done
      * 2. Poll next batch of items from queue
      * 3. Call processBatch() (implemented by subclass)
      * 4. On success: accumulate results and recurse
      * 5. On failure: handle error and recurse (fail-tolerant)
-     *
+
      * The recursion continues until all items are processed or queue is empty.
      * Each batch is processed completely before moving to the next batch.
      *
@@ -180,7 +180,7 @@ public abstract class QueueBatchProcessor<T>
 
     /**
      * Poll the next batch of items from the queue.
-     *
+
      * Polls up to batchSize items from the remaining queue. If fewer items
      * remain than batchSize, returns all remaining items. Uses thread-safe
      * poll() operation to remove items from the queue.
@@ -206,11 +206,11 @@ public abstract class QueueBatchProcessor<T>
 
     /**
      * Process a single batch of items.
-     *
+
      * This abstract method must be implemented by subclasses to define
      * the actual batch processing logic. The method should process all
      * items in the batch and return a Future containing the results.
-     *
+
      * The implementation should:
      * - Process all items in the batch
      * - Return results as JsonArray
@@ -224,16 +224,16 @@ public abstract class QueueBatchProcessor<T>
 
     /**
      * Handle batch processing failure.
-     *
+
      * This method is called when processBatch() fails. Subclasses can override
      * this method to implement custom error handling logic such as:
      * - Tracking failed items
      * - Logging detailed error information
      * - Updating failure counters
      * - Notifying external systems
-     *
+
      * Default implementation: logs error only (already logged by processNext)
-     *
+
      * Note: After this method returns, processing continues with the next batch
      * (fail-tolerant behavior). The failed batch is not retried automatically.
      *

@@ -10,9 +10,9 @@ import io.vertx.core.Future;
 
 import io.vertx.core.Promise;
 
-import io.vertx.pgclient.PgConnectOptions;
+import io.vertx.pgclient.PgBuilder;
 
-import io.vertx.pgclient.PgPool;
+import io.vertx.pgclient.PgConnectOptions;
 
 import io.vertx.serviceproxy.ServiceBinder;
 
@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * DatabaseVerticle - Comprehensive Database Operations with Vert.x ProxyGen
- *
+
  * This verticle manages all database services using ProxyGen:
  * - UserService - User management operations
  * - DeviceTypeService - Device type management
@@ -35,9 +35,9 @@ import org.slf4j.LoggerFactory;
  * - DeviceService - Device management operations
  * - MetricsService - Device metrics and time-series data
  * - AvailabilityService - Device availability status tracking
- *
+
  * Features:
- * - PostgreSQL connection management
+ * - PostgresSQL connection management
  * - Multiple service proxy registration
  * - Automatic event bus binding
  * - Health monitoring for all services
@@ -68,7 +68,7 @@ public class DatabaseVerticle extends AbstractVerticle
     private AvailabilityServiceImpl availabilityService;
 
     /**
-     * Starts the database verticle by creating PostgreSQL pool, instantiating service implementations,
+     * Starts the database verticle by creating PostgresSQL pool, instantiating service implementations,
      * and registering all ProxyGen services on the event bus.
      *
      * @param startPromise Promise completed when all services are registered successfully
@@ -78,7 +78,7 @@ public class DatabaseVerticle extends AbstractVerticle
     {
         logger.info("🔧 Starting DatabaseVerticle - Comprehensive Database Services");
 
-        // Setup PostgreSQL connection
+        // Setup PostgresSQL connection
         setupDatabaseConnection()
             .onSuccess(pool ->
             {
@@ -105,7 +105,7 @@ public class DatabaseVerticle extends AbstractVerticle
     }
 
     /**
-     * Sets up PostgreSQL connection pool and validates connectivity.
+     * Sets up PostgresSQL connection pool and validates connectivity.
      * Reads host, port, database, user, password, and pool size from verticle config and
      * returns a shared Vert.x SQL Pool on success.
      *
@@ -128,7 +128,12 @@ public class DatabaseVerticle extends AbstractVerticle
             PoolOptions poolOptions = new PoolOptions()
                 .setMaxSize(config().getInteger("maxSize", 20));
 
-            Pool pool = Pool.pool(vertx, connectOptions, poolOptions);
+            // Create PostgresSQL connection pool
+            Pool pool = PgBuilder.pool()
+                .with(poolOptions)
+                .connectingTo(connectOptions)
+                .using(vertx)
+                .build();
 
             // Test database connection
             pool.getConnection()
@@ -160,26 +165,25 @@ public class DatabaseVerticle extends AbstractVerticle
 
     /**
      * Instantiates all database service implementations backed by the shared PgPool.
-     * This wires Vert.x and PgPool into each service (User, DeviceType, CredentialProfile,
+     * This wires PgPool into each service (User, DeviceType, CredentialProfile,
      * DiscoveryProfile, Device, Metrics, Availability).
+     * Note: Only DeviceService needs Vertx instance for event bus publishing.
      */
     private void setupAllServices()
     {
-        PgPool pool = (PgPool) pgPool;
+        this.userService = new UserServiceImpl(pgPool);
 
-        this.userService = new UserServiceImpl(vertx, pool);
+        this.deviceTypeService = new DeviceTypeServiceImpl(pgPool);
 
-        this.deviceTypeService = new DeviceTypeServiceImpl(vertx, pool);
+        this.credentialService = new CredentialProfileServiceImpl(pgPool);
 
-        this.credentialService = new CredentialProfileServiceImpl(vertx, pool);
+        this.discoveryService = new DiscoveryProfileServiceImpl(pgPool);
 
-        this.discoveryService = new DiscoveryProfileServiceImpl(vertx, pool);
+        this.deviceService = new DeviceServiceImpl(vertx, pgPool);
 
-        this.deviceService = new DeviceServiceImpl(vertx, pool);
+        this.metricsService = new MetricsServiceImpl(pgPool);
 
-        this.metricsService = new MetricsServiceImpl(vertx, pool);
-
-        this.availabilityService = new AvailabilityServiceImpl(vertx, pool);
+        this.availabilityService = new AvailabilityServiceImpl(pgPool);
 
         logger.info("🔧 All 7 service implementations created successfully");
     }
@@ -258,7 +262,7 @@ public class DatabaseVerticle extends AbstractVerticle
 
     /**
      * Stops the database verticle by closing the PgPool and ensuring services are unbound.
-     * Uses Future.all to await pool close and (implicit) unregistration completion.
+     * Uses Future.all() to await pool close and (implicit) unregistration completion.
      *
      * @param stopPromise Promise completed when shutdown is finished
      */

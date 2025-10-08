@@ -8,11 +8,11 @@ import java.util.regex.Pattern;
 
 /**
  * IPRangeUtil - Utility class for parsing and validating IP addresses and ranges
- *
+
  * This utility supports:
  * - Single IP addresses: "192.168.1.100"
  * - IP ranges in same subnet: "192.168.1.1-50" (expands to 192.168.1.1 through 192.168.1.50)
- *
+
  * Features:
  * - IP format validation
  * - Range parsing and expansion

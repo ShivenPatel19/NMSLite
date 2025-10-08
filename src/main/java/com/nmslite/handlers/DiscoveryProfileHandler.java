@@ -36,11 +36,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * DiscoveryProfileHandler - Handles discovery profile management HTTP requests
- *
+
  * This handler manages:
  * - Discovery profile CRUD operations (database management)
  * - Discovery execution using GoEngine
- *
+
  * Uses DiscoveryService for profile management and event bus for discovery operations with GoEngine
  */
 public class DiscoveryProfileHandler
@@ -87,17 +87,11 @@ public class DiscoveryProfileHandler
      */
     public void getDiscoveryProfiles(RoutingContext ctx)
     {
-        discoveryProfileService.discoveryList(ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, new JsonObject().put("discovery_profiles", ar.result()));
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to get discovery profiles");
-            }
-        });
+        discoveryProfileService.discoveryList()
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, new JsonObject().put("discovery_profiles", result)))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get discovery profiles"));
     }
 
     /**
@@ -127,68 +121,63 @@ public class DiscoveryProfileHandler
         logger.info("🔧 Creating discovery profile for {} (range: {})", ipAddress, isRange);
 
         // Step 1: Validate device type exists
-        deviceTypeService.deviceTypeGetById(deviceTypeId, deviceTypeResult ->
-        {
-            if (deviceTypeResult.failed())
+        deviceTypeService.deviceTypeGetById(deviceTypeId)
+            .onSuccess(deviceType ->
+            {
+                // Step 2: Validate all credential profile IDs exist
+                validateCredentialProfileIdsExist(credentialProfileIds, validationResult ->
+                {
+                    if (validationResult.failed())
+                    {
+                        logger.error("❌ Invalid credential profile IDs: {}", validationResult.cause().getMessage());
+
+                        ExceptionUtil.handleHttp(ctx, validationResult.cause(),
+                            "Invalid device type ID or one or more credential profile IDs");
+
+                        return;
+                    }
+
+                    // Step 3: Set default port if not provided
+                    if (!requestBody.containsKey("port") || requestBody.getValue("port") == null)
+                    {
+                        Integer defaultPort = deviceType.getInteger("default_port");
+
+                        if (defaultPort != null)
+                        {
+                            requestBody.put("port", defaultPort);
+
+                            logger.info("🔧 Using default port {} for device type", defaultPort);
+                        }
+                        else
+                        {
+                            logger.warn("⚠️ No default port found for device type {}, proceeding without port", deviceTypeId);
+                        }
+                    }
+                    else
+                    {
+                        logger.info("🔧 Using provided port: {}", requestBody.getValue("port"));
+                    }
+
+                    // Step 4: Create discovery profile in database
+                    createDiscoveryProfileInDatabase(ctx, requestBody, ipAddress);
+                });
+            })
+            .onFailure(cause ->
             {
                 logger.error("❌ Invalid device type ID: {}", deviceTypeId);
 
                 ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid device type ID: " + deviceTypeId),
                     "Invalid device type ID");
-
-                return;
-            }
-
-            // Step 2: Validate all credential profile IDs exist
-            validateCredentialProfileIdsExist(ctx, credentialProfileIds, validationResult ->
-            {
-                if (validationResult.failed())
-                {
-                    logger.error("❌ Invalid credential profile IDs: {}", validationResult.cause().getMessage());
-
-                    ExceptionUtil.handleHttp(ctx, validationResult.cause(),
-                        "Invalid device type ID or one or more credential profile IDs");
-
-                    return;
-                }
-
-                // Step 3: Set default port if not provided
-                JsonObject deviceType = deviceTypeResult.result();
-
-                if (!requestBody.containsKey("port") || requestBody.getValue("port") == null)
-                {
-                    Integer defaultPort = deviceType.getInteger("default_port");
-
-                    if (defaultPort != null)
-                    {
-                        requestBody.put("port", defaultPort);
-
-                        logger.info("🔧 Using default port {} for device type", defaultPort);
-                    }
-                    else
-                    {
-                        logger.warn("⚠️ No default port found for device type {}, proceeding without port", deviceTypeId);
-                    }
-                }
-                else
-                {
-                    logger.info("🔧 Using provided port: {}", requestBody.getValue("port"));
-                }
-
-                // Step 4: Create discovery profile in database
-                createDiscoveryProfileInDatabase(ctx, requestBody, ipAddress);
             });
-        });
     }
 
     /**
      * Helper method to validate that all credential profile IDs exist in the database
      *
-     * @param ctx routing context
      * @param credentialProfileIds array of credential profile IDs to validate
      * @param resultHandler handler to call with validation result
      */
-    private void validateCredentialProfileIdsExist(RoutingContext ctx, JsonArray credentialProfileIds,
+    private void validateCredentialProfileIdsExist(JsonArray credentialProfileIds,
                                                      Handler<AsyncResult<Void>> resultHandler)
     {
         // Use Atomic Variables to track validation progress
@@ -200,42 +189,43 @@ public class DiscoveryProfileHandler
         {
             String credentialId = credentialProfileIds.getString(i);
 
-            credentialService.credentialGetById(credentialId, ar ->
-            {
-                if (hasError.get())
+            credentialService.credentialGetById(credentialId)
+                .onSuccess(result ->
                 {
-                    return; // Already failed, skip further processing
-                }
+                    if (hasError.get())
+                    {
+                        return; // Already failed, skip further processing
+                    }
 
-                if (ar.failed())
+                    // Check if credential was found
+                    if (result.getBoolean("found", false) == false)
+                    {
+                        hasError.set(true);
+
+                        resultHandler.handle(Future.failedFuture(
+                            new IllegalArgumentException("Invalid credential profile ID: " + credentialId)));
+
+                        return;
+                    }
+
+                    // Check if this was the last credential to validate
+                    if (validatedCount.incrementAndGet() == credentialProfileIds.size())
+                    {
+                        resultHandler.handle(Future.succeededFuture());
+                    }
+                })
+                .onFailure(cause ->
                 {
+                    if (hasError.get())
+                    {
+                        return; // Already failed, skip further processing
+                    }
+
                     hasError.set(true);
 
                     resultHandler.handle(Future.failedFuture(
                         new IllegalArgumentException("Invalid credential profile ID: " + credentialId)));
-
-                    return;
-                }
-
-                // Check if credential was found
-                JsonObject result = ar.result();
-
-                if (result.getBoolean("found", false) == false)
-                {
-                    hasError.set(true);
-
-                    resultHandler.handle(Future.failedFuture(
-                        new IllegalArgumentException("Invalid credential profile ID: " + credentialId)));
-
-                    return;
-                }
-
-                // Check if this was the last credential to validate
-                if (validatedCount.incrementAndGet() == credentialProfileIds.size())
-                {
-                    resultHandler.handle(Future.succeededFuture());
-                }
-            });
+                });
         }
     }
 
@@ -248,22 +238,20 @@ public class DiscoveryProfileHandler
      */
     private void createDiscoveryProfileInDatabase(RoutingContext ctx, JsonObject requestBody, String ipAddress)
     {
-        discoveryProfileService.discoveryCreate(requestBody, ar ->
-        {
-            if (ar.succeeded())
+        discoveryProfileService.discoveryCreate(requestBody)
+            .onSuccess(result ->
             {
                 logger.info("✅ Discovery profile created successfully for {} with port {}",
                     ipAddress, requestBody.getValue("port"));
 
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
+                ResponseUtil.handleSuccess(ctx, result);
+            })
+            .onFailure(cause ->
             {
-                logger.error("❌ Failed to create discovery profile for {}: {}", ipAddress, ar.cause().getMessage());
+                logger.error("❌ Failed to create discovery profile for {}: {}", ipAddress, cause.getMessage());
 
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to create discovery profile");
-            }
-        });
+                ExceptionUtil.handleHttp(ctx, cause, "Failed to create discovery profile");
+            });
     }
 
     /**
@@ -281,17 +269,11 @@ public class DiscoveryProfileHandler
             return;
         }
 
-        discoveryProfileService.discoveryDelete(profileId, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to delete discovery profile");
-            }
-        });
+        discoveryProfileService.discoveryDelete(profileId)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to delete discovery profile"));
     }
 
     // ========================================

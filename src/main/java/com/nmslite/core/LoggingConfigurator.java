@@ -12,14 +12,14 @@ import org.slf4j.LoggerFactory;
 
 /**
  * LoggingConfigurator - Configures application logging based on application.conf
- *
+
  * Features:
  * - Enable/disable logging globally
  * - Set log level (TRACE, DEBUG, INFO, WARN, ERROR)
  * - Enable/disable file logging
  * - Enable/disable console logging
  * - Configure log file path
- *
+
  * Configuration in application.conf:
  * logging {
  *   enabled = true                    # Enable/disable all logging
@@ -141,23 +141,6 @@ public class LoggingConfigurator
 
             logger.info("=".repeat(60));
         }
-    }
-
-    /**
-     * Create a NULL appender for disabling specific appenders
-     *
-     * @param loggerContext logger context
-     */
-    private static void createNullAppender(LoggerContext loggerContext)
-    {
-        ch.qos.logback.core.helpers.NOPAppender<ch.qos.logback.classic.spi.ILoggingEvent> nullAppender =
-            new ch.qos.logback.core.helpers.NOPAppender<>();
-
-        nullAppender.setName("NULL");
-
-        nullAppender.setContext(loggerContext);
-
-        nullAppender.start();
     }
 
 }

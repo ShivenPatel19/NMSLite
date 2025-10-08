@@ -22,13 +22,13 @@ import java.util.UUID;
 
 /**
  * DeviceHandler - Handles all device-related HTTP requests
- *
+
  * This handler manages:
  * - Device listing and management
  * - Device types
  * - Device soft delete and restore
  * - Device discovery integration
- *
+
  * Uses DeviceService and DeviceTypeService for database operations
  */
 public class DeviceHandler
@@ -62,17 +62,11 @@ public class DeviceHandler
      */
     public void getDiscoveredDevices(RoutingContext ctx)
     {
-        deviceService.deviceListByProvisioned(false, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to get unprovisioned devices");
-            }
-        });
+        deviceService.deviceListByProvisioned(false)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get unprovisioned devices"));
     }
 
     /**
@@ -82,17 +76,11 @@ public class DeviceHandler
      */
     public void getProvisionedDevices(RoutingContext ctx)
     {
-        deviceService.deviceListByProvisioned(true, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to get provisioned devices");
-            }
-        });
+        deviceService.deviceListByProvisioned(true)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get provisioned devices"));
     }
 
     /**
@@ -110,17 +98,11 @@ public class DeviceHandler
             return;
         }
 
-        deviceService.deviceDelete(deviceId, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to delete device");
-            }
-        });
+        deviceService.deviceDelete(deviceId)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to delete device"));
     }
 
     /**
@@ -138,17 +120,11 @@ public class DeviceHandler
             return;
         }
 
-        deviceService.deviceRestore(deviceId, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to restore device");
-            }
-        });
+        deviceService.deviceRestore(deviceId)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to restore device"));
     }
 
     /**
@@ -166,17 +142,11 @@ public class DeviceHandler
             return;
         }
 
-        deviceService.deviceEnableMonitoring(deviceId, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to enable monitoring for device");
-            }
-        });
+        deviceService.deviceEnableMonitoring(deviceId)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to enable monitoring for device"));
     }
 
     /**
@@ -193,17 +163,11 @@ public class DeviceHandler
             return;
         }
 
-        deviceService.deviceDisableMonitoring(deviceId, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to disable monitoring for device");
-            }
-        });
+        deviceService.deviceDisableMonitoring(deviceId)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to disable monitoring for device"));
     }
 
     /**
@@ -254,19 +218,13 @@ public class DeviceHandler
             }
         }
 
-        deviceService.deviceProvisionAndEnableMonitoring(deviceIds, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, new JsonObject()
-                    .put("results", ar.result())
-                    .put("total", deviceIds.size()));
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to provision devices");
-            }
-        });
+        deviceService.deviceProvisionAndEnableMonitoring(deviceIds)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, new JsonObject()
+                        .put("results", result)
+                        .put("total", deviceIds.size())))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to provision devices"));
     }
 
     /**
@@ -294,17 +252,11 @@ public class DeviceHandler
         }
 
         // 4) Invoke service
-        deviceService.deviceUpdateConfig(deviceId, body, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, ar.result());
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to update device configuration");
-            }
-        });
+        deviceService.deviceUpdateConfig(deviceId, body)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, result))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to update device configuration"));
     }
 
     // ========================================
@@ -319,17 +271,11 @@ public class DeviceHandler
     public void getDeviceTypes(RoutingContext ctx)
     {
         // Show only active device types by default (as requested)
-        deviceTypeService.deviceTypeList(false, ar ->
-        {
-            if (ar.succeeded())
-            {
-                ResponseUtil.handleSuccess(ctx, new JsonObject().put("device_types", ar.result()));
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, ar.cause(), "Failed to get device types");
-            }
-        });
+        deviceTypeService.deviceTypeList(false)
+            .onSuccess(result ->
+                    ResponseUtil.handleSuccess(ctx, new JsonObject().put("device_types", result)))
+            .onFailure(cause ->
+                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get device types"));
     }
 
 }

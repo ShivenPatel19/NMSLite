@@ -4,9 +4,7 @@ import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
-import io.vertx.core.AsyncResult;
-
-import io.vertx.core.Handler;
+import io.vertx.core.Future;
 
 import io.vertx.core.Vertx;
 
@@ -18,7 +16,7 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
 
 /**
  * AvailabilityService - Device current availability status operations with ProxyGen
- *
+
  * This interface provides:
  * - Current device availability status (one row per device)
  * - Real-time status updates
@@ -26,7 +24,7 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
  * - Dashboard status views
  * - Type-safe method calls
  * - Automatic event bus communication
- *
+
  * Note: This tracks CURRENT status only, not historical availability data
  */
 @ProxyGen
@@ -56,33 +54,33 @@ public interface AvailabilityService
     /**
      * Get all device availability statuses (only for active, non-deleted devices)
      *
-     * @param resultHandler Handler for the async result containing JsonArray of current device availability statuses
+     * @return Future containing JsonArray of current device availability statuses
      */
-    void availabilityListAll(Handler<AsyncResult<JsonArray>> resultHandler);
+    Future<JsonArray> availabilityListAll();
 
     /**
      * Create or update device availability status (upsert operation)
      *
      * @param availabilityData JsonObject containing availability data (device_id, status, response_time, checked_at)
-     * @param resultHandler Handler for the async result containing JsonObject with upsert result
+     * @return Future containing JsonObject with upsert result
      */
-    void availabilityCreateOrUpdate(JsonObject availabilityData, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> availabilityCreateOrUpdate(JsonObject availabilityData);
 
     /**
      * Get current availability status for specific device (device must be active, non-deleted)
      *
      * @param deviceId Device ID (must be active, non-deleted)
-     * @param resultHandler Handler for the async result containing JsonObject with current availability data or not found
+     * @return Future containing JsonObject with current availability data or not found
      */
-    void availabilityGetByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> availabilityGetByDevice(String deviceId);
 
     /**
      * Delete availability status for specific device (when device is deleted)
      *
      * @param deviceId Device ID whose availability status should be removed
-     * @param resultHandler Handler for the async result containing JsonObject with deletion result
+     * @return Future containing JsonObject with deletion result
      */
-    void availabilityDeleteByDevice(String deviceId, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> availabilityDeleteByDevice(String deviceId);
 
     /**
      * Update device status based on latest check (device must be active, non-deleted)
@@ -90,8 +88,8 @@ public interface AvailabilityService
      * @param deviceId Device ID (must be active, non-deleted)
      * @param status New status ("UP" or "DOWN")
      * @param responseTime Response time in milliseconds
-     * @param resultHandler Handler for the async result containing JsonObject with status update result
+     * @return Future containing JsonObject with status update result
      */
-    void availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime, Handler<AsyncResult<JsonObject>> resultHandler);
+    Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime);
 
 }

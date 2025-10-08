@@ -4,21 +4,15 @@ import com.nmslite.services.UserService;
 
 import com.nmslite.utils.PasswordUtil;
 
-import io.vertx.core.AsyncResult;
-
 import io.vertx.core.Future;
 
-import io.vertx.core.Handler;
-
 import io.vertx.core.Promise;
-
-import io.vertx.core.Vertx;
 
 import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.json.JsonObject;
 
-import io.vertx.pgclient.PgPool;
+import io.vertx.sqlclient.Pool;
 
 import io.vertx.sqlclient.Row;
 
@@ -32,7 +26,7 @@ import java.util.UUID;
 
 /**
  * UserServiceImpl - Implementation of UserService
- *
+
  * Provides user management operations including:
  * - User CRUD operations
  * - Password hashing and authentication
@@ -43,20 +37,15 @@ public class UserServiceImpl implements UserService
 
     private static final Logger logger = LoggerFactory.getLogger(UserServiceImpl.class);
 
-    private final Vertx vertx;
-
-    private final PgPool pgPool;
+    private final Pool pgPool;
 
     /**
      * Constructor for UserServiceImpl
      *
-     * @param vertx Vert.x instance
-     * @param pgPool PostgreSQL connection pool
+     * @param pgPool PostgresSQL connection pool
      */
-    public UserServiceImpl(Vertx vertx, PgPool pgPool)
+    public UserServiceImpl(Pool pgPool)
     {
-        this.vertx = vertx;
-
         this.pgPool = pgPool;
     }
 
@@ -64,105 +53,107 @@ public class UserServiceImpl implements UserService
      * Get list of users
      *
      * @param includeInactive Include inactive users
-     * @param resultHandler Handler for the async result
+     * @return Future containing JsonArray of users
      */
     @Override
-    public void userList(boolean includeInactive, Handler<AsyncResult<JsonArray>> resultHandler)
+    public Future<JsonArray> userList(boolean includeInactive)
     {
-        vertx.executeBlocking(blockingPromise ->
-        {
-            String sql = """
-                SELECT user_id, username, is_active
-                FROM users
-                """ + (includeInactive ? "" : "WHERE is_active = true ") + """
-                ORDER BY username
-                """;
+        Promise<JsonArray> promise = Promise.promise();
 
-            pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
+        String sql = """
+            SELECT user_id, username, is_active
+            FROM users
+            """ + (includeInactive ? "" : "WHERE is_active = true ") + """
+            ORDER BY username
+            """;
+
+        pgPool.query(sql)
+            .execute()
+            .onSuccess(rows ->
+            {
+                JsonArray users = new JsonArray();
+
+                for (Row row : rows)
                 {
-                    JsonArray users = new JsonArray();
+                    JsonObject user = new JsonObject()
+                        .put("user_id", row.getUUID("user_id").toString())
+                        .put("username", row.getString("username"))
+                        .put("is_active", row.getBoolean("is_active"));
 
-                    for (Row row : rows)
-                    {
-                        JsonObject user = new JsonObject()
-                            .put("user_id", row.getUUID("user_id").toString())
-                            .put("username", row.getString("username"))
-                            .put("is_active", row.getBoolean("is_active"));
+                    users.add(user);
+                }
 
-                        users.add(user);
-                    }
+                promise.complete(users);
+            })
+            .onFailure(cause ->
+            {
+                logger.error("Failed to get users", cause);
 
-                    blockingPromise.complete(users);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get users", cause);
+                promise.fail(cause);
+            });
 
-                    blockingPromise.fail(cause);
-                });
-        }, resultHandler);
+        return promise.future();
     }
 
     /**
      * Create a new user
      *
      * @param userData User data
-     * @param resultHandler Handler for the async result
+     * @return Future containing JsonObject with creation result
      */
     @Override
-    public void userCreate(JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler)
+    public Future<JsonObject> userCreate(JsonObject userData)
     {
-        vertx.executeBlocking(blockingPromise ->
-        {
-            String username = userData.getString("username");
+        Promise<JsonObject> promise = Promise.promise();
 
-            String password = userData.getString("password");
+        String username = userData.getString("username");
 
-            Boolean isActive = userData.getBoolean("is_active", true);
+        String password = userData.getString("password");
 
-            // Hash password for user authentication
-            String passwordHash = PasswordUtil.hashPassword(password);
+        Boolean isActive = userData.getBoolean("is_active", true);
 
-            // ===== TRUST HANDLER VALIDATION =====
-            // No validation here - handler has already validated all input
+        // Hash password for user authentication
+        String passwordHash = PasswordUtil.hashPassword(password);
 
-            String sql = """
-                INSERT INTO users (username, password_hash, is_active)
-                VALUES ($1, $2, $3)
-                RETURNING user_id, username, is_active
-                """;
+        // ===== TRUST HANDLER VALIDATION =====
+        // No validation here - handler has already validated all input
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(username, passwordHash, isActive))
-                .onSuccess(rows ->
+        String sql = """
+            INSERT INTO users (username, password_hash, is_active)
+            VALUES ($1, $2, $3)
+            RETURNING user_id, username, is_active
+            """;
+
+        pgPool.preparedQuery(sql)
+            .execute(Tuple.of(username, passwordHash, isActive))
+            .onSuccess(rows ->
+            {
+                Row row = rows.iterator().next();
+
+                JsonObject result = new JsonObject()
+                    .put("success", true)
+                    .put("user_id", row.getUUID("user_id").toString())
+                    .put("username", row.getString("username"))
+                    .put("is_active", row.getBoolean("is_active"))
+                    .put("message", "User created successfully");
+
+                promise.complete(result);
+            })
+            .onFailure(cause ->
+            {
+                logger.error("Failed to create user", cause);
+
+                if (cause.getMessage().contains("duplicate key"))
                 {
-                    Row row = rows.iterator().next();
-
-                    JsonObject result = new JsonObject()
-                        .put("success", true)
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("is_active", row.getBoolean("is_active"))
-                        .put("message", "User created successfully");
-
-                    blockingPromise.complete(result);
-                })
-                .onFailure(cause ->
+                    promise.fail(new IllegalArgumentException("Username already exists"));
+                }
+                else
                 {
-                    logger.error("Failed to create user", cause);
+                    promise.fail(cause);
+                }
+            });
 
-                    if (cause.getMessage().contains("duplicate key"))
-                    {
-                        blockingPromise.fail(new IllegalArgumentException("Username already exists"));
-                    }
-                    else
-                    {
-                        blockingPromise.fail(cause);
-                    }
-                });
-        }, resultHandler);
+        return promise.future();
     }
 
     /**
@@ -170,146 +161,148 @@ public class UserServiceImpl implements UserService
      *
      * @param userId User ID
      * @param userData User data to update
-     * @param resultHandler Handler for the async result
+     * @return Future containing JsonObject with update result
      */
     @Override
-    public void userUpdate(String userId, JsonObject userData, Handler<AsyncResult<JsonObject>> resultHandler)
+    public Future<JsonObject> userUpdate(String userId, JsonObject userData)
     {
-        vertx.executeBlocking(blockingPromise ->
+        Promise<JsonObject> promise = Promise.promise();
+
+        String username = userData.getString("username");
+
+        String password = userData.getString("password");
+
+        Boolean isActive = userData.getBoolean("is_active");
+
+        // ===== TRUST HANDLER VALIDATION =====
+        // No validation here - handler has already validated all input
+
+        StringBuilder sqlBuilder = new StringBuilder("UPDATE users SET ");
+
+        JsonArray params = new JsonArray();
+
+        int paramIndex = 1;
+
+        if (username != null)
         {
-            String username = userData.getString("username");
+            sqlBuilder.append("username = $").append(paramIndex++).append(", ");
 
-            String password = userData.getString("password");
+            params.add(username);
+        }
 
-            Boolean isActive = userData.getBoolean("is_active");
+        if (password != null)
+        {
+            String passwordHash = PasswordUtil.hashPassword(password);
 
-            // ===== TRUST HANDLER VALIDATION =====
-            // No validation here - handler has already validated all input
+            sqlBuilder.append("password_hash = $").append(paramIndex++).append(", ");
 
-            StringBuilder sqlBuilder = new StringBuilder("UPDATE users SET ");
+            params.add(passwordHash);
+        }
 
-            JsonArray params = new JsonArray();
+        if (isActive != null)
+        {
+            sqlBuilder.append("is_active = $").append(paramIndex++).append(", ");
 
-            int paramIndex = 1;
+            params.add(isActive);
+        }
 
-            if (username != null)
+        // Remove trailing comma and space, add WHERE clause
+        String sqlStr = sqlBuilder.toString();
+
+        if (sqlStr.endsWith(", "))
+        {
+            sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
+        }
+
+        String sql = sqlStr + " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active";
+
+        params.add(UUID.fromString(userId));
+
+        pgPool.preparedQuery(sql)
+            .execute(Tuple.from(params.getList()))
+            .onSuccess(rows ->
             {
-                sqlBuilder.append("username = $").append(paramIndex++).append(", ");
-
-                params.add(username);
-            }
-
-            if (password != null)
-            {
-                String passwordHash = PasswordUtil.hashPassword(password);
-
-                sqlBuilder.append("password_hash = $").append(paramIndex++).append(", ");
-
-                params.add(passwordHash);
-            }
-
-            if (isActive != null)
-            {
-                sqlBuilder.append("is_active = $").append(paramIndex++).append(", ");
-
-                params.add(isActive);
-            }
-
-            // Remove trailing comma and space, add WHERE clause
-            String sqlStr = sqlBuilder.toString();
-
-            if (sqlStr.endsWith(", "))
-            {
-                sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
-            }
-
-            String sql = sqlStr + " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active";
-
-            params.add(UUID.fromString(userId));
-
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.from(params.getList()))
-                .onSuccess(rows ->
+                if (rows.size() == 0)
                 {
-                    if (rows.size() == 0)
-                    {
-                        blockingPromise.fail(new IllegalArgumentException("User not found"));
+                    promise.fail(new IllegalArgumentException("User not found"));
 
-                        return;
-                    }
+                    return;
+                }
 
-                    Row row = rows.iterator().next();
+                Row row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
-                        .put("success", true)
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("is_active", row.getBoolean("is_active"))
-                        .put("message", "User updated successfully");
+                JsonObject result = new JsonObject()
+                    .put("success", true)
+                    .put("user_id", row.getUUID("user_id").toString())
+                    .put("username", row.getString("username"))
+                    .put("is_active", row.getBoolean("is_active"))
+                    .put("message", "User updated successfully");
 
-                    blockingPromise.complete(result);
-                })
-                .onFailure(cause ->
+                promise.complete(result);
+            })
+            .onFailure(cause ->
+            {
+                logger.error("Failed to update user", cause);
+
+                if (cause.getMessage().contains("duplicate key"))
                 {
-                    logger.error("Failed to update user", cause);
+                    promise.fail(new IllegalArgumentException("Username already exists"));
+                }
+                else
+                {
+                    promise.fail(cause);
+                }
+            });
 
-                    if (cause.getMessage().contains("duplicate key"))
-                    {
-                        blockingPromise.fail(new IllegalArgumentException("Username already exists"));
-                    }
-                    else
-                    {
-                        blockingPromise.fail(cause);
-                    }
-                });
-        }, resultHandler);
+        return promise.future();
     }
 
     /**
      * Delete a user
      *
      * @param userId User ID
-     * @param resultHandler Handler for the async result
+     * @return Future containing JsonObject with deletion result
      */
     @Override
-    public void userDelete(String userId, Handler<AsyncResult<JsonObject>> resultHandler)
+    public Future<JsonObject> userDelete(String userId)
     {
-        vertx.executeBlocking(blockingPromise ->
-        {
-            String sql = """
-                DELETE FROM users
-                WHERE user_id = $1
-                RETURNING user_id, username
-                """;
+        Promise<JsonObject> promise = Promise.promise();
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(userId)))
-                .onSuccess(rows ->
+        String sql = """
+            DELETE FROM users
+            WHERE user_id = $1
+            RETURNING user_id, username
+            """;
+
+        pgPool.preparedQuery(sql)
+            .execute(Tuple.of(UUID.fromString(userId)))
+            .onSuccess(rows ->
+            {
+                if (rows.size() == 0)
                 {
-                    if (rows.size() == 0)
-                    {
-                        blockingPromise.fail(new IllegalArgumentException("User not found"));
+                    promise.fail(new IllegalArgumentException("User not found"));
 
-                        return;
-                    }
+                    return;
+                }
 
-                    Row row = rows.iterator().next();
+                Row row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
-                        .put("success", true)
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("message", "User deleted successfully");
+                JsonObject result = new JsonObject()
+                    .put("success", true)
+                    .put("user_id", row.getUUID("user_id").toString())
+                    .put("username", row.getString("username"))
+                    .put("message", "User deleted successfully");
 
-                    blockingPromise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to delete user", cause);
+                promise.complete(result);
+            })
+            .onFailure(cause ->
+            {
+                logger.error("Failed to delete user", cause);
 
-                    blockingPromise.fail(cause);
-                });
-        }, resultHandler);
+                promise.fail(cause);
+            });
+
+        return promise.future();
     }
 
     /**
@@ -317,110 +310,110 @@ public class UserServiceImpl implements UserService
      *
      * @param username Username
      * @param password Password
-     * @param resultHandler Handler for the async result
+     * @return Future containing JsonObject with authentication result
      */
     @Override
-    public void userAuthenticate(String username, String password, Handler<AsyncResult<JsonObject>> resultHandler)
+    public Future<JsonObject> userAuthenticate(String username, String password)
     {
+        Promise<JsonObject> promise = Promise.promise();
 
-        vertx.executeBlocking(blockingPromise ->
-        {
-            String sql = """
-                SELECT user_id, username, password_hash, is_active
-                FROM users
-                WHERE username = $1 AND is_active = true
-                """;
+        String sql = """
+            SELECT user_id, username, password_hash, is_active
+            FROM users
+            WHERE username = $1 AND is_active = true
+            """;
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(username))
-                .onSuccess(rows ->
+        pgPool.preparedQuery(sql)
+            .execute(Tuple.of(username))
+            .onSuccess(rows ->
+            {
+                if (rows.size() == 0)
                 {
-                    if (rows.size() == 0)
-                    {
-                        blockingPromise.complete(new JsonObject()
-                            .put("authenticated", false)
-                            .put("message", "Invalid username or password"));
+                    promise.complete(new JsonObject()
+                        .put("authenticated", false)
+                        .put("message", "Invalid username or password"));
 
-                        return;
-                    }
+                    return;
+                }
 
-                    Row row = rows.iterator().next();
+                Row row = rows.iterator().next();
 
-                    String storedPasswordHash = row.getString("password_hash");
+                String storedPasswordHash = row.getString("password_hash");
 
-                    if (PasswordUtil.verifyPassword(password, storedPasswordHash))
-                    {
-                        JsonObject result = new JsonObject()
-                            .put("authenticated", true)
-                            .put("user_id", row.getUUID("user_id").toString())
-                            .put("username", row.getString("username"))
-                            .put("is_active", row.getBoolean("is_active"))
-                            .put("message", "Authentication successful");
-
-                        blockingPromise.complete(result);
-                    }
-                    else
-                    {
-                        blockingPromise.complete(new JsonObject()
-                            .put("authenticated", false)
-                            .put("message", "Invalid username or password"));
-                    }
-                })
-                .onFailure(cause ->
+                if (PasswordUtil.verifyPassword(password, storedPasswordHash))
                 {
-                    logger.error("Failed to authenticate user", cause);
+                    JsonObject result = new JsonObject()
+                        .put("authenticated", true)
+                        .put("user_id", row.getUUID("user_id").toString())
+                        .put("username", row.getString("username"))
+                        .put("is_active", row.getBoolean("is_active"))
+                        .put("message", "Authentication successful");
 
-                    blockingPromise.fail(cause);
-                });
-        }, resultHandler);
+                    promise.complete(result);
+                }
+                else
+                {
+                    promise.complete(new JsonObject()
+                        .put("authenticated", false)
+                        .put("message", "Invalid username or password"));
+                }
+            })
+            .onFailure(cause ->
+            {
+                logger.error("Failed to authenticate user", cause);
+
+                promise.fail(cause);
+            });
+
+        return promise.future();
     }
 
     /**
      * Get user by ID
      *
      * @param userId User ID
-     * @param resultHandler Handler for the async result
+     * @return Future containing JsonObject with user data or not found
      */
     @Override
-    public void userGetById(String userId, Handler<AsyncResult<JsonObject>> resultHandler)
+    public Future<JsonObject> userGetById(String userId)
     {
+        Promise<JsonObject> promise = Promise.promise();
 
-        vertx.executeBlocking(blockingPromise ->
-        {
-            String sql = """
-                SELECT user_id, username, is_active
-                FROM users
-                WHERE user_id = $1
-                """;
+        String sql = """
+            SELECT user_id, username, is_active
+            FROM users
+            WHERE user_id = $1
+            """;
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(userId)))
-                .onSuccess(rows ->
+        pgPool.preparedQuery(sql)
+            .execute(Tuple.of(UUID.fromString(userId)))
+            .onSuccess(rows ->
+            {
+                if (rows.size() == 0)
                 {
-                    if (rows.size() == 0)
-                    {
-                        blockingPromise.complete(new JsonObject().put("found", false));
+                    promise.complete(new JsonObject().put("found", false));
 
-                        return;
-                    }
+                    return;
+                }
 
-                    Row row = rows.iterator().next();
+                Row row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
-                        .put("found", true)
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("is_active", row.getBoolean("is_active"));
+                JsonObject result = new JsonObject()
+                    .put("found", true)
+                    .put("user_id", row.getUUID("user_id").toString())
+                    .put("username", row.getString("username"))
+                    .put("is_active", row.getBoolean("is_active"));
 
-                    blockingPromise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get user by ID", cause);
+                promise.complete(result);
+            })
+            .onFailure(cause ->
+            {
+                logger.error("Failed to get user by ID", cause);
 
-                    blockingPromise.fail(cause);
-                });
-        }, resultHandler);
+                promise.fail(cause);
+            });
+
+        return promise.future();
     }
 
     /**
@@ -428,50 +421,50 @@ public class UserServiceImpl implements UserService
      *
      * @param userId User ID
      * @param isActive Active status
-     * @param resultHandler Handler for the async result
+     * @return Future containing JsonObject with update result
      */
     @Override
-    public void userSetActive(String userId, boolean isActive, Handler<AsyncResult<JsonObject>> resultHandler)
+    public Future<JsonObject> userSetActive(String userId, boolean isActive)
     {
+        Promise<JsonObject> promise = Promise.promise();
 
-        vertx.executeBlocking(blockingPromise ->
-        {
-            String sql = """
-                UPDATE users
-                SET is_active = $1
-                WHERE user_id = $2
-                RETURNING user_id, username, is_active
-                """;
+        String sql = """
+            UPDATE users
+            SET is_active = $1
+            WHERE user_id = $2
+            RETURNING user_id, username, is_active
+            """;
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(isActive, UUID.fromString(userId)))
-                .onSuccess(rows ->
+        pgPool.preparedQuery(sql)
+            .execute(Tuple.of(isActive, UUID.fromString(userId)))
+            .onSuccess(rows ->
+            {
+                if (rows.size() == 0)
                 {
-                    if (rows.size() == 0)
-                    {
-                        blockingPromise.fail(new IllegalArgumentException("User not found"));
+                    promise.fail(new IllegalArgumentException("User not found"));
 
-                        return;
-                    }
+                    return;
+                }
 
-                    Row row = rows.iterator().next();
+                Row row = rows.iterator().next();
 
-                    JsonObject result = new JsonObject()
-                        .put("success", true)
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("is_active", row.getBoolean("is_active"))
-                        .put("message", "User status updated successfully");
+                JsonObject result = new JsonObject()
+                    .put("success", true)
+                    .put("user_id", row.getUUID("user_id").toString())
+                    .put("username", row.getString("username"))
+                    .put("is_active", row.getBoolean("is_active"))
+                    .put("message", "User status updated successfully");
 
-                    blockingPromise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to update user status", cause);
+                promise.complete(result);
+            })
+            .onFailure(cause ->
+            {
+                logger.error("Failed to update user status", cause);
 
-                    blockingPromise.fail(cause);
-                });
-        }, resultHandler);
+                promise.fail(cause);
+            });
+
+        return promise.future();
     }
 
 }

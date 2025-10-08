@@ -6,7 +6,7 @@ import io.vertx.ext.web.RoutingContext;
 
 /**
  * ResponseUtil - HTTP Response Utility
- *
+
  * Provides consistent success response formatting across all APIs
  * - Success response formatting with data
  * - Standardized JSON structure

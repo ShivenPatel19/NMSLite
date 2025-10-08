@@ -2,10 +2,6 @@ package com.nmslite.utils;
 
 import javax.crypto.Cipher;
 
-import javax.crypto.KeyGenerator;
-
-import javax.crypto.SecretKey;
-
 import javax.crypto.spec.SecretKeySpec;
 
 import java.nio.charset.StandardCharsets;
@@ -13,8 +9,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 import java.security.NoSuchAlgorithmException;
-
-import java.security.SecureRandom;
 
 import java.util.Base64;
 

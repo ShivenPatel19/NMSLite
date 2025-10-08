@@ -1,7 +1,5 @@
 package com.nmslite.utils;
 
-import io.vertx.config.ConfigRetriever;
-
 import io.vertx.core.Future;
 
 import io.vertx.core.Promise;
@@ -34,11 +32,11 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * NetworkConnectivityUtil - Batch connectivity checks for Discovery and Polling
- *
+
  * Provides optimized batch methods for pre-checking device reachability:
  * - Batch fping check: Single fping process for multiple IPs (efficient)
  * - Batch port check: Parallel port checks for multiple IPs (fast)
- *
+
  * Used by both DiscoveryVerticle and PollingMetricsVerticle for pre-filtering
  * devices before sending to GoEngine.
  */
@@ -49,10 +47,10 @@ public class NetworkConnectivityUtil
 
     /**
      * Batch fping check for multiple IPs (EFFICIENT - single fping process)
-     *
+
      * Uses fping's batch mode: writes all IPs to stdin and reads results from stdout.
      * This is much more efficient than running individual fping processes.
-     *
+
      * 2-Level Timeout Hierarchy:
      * - Level 2: Per-IP timeout (tools.fping.timeout.seconds) - fping -t parameter
      * - Level 1: Batch operation timeout (fping.batch.blocking.timeout.seconds) - process.waitFor
@@ -81,7 +79,7 @@ public class NetworkConnectivityUtil
         // Level 1: Batch operation timeout (process.waitFor)
         int batchTimeoutSeconds = config.getInteger("fping.batch.blocking.timeout.seconds", 180);
 
-        vertx.executeBlocking(blockingPromise ->
+        vertx.executeBlocking(() ->
         {
             Map<String, Boolean> results = new HashMap<>();
 
@@ -114,9 +112,7 @@ public class NetworkConnectivityUtil
 
                     logger.warn("Batch fping timeout for {} IPs after {} seconds", ipAddresses.size(), batchTimeoutSeconds);
 
-                    blockingPromise.complete(results);
-
-                    return;
+                    return results;
                 }
 
                 // Read alive IPs from stdout
@@ -138,7 +134,7 @@ public class NetworkConnectivityUtil
                 logger.debug("Batch fping: {}/{} IPs reachable",
                     results.values().stream().filter(v -> v).count(), ipAddresses.size());
 
-                blockingPromise.complete(results);
+                return results;
 
             }
             catch (Exception exception)
@@ -151,19 +147,33 @@ public class NetworkConnectivityUtil
                     results.put(ip, false);
                 }
 
-                blockingPromise.complete(results);
+                return results;
             }
-        }, promise);
+        })
+        .onSuccess(promise::complete)
+        .onFailure(cause ->
+        {
+            logger.error("Batch fping executeBlocking failed", cause);
+
+            Map<String, Boolean> results = new HashMap<>();
+
+            for (String ip : ipAddresses)
+            {
+                results.put(ip, false);
+            }
+
+            promise.complete(results);
+        });
 
         return promise.future();
     }
 
     /**
      * Batch port check for multiple IPs (PARALLEL - concurrent checks)
-     *
+
      * Uses Java parallel streams to check multiple ports concurrently.
      * Much faster than sequential port checks.
-     *
+
      * 2-Level Timeout Hierarchy:
      * - Level 2: Per-socket timeout (tools.port.check.timeout.seconds)
      * - Level 1: Batch operation timeout (port.check.batch.blocking.timeout.seconds)
@@ -188,7 +198,7 @@ public class NetworkConnectivityUtil
         // Level 2: Per-socket timeout (TCP connection timeout)
         int perSocketTimeoutSeconds = config.getInteger("tools.port.check.timeout.seconds", 5);
 
-        vertx.executeBlocking(blockingPromise ->
+        vertx.executeBlocking(() ->
         {
             Map<String, Boolean> results = new HashMap<>();
 
@@ -220,9 +230,23 @@ public class NetworkConnectivityUtil
             logger.debug("Batch port check (port {}): {}/{} ports reachable",
                 port, results.values().stream().filter(v -> v).count(), ipAddresses.size());
 
-            blockingPromise.complete(results);
+            return results;
 
-        }, promise);
+        })
+        .onSuccess(promise::complete)
+        .onFailure(cause ->
+        {
+            logger.error("Batch port check executeBlocking failed", cause);
+
+            Map<String, Boolean> results = new HashMap<>();
+
+            for (String ip : ipAddresses)
+            {
+                results.put(ip, false);
+            }
+
+            promise.complete(results);
+        });
 
         return promise.future();
     }
