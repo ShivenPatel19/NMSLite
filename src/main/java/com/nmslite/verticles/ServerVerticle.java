@@ -74,6 +74,10 @@ public class ServerVerticle extends AbstractVerticle
 
     private DeviceHandler deviceHandler;
 
+    private MetricsHandler metricsHandler;
+
+    private AvailabilityHandler availabilityHandler;
+
     private AuthenticationMiddleware authMiddleware;
 
     /**
@@ -162,6 +166,10 @@ public class ServerVerticle extends AbstractVerticle
         this.discoveryProfileHandler = new DiscoveryProfileHandler(vertx, discoveryProfileService, deviceTypeService, credentialProfileService);
 
         this.deviceHandler = new DeviceHandler(deviceService, deviceTypeService);
+
+        this.metricsHandler = new MetricsHandler(metricsService);
+
+        this.availabilityHandler = new AvailabilityHandler(availabilityService);
     }
 
     /**
@@ -191,6 +199,10 @@ public class ServerVerticle extends AbstractVerticle
         setupDiscoveryRoutes(router);
 
         setupDeviceRoutes(router);
+
+        setupMetricsRoutes(router);
+
+        setupAvailabilityRoutes(router);
 
         // 404 handler for unmatched routes
         router.route("/*").handler(ctx ->
@@ -289,6 +301,28 @@ public class ServerVerticle extends AbstractVerticle
 
         // Device Types (Read-Only) - Authentication required
         router.get("/api/device-types").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDeviceTypes);
+    }
+
+    /**
+     * Sets up metrics-related routes.
+     *
+     * @param router Router instance to add routes to
+     */
+    private void setupMetricsRoutes(Router router)
+    {
+        // Metrics API (Authentication required)
+        router.get("/api/metrics/:deviceId").handler(authMiddleware.requireAuthentication()).handler(metricsHandler::getDeviceMetrics);
+    }
+
+    /**
+     * Sets up availability-related routes.
+     *
+     * @param router Router instance to add routes to
+     */
+    private void setupAvailabilityRoutes(Router router)
+    {
+        // Availability API (Authentication required)
+        router.get("/api/availability/:deviceId").handler(authMiddleware.requireAuthentication()).handler(availabilityHandler::getDeviceAvailability);
     }
 
     /**

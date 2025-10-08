@@ -20,21 +20,15 @@ import org.slf4j.Logger;
 
 import org.slf4j.LoggerFactory;
 
-import java.time.LocalDateTime;
-
-import java.time.format.DateTimeFormatter;
-
 import java.util.UUID;
 
 /**
  * MetricsServiceImpl - Implementation of MetricsService
 
  * Provides metrics management operations including:
- * - Metrics CRUD operations
- * - Time-series data management
- * - Device performance tracking
- * - Metrics aggregation and cleanup
- * - Dashboard data preparation
+ * - Metrics creation for polling
+ * - Metrics retrieval by device
+ * - Metrics cleanup operations
  */
 public class MetricsServiceImpl implements MetricsService
 {
@@ -54,7 +48,7 @@ public class MetricsServiceImpl implements MetricsService
     }
 
     /**
-     * Create new metrics record
+     * Create new metrics record (used by PollingMetricsVerticle)
      *
      * @param metricsData Metrics data
      * @return Future containing JsonObject with creation result
@@ -85,9 +79,6 @@ public class MetricsServiceImpl implements MetricsService
         Long diskUsed = metricsData.getLong("disk_used_bytes");
 
         Long diskFree = metricsData.getLong("disk_free_bytes");
-
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
 
         String sql = """
                 INSERT INTO metrics (device_id, duration_ms, cpu_usage_percent, memory_usage_percent,
@@ -146,187 +137,69 @@ public class MetricsServiceImpl implements MetricsService
     }
 
     /**
-     * Get paginated list of metrics
+     * Get all metrics for a specific device ordered by timestamp DESC (latest to old)
      *
-     * @param page Page number
-     * @param pageSize Page size
-     * @param deviceId Optional device ID filter
-     * @return Future containing JsonObject with paginated metrics data
+     * @param deviceId Device ID
+     * @return Future containing JsonArray of all metrics for the device
      */
     @Override
-    public Future<JsonObject> metricsList(int page, int pageSize, String deviceId)
+    public Future<JsonArray> metricsGetAllByDevice(String deviceId)
     {
-        Promise<JsonObject> promise = Promise.promise();
-
-        // Build SQL with optional device filter and ensure device is active
-        StringBuilder sqlBuilder = new StringBuilder("""
-                SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
-                       m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
-                       m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
-                       m.disk_free_bytes, d.device_name, d.ip_address
-                FROM metrics m
-                JOIN devices d ON m.device_id = d.device_id
-                WHERE d.is_deleted = false
-                """);
-
-        JsonArray params = new JsonArray();
-
-        int paramIndex = 1;
-
-        if (deviceId != null)
-        {
-            sqlBuilder.append(" AND m.device_id = $").append(paramIndex++);
-
-            params.add(UUID.fromString(deviceId));
-        }
-
-        sqlBuilder.append(" ORDER BY m.timestamp DESC");
-
-        sqlBuilder.append(" LIMIT $").append(paramIndex++);
-
-        sqlBuilder.append(" OFFSET $").append(paramIndex);
-
-        params.add(pageSize);
-
-        params.add(page * pageSize);
-
-        // Count query for pagination
-        StringBuilder countSqlBuilder = new StringBuilder("""
-                SELECT COUNT(*) as total
-                FROM metrics m
-                JOIN devices d ON m.device_id = d.device_id
-                WHERE d.is_deleted = false
-                """);
-
-        JsonArray countParams = new JsonArray();
-
-        if (deviceId != null)
-        {
-            countSqlBuilder.append(" AND m.device_id = $1");
-
-            countParams.add(UUID.fromString(deviceId));
-        }
-
-        // Execute count query first
-        pgPool.preparedQuery(countSqlBuilder.toString())
-                .execute(!countParams.isEmpty() ? Tuple.from(countParams.getList()) : Tuple.tuple())
-                .onSuccess(countRows ->
-                {
-                    long total = countRows.iterator().next().getLong("total");
-
-                    // Execute main query
-                    pgPool.preparedQuery(sqlBuilder.toString())
-                            .execute(Tuple.from(params.getList()))
-                            .onSuccess(rows ->
-                            {
-                                JsonArray metrics = new JsonArray();
-
-                                for (Row row : rows)
-                                {
-                                    JsonObject metric = new JsonObject()
-                                            .put("metric_id", row.getUUID("metric_id").toString())
-                                            .put("device_id", row.getUUID("device_id").toString())
-                                            .put("device_name", row.getString("device_name"))
-                                            .put("ip_address", row.getValue("ip_address").toString())
-                                            .put("timestamp", row.getLocalDateTime("timestamp").toString())
-                                            .put("duration_ms", row.getInteger("duration_ms"))
-                                            .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
-                                            .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
-                                            .put("memory_total_bytes", row.getLong("memory_total_bytes"))
-                                            .put("memory_used_bytes", row.getLong("memory_used_bytes"))
-                                            .put("memory_free_bytes", row.getLong("memory_free_bytes"))
-                                            .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
-                                            .put("disk_total_bytes", row.getLong("disk_total_bytes"))
-                                            .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                            .put("disk_free_bytes", row.getLong("disk_free_bytes"));
-
-                                    metrics.add(metric);
-                                }
-
-                                JsonObject result = new JsonObject()
-                                        .put("metrics", metrics)
-                                        .put("pagination", new JsonObject()
-                                                .put("page", page)
-                                                .put("pageSize", pageSize)
-                                                .put("total", total)
-                                                .put("totalPages", (int) Math.ceil((double) total / pageSize)));
-
-                                promise.complete(result);
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to get metrics list", cause);
-
-                                promise.fail(cause);
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to count metrics", cause);
-
-                    promise.fail(cause);
-                });
-
-        return promise.future();
-    }
-
-    /**
-     * Get metric by ID
-     *
-     * @param metricId Metric ID
-     * @return Future containing JsonObject with metric data or not found
-     */
-    @Override
-    public Future<JsonObject> metricsGet(String metricId)
-    {
-        Promise<JsonObject> promise = Promise.promise();
+        Promise<JsonArray> promise = Promise.promise();
 
         String sql = """
                 SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
                        m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
                        m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
-                       m.disk_free_bytes, d.device_name, d.ip_address
+                       m.disk_free_bytes,
+                       d.device_name, d.ip_address::text as ip_address, d.device_type
                 FROM metrics m
                 JOIN devices d ON m.device_id = d.device_id
-                WHERE m.metric_id = $1 AND d.is_deleted = false
+                WHERE m.device_id = $1 AND d.is_deleted = false
+                ORDER BY m.timestamp DESC
                 """;
 
         pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(metricId)))
+                .execute(Tuple.of(UUID.fromString(deviceId)))
                 .onSuccess(rows ->
                 {
-                    if (rows.size() == 0)
-                    {
-                        promise.complete(new JsonObject().put("found", false));
+                    JsonArray metrics = new JsonArray();
 
-                        return;
+                    for (Row row : rows)
+                    {
+                        String ipAddr = row.getString("ip_address");
+
+                        if (ipAddr != null && ipAddr.contains("/"))
+                        {
+                            ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
+                        }
+
+                        JsonObject metric = new JsonObject()
+                                .put("metric_id", row.getUUID("metric_id").toString())
+                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("device_name", row.getString("device_name"))
+                                .put("ip_address", ipAddr)
+                                .put("device_type", row.getString("device_type"))
+                                .put("timestamp", row.getLocalDateTime("timestamp").toString())
+                                .put("duration_ms", row.getInteger("duration_ms"))
+                                .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
+                                .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
+                                .put("memory_total_bytes", row.getLong("memory_total_bytes"))
+                                .put("memory_used_bytes", row.getLong("memory_used_bytes"))
+                                .put("memory_free_bytes", row.getLong("memory_free_bytes"))
+                                .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
+                                .put("disk_total_bytes", row.getLong("disk_total_bytes"))
+                                .put("disk_used_bytes", row.getLong("disk_used_bytes"))
+                                .put("disk_free_bytes", row.getLong("disk_free_bytes"));
+
+                        metrics.add(metric);
                     }
 
-                    Row row = rows.iterator().next();
-
-                    JsonObject result = new JsonObject()
-                            .put("found", true)
-                            .put("metric_id", row.getUUID("metric_id").toString())
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("device_name", row.getString("device_name"))
-                            .put("ip_address", row.getValue("ip_address").toString())
-                            .put("timestamp", row.getLocalDateTime("timestamp").toString())
-                            .put("duration_ms", row.getInteger("duration_ms"))
-                            .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
-                            .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
-                            .put("memory_total_bytes", row.getLong("memory_total_bytes"))
-                            .put("memory_used_bytes", row.getLong("memory_used_bytes"))
-                            .put("memory_free_bytes", row.getLong("memory_free_bytes"))
-                            .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
-                            .put("disk_total_bytes", row.getLong("disk_total_bytes"))
-                            .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                            .put("disk_free_bytes", row.getLong("disk_free_bytes"));
-
-                    promise.complete(result);
+                    promise.complete(metrics);
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("Failed to get metric by ID", cause);
+                    logger.error("Failed to get metrics for device: {}", deviceId, cause);
 
                     promise.fail(cause);
                 });
@@ -335,54 +208,7 @@ public class MetricsServiceImpl implements MetricsService
     }
 
     /**
-     * Delete metrics older than specified days
-     *
-     * @param olderThanDays Number of days
-     * @return Future containing JsonObject with cleanup result
-     */
-    @Override
-    public Future<JsonObject> metricsDeleteOlderThan(int olderThanDays)
-    {
-        Promise<JsonObject> promise = Promise.promise();
-
-        if (olderThanDays <= 0)
-        {
-            promise.fail(new IllegalArgumentException("Days must be positive"));
-
-            return promise.future();
-        }
-
-        String sql = """
-                DELETE FROM metrics
-                WHERE timestamp < CURRENT_TIMESTAMP - INTERVAL '%d days'
-                """.formatted(olderThanDays);
-
-        pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
-                {
-                    int deletedCount = rows.rowCount();
-
-                    JsonObject result = new JsonObject()
-                            .put("success", true)
-                            .put("deleted_count", deletedCount)
-                            .put("older_than_days", olderThanDays)
-                            .put("message", "Metrics cleanup completed successfully");
-
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to delete old metrics", cause);
-
-                    promise.fail(cause);
-                });
-
-        return promise.future();
-    }
-
-    /**
-     * Delete all metrics for a device
+     * Delete all metrics for a device (when device is deleted)
      *
      * @param deviceId Device ID
      * @return Future containing JsonObject with deletion result
@@ -421,361 +247,5 @@ public class MetricsServiceImpl implements MetricsService
         return promise.future();
     }
 
-    /**
-     * Get paginated list of metrics for a device
-     *
-     * @param deviceId Device ID
-     * @param page Page number
-     * @param pageSize Page size
-     * @return Future containing JsonObject with paginated device metrics
-     */
-    @Override
-    public Future<JsonObject> metricsListByDevice(String deviceId, int page, int pageSize)
-    {
-        Promise<JsonObject> promise = Promise.promise();
-
-        // First verify device exists and is active
-        String deviceCheckSql = """
-                SELECT device_name, ip_address
-                FROM devices
-                WHERE device_id = $1 AND is_deleted = false
-                """;
-
-        pgPool.preparedQuery(deviceCheckSql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(deviceRows ->
-                {
-                    if (deviceRows.size() == 0)
-                    {
-                        promise.fail(new IllegalArgumentException("Device not found or deleted"));
-
-                        return;
-                    }
-
-                    Row deviceRow = deviceRows.iterator().next();
-
-                    String deviceName = deviceRow.getString("device_name");
-
-                    String ipAddress = deviceRow.getValue("ip_address").toString();
-
-                    // Count query
-                    String countSql = """
-                            SELECT COUNT(*) as total
-                            FROM metrics
-                            WHERE device_id = $1
-                            """;
-
-                    pgPool.preparedQuery(countSql)
-                            .execute(Tuple.of(UUID.fromString(deviceId)))
-                            .onSuccess(countRows ->
-                            {
-                                long total = countRows.iterator().next().getLong("total");
-
-                                // Main query
-                                String sql = """
-                                        SELECT metric_id, device_id, timestamp, duration_ms,
-                                               cpu_usage_percent, memory_usage_percent, memory_total_bytes, memory_used_bytes,
-                                               memory_free_bytes, disk_usage_percent, disk_total_bytes, disk_used_bytes,
-                                               disk_free_bytes
-                                        FROM metrics
-                                        WHERE device_id = $1
-                                        ORDER BY timestamp DESC
-                                        LIMIT $2 OFFSET $3
-                                        """;
-
-                                pgPool.preparedQuery(sql)
-                                        .execute(Tuple.of(UUID.fromString(deviceId), pageSize, page * pageSize))
-                                        .onSuccess(rows ->
-                                        {
-                                            JsonArray metrics = new JsonArray();
-
-                                            for (Row row : rows)
-                                            {
-                                                JsonObject metric = new JsonObject()
-                                                        .put("metric_id", row.getUUID("metric_id").toString())
-                                                        .put("device_id", row.getUUID("device_id").toString())
-                                                        .put("device_name", deviceName)
-                                                        .put("ip_address", ipAddress)
-                                                        .put("timestamp", row.getLocalDateTime("timestamp").toString())
-                                                        .put("duration_ms", row.getInteger("duration_ms"))
-                                                        .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
-                                                        .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
-                                                        .put("memory_total_bytes", row.getLong("memory_total_bytes"))
-                                                        .put("memory_used_bytes", row.getLong("memory_used_bytes"))
-                                                        .put("memory_free_bytes", row.getLong("memory_free_bytes"))
-                                                        .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
-                                                        .put("disk_total_bytes", row.getLong("disk_total_bytes"))
-                                                        .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                                        .put("disk_free_bytes", row.getLong("disk_free_bytes"));
-
-                                                metrics.add(metric);
-                                            }
-
-                                            JsonObject result = new JsonObject()
-                                                    .put("device_id", deviceId)
-                                                    .put("device_name", deviceName)
-                                                    .put("ip_address", ipAddress)
-                                                    .put("metrics", metrics)
-                                                    .put("pagination", new JsonObject()
-                                                            .put("page", page)
-                                                            .put("pageSize", pageSize)
-                                                            .put("total", total)
-                                                            .put("totalPages", (int) Math.ceil((double) total / pageSize)));
-
-                                            promise.complete(result);
-                                        })
-                                        .onFailure(cause ->
-                                        {
-                                            logger.error("Failed to get device metrics", cause);
-
-                                            promise.fail(cause);
-                                        });
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to count device metrics", cause);
-
-                                promise.fail(cause);
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to verify device", cause);
-
-                    promise.fail(cause);
-                });
-
-        return promise.future();
-    }
-
-    /**
-     * Get latest metric for a device
-     *
-     * @param deviceId Device ID
-     * @return Future containing JsonObject with latest metric data or not found
-     */
-    @Override
-    public Future<JsonObject> metricsGetLatestByDevice(String deviceId)
-    {
-        Promise<JsonObject> promise = Promise.promise();
-
-        String sql = """
-                SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
-                       m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
-                       m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
-                       m.disk_free_bytes, d.device_name, d.ip_address
-                FROM metrics m
-                JOIN devices d ON m.device_id = d.device_id
-                WHERE m.device_id = $1 AND d.is_deleted = false
-                ORDER BY m.timestamp DESC
-                LIMIT 1
-                """;
-
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(rows ->
-                {
-                    if (rows.size() == 0)
-                    {
-                        promise.complete(new JsonObject().put("found", false));
-
-                        return;
-                    }
-
-                    Row row = rows.iterator().next();
-
-                    JsonObject result = new JsonObject()
-                            .put("found", true)
-                            .put("metric_id", row.getUUID("metric_id").toString())
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("device_name", row.getString("device_name"))
-                            .put("ip_address", row.getValue("ip_address").toString())
-                            .put("timestamp", row.getLocalDateTime("timestamp").toString())
-                            .put("duration_ms", row.getInteger("duration_ms"))
-                            .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
-                            .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
-                            .put("memory_total_bytes", row.getLong("memory_total_bytes"))
-                            .put("memory_used_bytes", row.getLong("memory_used_bytes"))
-                            .put("memory_free_bytes", row.getLong("memory_free_bytes"))
-                            .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
-                            .put("disk_total_bytes", row.getLong("disk_total_bytes"))
-                            .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                            .put("disk_free_bytes", row.getLong("disk_free_bytes"));
-
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get latest metric for device", cause);
-
-                    promise.fail(cause);
-                });
-
-        return promise.future();
-    }
-
-    /**
-     * Get latest metrics for all monitoring-enabled devices
-     *
-     * @return Future containing JsonArray of latest metrics for all active devices
-     */
-    @Override
-    public Future<JsonArray> metricsGetLatestAllDevices()
-    {
-        Promise<JsonArray> promise = Promise.promise();
-
-        String sql = """
-                SELECT DISTINCT ON (d.device_id)
-                       m.metric_id, m.device_id, m.timestamp, m.duration_ms,
-                       m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
-                       m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
-                       m.disk_free_bytes, d.device_name, d.ip_address, d.device_type
-                FROM devices d
-                LEFT JOIN metrics m ON d.device_id = m.device_id
-                WHERE d.is_deleted = false AND d.is_monitoring_enabled = true
-                ORDER BY d.device_id, m.timestamp DESC NULLS LAST
-                """;
-
-        pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
-                {
-                    JsonArray metrics = new JsonArray();
-
-                    for (Row row : rows)
-                    {
-                        UUID deviceId = row.getUUID("device_id");
-
-                        if (deviceId == null)
-                        {
-                            continue; // Skip rows with null device_id
-                        }
-
-                        JsonObject metric = new JsonObject()
-                                .put("device_id", deviceId.toString())
-                                .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getValue("ip_address").toString())
-                                .put("device_type", row.getString("device_type"));
-
-                        // Add metric data if available
-                        if (row.getUUID("metric_id") != null)
-                        {
-                            metric.put("metric_id", row.getUUID("metric_id").toString())
-                                  .put("timestamp", row.getLocalDateTime("timestamp").toString())
-                                  .put("duration_ms", row.getInteger("duration_ms"))
-                                  .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
-                                  .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
-                                  .put("memory_total_bytes", row.getLong("memory_total_bytes"))
-                                  .put("memory_used_bytes", row.getLong("memory_used_bytes"))
-                                  .put("memory_free_bytes", row.getLong("memory_free_bytes"))
-                                  .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
-                                  .put("disk_total_bytes", row.getLong("disk_total_bytes"))
-                                  .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                  .put("disk_free_bytes", row.getLong("disk_free_bytes"))
-                                  .put("has_metrics", true);
-                        }
-                        else
-                        {
-                            metric.put("has_metrics", false)
-                                  .put("message", "No metrics data available");
-                        }
-
-                        metrics.add(metric);
-                    }
-
-                    promise.complete(metrics);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get latest metrics for all devices", cause);
-
-                    promise.fail(cause);
-                });
-
-        return promise.future();
-    }
-
-    /**
-     * Get metrics for a device within a time range
-     *
-     * @param deviceId Device ID
-     * @param startTime Start time (ISO 8601 format)
-     * @param endTime End time (ISO 8601 format)
-     * @return Future containing JsonArray of metrics within time range
-     */
-    @Override
-    public Future<JsonArray> metricsGetByDeviceTimeRange(String deviceId, String startTime, String endTime)
-    {
-        Promise<JsonArray> promise = Promise.promise();
-
-        try
-        {
-            // Parse and validate time strings
-            LocalDateTime start = LocalDateTime.parse(startTime, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-
-            LocalDateTime end = LocalDateTime.parse(endTime, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-
-            if (start.isAfter(end))
-            {
-                promise.fail(new IllegalArgumentException("Start time must be before end time"));
-
-                return promise.future();
-            }
-
-            String sql = """
-                    SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
-                           m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
-                           m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
-                           m.disk_free_bytes, d.device_name, d.ip_address
-                    FROM metrics m
-                    JOIN devices d ON m.device_id = d.device_id
-                    WHERE m.device_id = $1 AND d.is_deleted = false
-                    AND m.timestamp >= $2 AND m.timestamp <= $3
-                    ORDER BY m.timestamp ASC
-                    """;
-
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId), start, end))
-                    .onSuccess(rows ->
-                    {
-                        JsonArray metrics = new JsonArray();
-
-                        for (Row row : rows)
-                        {
-                            JsonObject metric = new JsonObject()
-                                    .put("metric_id", row.getUUID("metric_id").toString())
-                                    .put("device_id", row.getUUID("device_id").toString())
-                                    .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getValue("ip_address").toString())
-                                    .put("timestamp", row.getLocalDateTime("timestamp").toString())
-                                    .put("duration_ms", row.getInteger("duration_ms"))
-                                    .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
-                                    .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
-                                    .put("memory_total_bytes", row.getLong("memory_total_bytes"))
-                                    .put("memory_used_bytes", row.getLong("memory_used_bytes"))
-                                    .put("memory_free_bytes", row.getLong("memory_free_bytes"))
-                                    .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
-                                    .put("disk_total_bytes", row.getLong("disk_total_bytes"))
-                                    .put("disk_used_bytes", row.getLong("disk_used_bytes"))
-                                    .put("disk_free_bytes", row.getLong("disk_free_bytes"));
-
-                            metrics.add(metric);
-                        }
-
-                        promise.complete(metrics);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get metrics by time range", cause);
-
-                        promise.fail(cause);
-                    });
-        }
-        catch (Exception exception)
-        {
-            promise.fail(new IllegalArgumentException("Invalid time format. Use ISO 8601 format (yyyy-MM-ddTHH:mm:ss)"));
-        }
-
-        return promise.future();
-    }
 }
+

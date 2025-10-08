@@ -6,8 +6,6 @@ import io.vertx.core.Future;
 
 import io.vertx.core.Promise;
 
-import io.vertx.core.json.JsonArray;
-
 import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Pool;
@@ -28,10 +26,9 @@ import java.util.UUID;
  * AvailabilityServiceImpl - Implementation of AvailabilityService
 
  * Provides device availability status operations including:
- * - Current device availability status tracking
- * - Real-time status updates
- * - Device status monitoring
- * - Dashboard status views
+ * - Current device availability status retrieval
+ * - Real-time status updates for polling
+ * - Availability cleanup operations
  */
 public class AvailabilityServiceImpl implements AvailabilityService
 {
@@ -51,221 +48,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
     }
 
     /**
-     * Get list of all device availability statuses
-     *
-     * @return Future containing JsonArray of device availability statuses
-     */
-    @Override
-    public Future<JsonArray> availabilityListAll()
-    {
-        Promise<JsonArray> promise = Promise.promise();
-
-        String sql = """
-                SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
-                       da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
-                       da.current_status, da.status_since, da.updated_at,
-                       d.device_name, d.ip_address, d.device_type, d.is_monitoring_enabled
-                FROM device_availability da
-                JOIN devices d ON da.device_id = d.device_id
-                WHERE d.is_deleted = false
-                ORDER BY d.device_name
-                """;
-
-        pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
-                {
-                    JsonArray availabilities = new JsonArray();
-
-                    for (Row row : rows)
-                    {
-                        JsonObject availability = new JsonObject()
-                                .put("device_id", row.getUUID("device_id").toString())
-                                .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getValue("ip_address").toString())
-                                .put("device_type", row.getString("device_type"))
-                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                .put("total_checks", row.getInteger("total_checks"))
-                                .put("successful_checks", row.getInteger("successful_checks"))
-                                .put("failed_checks", row.getInteger("failed_checks"))
-                                .put("availability_percent", row.getBigDecimal("availability_percent"))
-                                .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
-                                    row.getLocalDateTime("last_check_time").toString() : null)
-                                .put("last_success_time", row.getLocalDateTime("last_success_time") != null ?
-                                    row.getLocalDateTime("last_success_time").toString() : null)
-                                .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ?
-                                    row.getLocalDateTime("last_failure_time").toString() : null)
-                                .put("current_status", row.getString("current_status"))
-                                .put("status_since", row.getLocalDateTime("status_since") != null ?
-                                    row.getLocalDateTime("status_since").toString() : null)
-                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                    row.getLocalDateTime("updated_at").toString() : null);
-
-                        availabilities.add(availability);
-                    }
-
-                    promise.complete(availabilities);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get all device availability statuses", cause);
-
-                    promise.fail(cause);
-                });
-
-        return promise.future();
-    }
-
-    /**
-     * Create or update device availability status
-     *
-     * @param availabilityData Availability data
-     * @return Future containing JsonObject with upsert result
-     */
-    @Override
-    public Future<JsonObject> availabilityCreateOrUpdate(JsonObject availabilityData)
-    {
-        Promise<JsonObject> promise = Promise.promise();
-
-        String deviceId = availabilityData.getString("device_id");
-
-        String status = availabilityData.getString("status");
-
-        Long responseTime = availabilityData.getLong("response_time");
-
-        LocalDateTime checkedAt = availabilityData.getString("checked_at") != null ?
-            LocalDateTime.parse(availabilityData.getString("checked_at")) : LocalDateTime.now();
-
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
-
-        // Normalize status to lowercase
-        String normalizedStatus = status.toLowerCase();
-
-        if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down"))
-        {
-            promise.fail(new IllegalArgumentException("Status must be 'up' or 'down'"));
-
-            return promise.future();
-        }
-
-        // First verify device exists and is active
-        String deviceCheckSql = """
-                SELECT device_name, ip_address
-                FROM devices
-                WHERE device_id = $1 AND is_deleted = false
-                """;
-
-        pgPool.preparedQuery(deviceCheckSql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(deviceRows ->
-                {
-                    if (deviceRows.size() == 0)
-                    {
-                        promise.fail(new IllegalArgumentException("Device not found or deleted"));
-
-                        return;
-                    }
-
-                    Row deviceRow = deviceRows.iterator().next();
-
-                    String deviceName = deviceRow.getString("device_name");
-
-                    String ipAddress = deviceRow.getValue("ip_address").toString();
-
-                    // Upsert availability record
-                    String upsertSql = """
-                            INSERT INTO device_availability (device_id, total_checks, successful_checks, failed_checks,
-                                                            availability_percent, last_check_time, last_success_time,
-                                                            last_failure_time, current_status, status_since, updated_at)
-                            VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $5, $5)
-                            ON CONFLICT (device_id) DO UPDATE SET
-                                total_checks = device_availability.total_checks + 1,
-                                successful_checks = device_availability.successful_checks + $2,
-                                failed_checks = device_availability.failed_checks + $3,
-                                availability_percent = ROUND(
-                                    (device_availability.successful_checks + $2) * 100.0 /
-                                    (device_availability.total_checks + 1), 2
-                                ),
-                                last_check_time = $5,
-                                last_success_time = CASE WHEN $2 = 1 THEN $5 ELSE device_availability.last_success_time END,
-                                last_failure_time = CASE WHEN $3 = 1 THEN $5 ELSE device_availability.last_failure_time END,
-                                current_status = CASE
-                                    WHEN device_availability.current_status != $8 THEN $8
-                                    ELSE device_availability.current_status
-                                END,
-                                status_since = CASE
-                                    WHEN device_availability.current_status != $8 THEN $5
-                                    ELSE device_availability.status_since
-                                END
-                            RETURNING device_id, total_checks, successful_checks, failed_checks, availability_percent,
-                                     last_check_time, current_status, status_since, updated_at
-                            """;
-
-                    int successfulIncrement = normalizedStatus.equals("up") ? 1 : 0;
-
-                    int failedIncrement = normalizedStatus.equals("down") ? 1 : 0;
-
-                    double initialAvailability = normalizedStatus.equals("up") ? 100.0 : 0.0;
-
-                    LocalDateTime successTime = normalizedStatus.equals("up") ? checkedAt : null;
-
-                    LocalDateTime failureTime = normalizedStatus.equals("down") ? checkedAt : null;
-
-                    pgPool.preparedQuery(upsertSql)
-                            .execute(Tuple.of(UUID.fromString(deviceId), successfulIncrement, failedIncrement,
-                                            initialAvailability, checkedAt, successTime, failureTime, normalizedStatus))
-                            .onSuccess(rows ->
-                            {
-                                Row row = rows.iterator().next();
-
-                                JsonObject result = new JsonObject()
-                                        .put("success", true)
-                                        .put("device_id", row.getUUID("device_id").toString())
-                                        .put("device_name", deviceName)
-                                        .put("ip_address", ipAddress)
-                                        .put("total_checks", row.getInteger("total_checks"))
-                                        .put("successful_checks", row.getInteger("successful_checks"))
-                                        .put("failed_checks", row.getInteger("failed_checks"))
-                                        .put("availability_percent", row.getBigDecimal("availability_percent"))
-                                        .put("last_check_time", row.getLocalDateTime("last_check_time").toString())
-                                        .put("current_status", row.getString("current_status"))
-                                        .put("status_since", row.getLocalDateTime("status_since").toString())
-                                        .put("updated_at", row.getLocalDateTime("updated_at").toString())
-                                        .put("response_time", responseTime)
-                                        .put("message", "Device availability status updated successfully");
-
-                                promise.complete(result);
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to create or update availability", cause);
-
-                                if (cause.getMessage().contains("chk_availability_range"))
-                                {
-                                    promise.fail(new IllegalArgumentException("Availability percentage must be between 0 and 100"));
-                                }
-                                else if (cause.getMessage().contains("chk_checks_consistency"))
-                                {
-                                    promise.fail(new IllegalArgumentException("Check counts consistency error"));
-                                }
-                                else
-                                {
-                                    promise.fail(cause);
-                                }
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to verify device", cause);
-
-                    promise.fail(cause);
-                });
-
-        return promise.future();
-    }
-
-    /**
      * Get device availability by device ID
      *
      * @param deviceId Device ID
@@ -280,7 +62,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
                 SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
                        da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
                        da.current_status, da.status_since, da.updated_at,
-                       d.device_name, d.ip_address, d.device_type, d.is_monitoring_enabled
+                       d.device_name, d.ip_address::text as ip_address, d.device_type, d.is_monitoring_enabled
                 FROM device_availability da
                 JOIN devices d ON da.device_id = d.device_id
                 WHERE da.device_id = $1 AND d.is_deleted = false
@@ -299,11 +81,18 @@ public class AvailabilityServiceImpl implements AvailabilityService
 
                     Row row = rows.iterator().next();
 
+                    String ipAddr = row.getString("ip_address");
+
+                    if (ipAddr != null && ipAddr.contains("/"))
+                    {
+                        ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
+                    }
+
                     JsonObject result = new JsonObject()
                             .put("found", true)
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("device_name", row.getString("device_name"))
-                            .put("ip_address", row.getValue("ip_address").toString())
+                            .put("ip_address", ipAddr)
                             .put("device_type", row.getString("device_type"))
                             .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                             .put("total_checks", row.getInteger("total_checks"))
@@ -335,49 +124,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
     }
 
     /**
-     * Delete device availability by device ID
-     *
-     * @param deviceId Device ID
-     * @return Future containing JsonObject with deletion result
-     */
-    @Override
-    public Future<JsonObject> availabilityDeleteByDevice(String deviceId)
-    {
-        Promise<JsonObject> promise = Promise.promise();
-
-        String sql = """
-                DELETE FROM device_availability
-                WHERE device_id = $1
-                """;
-
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(rows ->
-                {
-                    int deletedCount = rows.rowCount();
-
-                    JsonObject result = new JsonObject()
-                            .put("success", true)
-                            .put("device_id", deviceId)
-                            .put("deleted", deletedCount > 0)
-                            .put("message", deletedCount > 0 ?
-                                "Device availability status deleted successfully" :
-                                "No availability status found for device");
-
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to delete device availability", cause);
-
-                    promise.fail(cause);
-                });
-
-        return promise.future();
-    }
-
-    /**
-     * Update device availability status
+     * Update device availability status (used by PollingMetricsVerticle)
      *
      * @param deviceId Device ID
      * @param status Device status (up/down)
@@ -388,9 +135,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
     public Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime)
     {
         Promise<JsonObject> promise = Promise.promise();
-
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
 
         // Normalize status to lowercase
         String normalizedStatus = status.toLowerCase();
@@ -404,7 +148,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
 
         // First verify device exists and is active
         String deviceCheckSql = """
-                SELECT device_name, ip_address
+                SELECT device_name, ip_address::text as ip_address
                 FROM devices
                 WHERE device_id = $1 AND is_deleted = false
                 """;
@@ -424,7 +168,11 @@ public class AvailabilityServiceImpl implements AvailabilityService
 
                     String deviceName = deviceRow.getString("device_name");
 
-                    String ipAddress = deviceRow.getValue("ip_address").toString();
+                    String ipAddressRaw = deviceRow.getString("ip_address");
+
+                    final String ipAddress = (ipAddressRaw != null && ipAddressRaw.contains("/"))
+                            ? ipAddressRaw.split("/")[0]  // Remove CIDR notation
+                            : ipAddressRaw;
 
                     LocalDateTime now = LocalDateTime.now();
 
@@ -505,4 +253,47 @@ public class AvailabilityServiceImpl implements AvailabilityService
         return promise.future();
     }
 
+    /**
+     * Delete device availability by device ID (when device is deleted)
+     *
+     * @param deviceId Device ID
+     * @return Future containing JsonObject with deletion result
+     */
+    @Override
+    public Future<JsonObject> availabilityDeleteByDevice(String deviceId)
+    {
+        Promise<JsonObject> promise = Promise.promise();
+
+        String sql = """
+                DELETE FROM device_availability
+                WHERE device_id = $1
+                """;
+
+        pgPool.preparedQuery(sql)
+                .execute(Tuple.of(UUID.fromString(deviceId)))
+                .onSuccess(rows ->
+                {
+                    int deletedCount = rows.rowCount();
+
+                    JsonObject result = new JsonObject()
+                            .put("success", true)
+                            .put("device_id", deviceId)
+                            .put("deleted", deletedCount > 0)
+                            .put("message", deletedCount > 0 ?
+                                "Device availability status deleted successfully" :
+                                "No availability status found for device");
+
+                    promise.complete(result);
+                })
+                .onFailure(cause ->
+                {
+                    logger.error("Failed to delete device availability", cause);
+
+                    promise.fail(cause);
+                });
+
+        return promise.future();
+    }
+
 }
+

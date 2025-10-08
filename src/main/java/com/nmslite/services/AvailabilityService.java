@@ -8,8 +8,6 @@ import io.vertx.core.Future;
 
 import io.vertx.core.Vertx;
 
-import io.vertx.core.json.JsonArray;
-
 import io.vertx.core.json.JsonObject;
 
 import io.vertx.serviceproxy.ServiceProxyBuilder;
@@ -18,10 +16,9 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
  * AvailabilityService - Device current availability status operations with ProxyGen
 
  * This interface provides:
- * - Current device availability status (one row per device)
- * - Real-time status updates
- * - Device status monitoring
- * - Dashboard status views
+ * - Current device availability status retrieval
+ * - Real-time status updates for polling
+ * - Availability cleanup operations
  * - Type-safe method calls
  * - Automatic event bus communication
 
@@ -52,21 +49,6 @@ public interface AvailabilityService
     // ========================================
 
     /**
-     * Get all device availability statuses (only for active, non-deleted devices)
-     *
-     * @return Future containing JsonArray of current device availability statuses
-     */
-    Future<JsonArray> availabilityListAll();
-
-    /**
-     * Create or update device availability status (upsert operation)
-     *
-     * @param availabilityData JsonObject containing availability data (device_id, status, response_time, checked_at)
-     * @return Future containing JsonObject with upsert result
-     */
-    Future<JsonObject> availabilityCreateOrUpdate(JsonObject availabilityData);
-
-    /**
      * Get current availability status for specific device (device must be active, non-deleted)
      *
      * @param deviceId Device ID (must be active, non-deleted)
@@ -75,15 +57,7 @@ public interface AvailabilityService
     Future<JsonObject> availabilityGetByDevice(String deviceId);
 
     /**
-     * Delete availability status for specific device (when device is deleted)
-     *
-     * @param deviceId Device ID whose availability status should be removed
-     * @return Future containing JsonObject with deletion result
-     */
-    Future<JsonObject> availabilityDeleteByDevice(String deviceId);
-
-    /**
-     * Update device status based on latest check (device must be active, non-deleted)
+     * Update device status based on latest check (used by PollingMetricsVerticle)
      *
      * @param deviceId Device ID (must be active, non-deleted)
      * @param status New status ("UP" or "DOWN")
@@ -91,5 +65,13 @@ public interface AvailabilityService
      * @return Future containing JsonObject with status update result
      */
     Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime);
+
+    /**
+     * Delete availability status for specific device (when device is deleted)
+     *
+     * @param deviceId Device ID whose availability status should be removed
+     * @return Future containing JsonObject with deletion result
+     */
+    Future<JsonObject> availabilityDeleteByDevice(String deviceId);
 
 }
