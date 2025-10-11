@@ -76,10 +76,6 @@ public class DiscoveryProfileHandler
         this.credentialService = credentialService;
     }
 
-    // ========================================
-    // DISCOVERY PROFILE CRUD OPERATIONS
-    // ========================================
-
     /**
      * Get all discovery profiles.
      *
@@ -118,8 +114,6 @@ public class DiscoveryProfileHandler
 
         var credentialProfileIds = requestBody.getJsonArray("credential_profile_ids");
 
-        logger.info("🔧 Creating discovery profile for {} (range: {})", ipAddress, isRange);
-
         // Step 1: Validate device type exists
         deviceTypeService.deviceTypeGetById(deviceTypeId)
             .onSuccess(deviceType ->
@@ -129,7 +123,7 @@ public class DiscoveryProfileHandler
                 {
                     if (validationResult.failed())
                     {
-                        logger.error("❌ Invalid credential profile IDs: {}", validationResult.cause().getMessage());
+                        logger.error("Invalid credential profile IDs: {}", validationResult.cause().getMessage());
 
                         ExceptionUtil.handleHttp(ctx, validationResult.cause(),
                             "Invalid device type ID or one or more credential profile IDs");
@@ -145,17 +139,11 @@ public class DiscoveryProfileHandler
                         if (defaultPort != null)
                         {
                             requestBody.put("port", defaultPort);
-
-                            logger.info("🔧 Using default port {} for device type", defaultPort);
                         }
                         else
                         {
-                            logger.warn("⚠️ No default port found for device type {}, proceeding without port", deviceTypeId);
+                            logger.debug("No default port found for device type {}, proceeding without port", deviceTypeId);
                         }
-                    }
-                    else
-                    {
-                        logger.info("🔧 Using provided port: {}", requestBody.getValue("port"));
                     }
 
                     // Step 4: Create discovery profile in database
@@ -164,7 +152,7 @@ public class DiscoveryProfileHandler
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Invalid device type ID: {}", deviceTypeId);
+                logger.error("Invalid device type ID: {}", deviceTypeId);
 
                 ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid device type ID: " + deviceTypeId),
                     "Invalid device type ID");
@@ -241,14 +229,11 @@ public class DiscoveryProfileHandler
         discoveryProfileService.discoveryCreate(requestBody)
             .onSuccess(result ->
             {
-                logger.info("✅ Discovery profile created successfully for {} with port {}",
-                    ipAddress, requestBody.getValue("port"));
-
                 ResponseUtil.handleSuccess(ctx, result);
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Failed to create discovery profile for {}: {}", ipAddress, cause.getMessage());
+                logger.error("Failed to create discovery profile for {}: {}", ipAddress, cause.getMessage());
 
                 ExceptionUtil.handleHttp(ctx, cause, "Failed to create discovery profile");
             });
@@ -299,15 +284,13 @@ public class DiscoveryProfileHandler
 
         var profileId = requestBody.getString("profile_id");
 
-        logger.info("🧪 Starting test discovery for profile: {}", profileId);
-
         // Execute discovery test via DiscoveryVerticle
         vertx.eventBus().request("discovery.test_profile", new JsonObject().put("profile_id", profileId))
             .onSuccess(reply ->
             {
                 var result = (JsonObject) reply.body();
 
-                logger.info("✅ Test discovery completed for profile {}: {} devices discovered, {} failed",
+                logger.info("Test discovery completed for profile {}: {} devices discovered, {} failed",
                            profileId,
                            result.getInteger("devices_discovered", 0),
                            result.getInteger("devices_failed", 0));
@@ -316,7 +299,7 @@ public class DiscoveryProfileHandler
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Test discovery failed for profile {}: {}", profileId, cause.getMessage());
+                logger.error("Test discovery failed for profile {}: {}", profileId, cause.getMessage());
 
                 ExceptionUtil.handleHttp(ctx, cause, "Failed to execute test discovery");
             });

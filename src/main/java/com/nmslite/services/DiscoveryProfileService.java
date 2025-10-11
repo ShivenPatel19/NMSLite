@@ -45,10 +45,6 @@ public interface DiscoveryProfileService
             .build(DiscoveryProfileService.class);
     }
 
-    // ========================================
-    // DISCOVERY PROFILE MANAGEMENT OPERATIONS
-    // ========================================
-
     /**
      * Get all discovery profiles with full details (including device type and credential info)
      *

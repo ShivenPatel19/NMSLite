@@ -52,10 +52,6 @@ public class UserHandler
         this.jwtUtil = jwtUtil;
     }
 
-    // ========================================
-    // USER CRUD OPERATIONS
-    // ========================================
-
     /**
      * Get all users with optional filter for inactive users.
      *
@@ -128,24 +124,9 @@ public class UserHandler
         var body = ctx.body().asJsonObject();
 
         // 1. Validate path parameter
-        if (userId == null || userId.trim().isEmpty())
+        if (!ValidationUtil.validatePathParameterUUID(ctx, userId, "User ID"))
         {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("User ID is required"),
-                "User ID path parameter is required");
-
-            return;
-        }
-
-        try
-        {
-            java.util.UUID.fromString(userId);
-        }
-        catch (IllegalArgumentException exception)
-        {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
-                "User ID must be a valid UUID");
-
-            return;
+            return; // Validation failed, response already sent
         }
 
         // 2. Validate user update fields
@@ -171,24 +152,9 @@ public class UserHandler
         var userId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
-        if (userId == null || userId.trim().isEmpty())
+        if (!ValidationUtil.validatePathParameterUUID(ctx, userId, "User ID"))
         {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("User ID is required"),
-                "User ID path parameter is required");
-
-            return;
-        }
-
-        try
-        {
-            java.util.UUID.fromString(userId);
-        }
-        catch (IllegalArgumentException exception)
-        {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
-                "User ID must be a valid UUID");
-
-            return;
+            return; // Validation failed, response already sent
         }
 
         userService.userDelete(userId)
@@ -197,10 +163,6 @@ public class UserHandler
             .onFailure(cause ->
                     ExceptionUtil.handleHttp(ctx, cause, "Failed to delete user"));
     }
-
-    // ========================================
-    // USER AUTHENTICATION
-    // ========================================
 
     /**
      * Authenticate a user and generate JWT token on success.
@@ -245,14 +207,12 @@ public class UserHandler
                             .put("expires_in_hours", JWTUtil.getTokenExpiryHours())
                             .put("message", "Authentication successful - JWT token generated");
 
-                        logger.info("✅ JWT token generated for user: {}", authenticatedUsername);
-
                         ResponseUtil.handleSuccess(ctx, enhancedResult);
 
                     }
                     catch (Exception exception)
                     {
-                        logger.error("❌ Failed to generate JWT token for user: {}", authenticatedUsername, exception);
+                        logger.error("Failed to generate JWT token for user: {}", authenticatedUsername, exception);
 
                         ExceptionUtil.handleHttp(ctx, exception, "Authentication successful but failed to generate token");
                     }
@@ -265,30 +225,6 @@ public class UserHandler
             })
             .onFailure(cause ->
                     ExceptionUtil.handleHttp(ctx, cause, "Failed to authenticate user"));
-    }
-
-    /**
-     * Logout a user (client-side token invalidation).
-
-     * Since JWT tokens are stateless, this endpoint simply returns a success response.
-     * The client should discard the JWT token upon receiving this response.
-     *
-     * @param ctx routing context containing the HTTP request and response
-     */
-    public void logoutUser(RoutingContext ctx)
-    {
-        // Extract user info from JWT token (set by auth middleware)
-        var user = ctx.<JsonObject>get("user");
-
-        var username = user != null ? user.getString("username") : "unknown";
-
-        logger.info("🚪 User logout request: {}", username);
-
-        var response = new JsonObject()
-            .put("success", true)
-            .put("message", "Logout successful - please discard your JWT token");
-
-        ResponseUtil.handleSuccess(ctx, response);
     }
 }
 

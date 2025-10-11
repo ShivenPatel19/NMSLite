@@ -2,15 +2,13 @@ package com.nmslite.verticles;
 
 import com.nmslite.services.DeviceService;
 
-import com.nmslite.services.DeviceTypeService;
-
-import com.nmslite.services.CredentialProfileService;
-
 import com.nmslite.services.DiscoveryProfileService;
 
 import com.nmslite.utils.IPRangeUtil;
 
 import com.nmslite.utils.NetworkConnectivityUtil;
+
+import com.nmslite.utils.PasswordUtil;
 
 import io.vertx.core.AbstractVerticle;
 
@@ -68,10 +66,6 @@ public class DiscoveryVerticle extends AbstractVerticle
     // Service proxies
     private DeviceService deviceService;
 
-    private DeviceTypeService deviceTypeService;
-
-    private CredentialProfileService credentialProfileService;
-
     private DiscoveryProfileService discoveryProfileService;
 
     /**
@@ -83,7 +77,7 @@ public class DiscoveryVerticle extends AbstractVerticle
     @Override
     public void start(Promise<Void> startPromise)
     {
-        logger.info("🔍 Starting DiscoveryVerticle - Device Discovery");
+        logger.info("Starting DiscoveryVerticle");
 
         // Load configuration from tools and discovery sections
         var toolsConfig = config().getJsonObject("tools", new JsonObject());
@@ -93,48 +87,20 @@ public class DiscoveryVerticle extends AbstractVerticle
         var goEngineConfig = discoveryConfig.getJsonObject("goengine", new JsonObject());
 
         goEnginePath = toolsConfig.getString("goengine.path", "./goengine/goengine");
-
-        var fpingPath = toolsConfig.getString("fping.path", "fping");
-
-        // GoEngine v7.0.0 configuration parameters
+        
+        // GoEngine configuration parameters
         timeoutSeconds = goEngineConfig.getInteger("timeout.seconds", 30);
 
         connectionTimeoutSeconds = goEngineConfig.getInteger("connection.timeout.seconds", 10);
-
-        var retryCount = goEngineConfig.getInteger("retry.count", 2);
-
-        var fpingTimeoutSeconds = toolsConfig.getInteger("fping.batch.blocking.timeout.seconds", 180);
-
+        
         discoveryBatchSize = discoveryConfig.getInteger("batch.size", 100);
 
         blockingTimeoutGoEngine = discoveryConfig.getInteger("blocking.timeout.goengine", 120);
 
-        logger.info("🔧 GoEngine path: {}", goEnginePath);
-
-        logger.info("🔧 fping path: {}", fpingPath);
-
-        logger.info("🔧 GoEngine v7.0.0 - Timeout per IP: {} seconds", timeoutSeconds);
-
-        logger.info("🔧 GoEngine v7.0.0 - Connection timeout: {} seconds", connectionTimeoutSeconds);
-
-        logger.info("🔧 Java retry count: {}", retryCount);
-
-        logger.info("🕐 fping batch blocking timeout: {} seconds", fpingTimeoutSeconds);
-
-        logger.info("📦 Discovery batch size: {} IPs", discoveryBatchSize);
-
-        logger.info("⏱️ GoEngine blocking timeout: {} seconds", blockingTimeoutGoEngine);
-
         // Initialize service proxies
         this.deviceService = DeviceService.createProxy(vertx);
 
-        this.deviceTypeService = DeviceTypeService.createProxy(vertx);
-
-        this.credentialProfileService = CredentialProfileService.createProxy(vertx);
-
         this.discoveryProfileService = DiscoveryProfileService.createProxy(vertx);
-
-        logger.info("🔧 Service proxies initialized");
 
         setupEventBusConsumers();
 
@@ -154,8 +120,6 @@ public class DiscoveryVerticle extends AbstractVerticle
 
             handleTestDiscoveryFromProfile(message, request);
         });
-
-        logger.info("📡 Discovery event bus consumers setup complete");
     }
 
     /**
@@ -191,7 +155,7 @@ public class DiscoveryVerticle extends AbstractVerticle
     {
         var profileId = request.getString("profile_id");
 
-        logger.info("🧪 Starting test discovery for profile: {}", profileId);
+        logger.debug("Starting test discovery for profile: {}", profileId);
 
         // Get discovery profile data
         getDiscoveryProfileWithCredentials(profileId)
@@ -201,7 +165,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             .compose(this::processTestDiscoveryResults)
             .onSuccess(result ->
             {
-                logger.info("✅ Test discovery completed for profile {}: {} discovered, {} failed, {} existing",
+                logger.info("Test discovery completed for profile {}: {} discovered, {} failed, {} existing",
                            profileId,
                            result.getInteger("devices_discovered", 0),
                            result.getInteger("devices_failed", 0),
@@ -211,7 +175,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Test discovery failed for profile {}: {}", profileId, cause.getMessage());
+                logger.error("Test discovery failed for profile {}: {}", profileId, cause.getMessage());
 
                 message.reply(new JsonObject()
                     .put("success", false)
@@ -251,7 +215,7 @@ public class DiscoveryVerticle extends AbstractVerticle
     {
         var promise = Promise.<JsonObject>promise();
 
-        // Get discovery profile using DiscoveryProfileService
+        // Get discovery profile with encrypted credentials using DiscoveryProfileService
         discoveryProfileService.discoveryGetById(profileId)
             .onSuccess(profileResponse ->
             {
@@ -262,19 +226,36 @@ public class DiscoveryVerticle extends AbstractVerticle
                     return;
                 }
 
-                var credentialIds = profileResponse.getJsonArray("credential_profile_ids");
+                // Get credential_profiles array (includes encrypted passwords)
+                var credentialProfiles = profileResponse.getJsonArray("credential_profiles");
 
-                // Get credential profiles using CredentialProfileService
-                credentialProfileService.credentialGetByIds(credentialIds)
-                    .onSuccess(credentialResponse ->
-                    {
-                        var credentials = credentialResponse.getJsonArray("credentials");
+                // Decrypt passwords locally (no additional database call needed)
+                var decryptedCredentials = new JsonArray();
 
-                        profileResponse.put("credentials", credentials);
+                for (var i = 0; i < credentialProfiles.size(); i++)
+                {
+                    var credential = credentialProfiles.getJsonObject(i);
 
-                        promise.complete(profileResponse);
-                    })
-                    .onFailure(cause -> promise.fail("Failed to get credentials: " + cause.getMessage()));
+                    var encryptedPassword = credential.getString("password_encrypted");
+
+                    var decryptedPassword = PasswordUtil.decryptPassword(encryptedPassword);
+
+                    // Create credential object with decrypted password for GoEngine
+                    var decryptedCredential = new JsonObject()
+                        .put("credential_profile_id", credential.getString("credential_profile_id"))
+                        .put("profile_name", credential.getString("profile_name"))
+                        .put("username", credential.getString("username"))
+                        .put("password", decryptedPassword);
+
+                    decryptedCredentials.add(decryptedCredential);
+                }
+
+                // Replace credential_profiles with decrypted credentials
+                profileResponse.remove("credential_profiles"); // Remove encrypted version to avoid duplication
+
+                profileResponse.put("credentials", decryptedCredentials);
+
+                promise.complete(profileResponse);
             })
             .onFailure(cause -> promise.fail("Failed to get discovery profile: " + cause.getMessage()));
 
@@ -324,7 +305,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                 targetIps.add(ip);
             }
 
-            logger.info("📋 Discovery targets: {} ({} {})", ipAddress, targetIps.size(),
+            logger.debug("Discovery targets: {} ({} {})", ipAddress, targetIps.size(),
                        isRange ? "IPs from range" : "single IP");
 
             // Create result with profile data and target IPs
@@ -336,7 +317,7 @@ public class DiscoveryVerticle extends AbstractVerticle
         .onSuccess(promise::complete)
         .onFailure(cause ->
         {
-            logger.error("❌ Failed to parse discovery targets: {}", cause.getMessage());
+            logger.error("Failed to parse discovery targets: {}", cause.getMessage());
 
             promise.fail("Failed to parse discovery targets: " + cause.getMessage());
         });
@@ -396,7 +377,6 @@ public class DiscoveryVerticle extends AbstractVerticle
             deviceService.deviceFindByIp(ip, true)
                 .onSuccess(deviceResult ->
                 {
-                    logger.info("🔍 Device lookup for IP {}: {}", ip, deviceResult.encodePrettily());
 
                     if (deviceResult.getBoolean("found", false))
                     {
@@ -500,7 +480,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                             // Soft deleted device - proceed with discovery
                             newTargets.add(ip);
 
-                            logger.info("📋 IP {} has soft deleted device, proceeding with new discovery", ip);
+                            logger.debug("IP {} has soft deleted device, proceeding with new discovery", ip);
                         }
                         else
                         {
@@ -513,7 +493,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                                 .put("is_monitoring_enabled", deviceCheck.getBoolean("is_monitoring_enabled"))
                                 .put("is_deleted", deviceCheck.getBoolean("is_deleted", false)));
 
-                            logger.info("📋 IP {} already exists: {}", ip, deviceCheck.getString("message"));
+                            logger.debug("IP {} already exists: {}", ip, deviceCheck.getString("message"));
                         }
                     }
                     else
@@ -523,7 +503,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                     }
                 }
 
-                logger.info("📊 Device check: {} existing (skipped), {} new targets for discovery",
+                logger.info("Device check: {} existing (skipped), {} new targets for discovery",
                            existingDevices.size(), newTargets.size());
 
                 promise.complete(profileData
@@ -568,21 +548,19 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         if (newTargets.isEmpty())
         {
-            logger.info("📋 No new targets for discovery, skipping GoEngine execution");
+            logger.debug("No new targets for discovery, skipping GoEngine execution");
 
             promise.complete(profileData.put("discovery_results", new JsonArray()));
 
             return promise.future();
         }
 
-        logger.info("🚀 Starting sequential batch discovery for {} targets", newTargets.size());
-
         var totalTargets = newTargets.size();
 
         var totalBatches = (int) Math.ceil((double) totalTargets / discoveryBatchSize);
 
-        logger.info("📦 Will process {} targets in {} batches of max {} IPs (GoEngine credential iteration)",
-                   totalTargets, totalBatches, discoveryBatchSize);
+        logger.info("Starting sequential batch discovery for {} targets in {} batches",
+                   totalTargets, totalBatches);
 
         // Use QueueBatchProcessor for sequential batch discovery
         var processor = new DiscoveryBatchProcessor(profileData, newTargets);
@@ -633,9 +611,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         var requestId = "DISC_" + System.currentTimeMillis();
 
-        var batchId = "batch-" + System.currentTimeMillis();
-
-        logger.info("🚀 Starting discovery for {} IPs with connectivity pre-check", targetIps.size());
+        var batchId = "batch_" + System.currentTimeMillis();
 
         // Step 1: Perform connectivity checks first
         performConnectivityChecks(targetIps, profileData)
@@ -645,12 +621,11 @@ public class DiscoveryVerticle extends AbstractVerticle
 
                 var unreachableIPs = connectivityResults.getJsonArray("unreachable");
 
-                logger.info("🏓 Connectivity check completed: {}/{} IPs reachable",
-                           reachableIPs.size(), targetIps.size());
+                logger.debug("Connectivity check: {}/{} IPs reachable", reachableIPs.size(), targetIps.size());
 
                 if (reachableIPs.isEmpty())
                 {
-                    logger.info("❌ No reachable IPs found, skipping GoEngine discovery");
+                    logger.debug("No reachable IPs found, skipping GoEngine discovery");
 
                     // Create failed results inline
                     var failedResults = new JsonArray();
@@ -672,8 +647,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                 }
 
                 // Step 2: Proceed with GoEngine discovery for reachable IPs only
-                logger.info("🚀 Executing GoEngine discovery for {} reachable IPs with request ID: {}",
-                           reachableIPs.size(), requestId);
 
                 return executeGoEngineForReachableIPs(profileData, reachableIPs, unreachableIPs, batchId, requestId);
             })
@@ -724,8 +697,6 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         var port = profileData.getInteger("port", 22);
 
-        logger.debug("🔍 Starting batch connectivity checks for {} IPs", ipList.size());
-
         // Step 1: Batch fping check (single fping process for all IPs)
         NetworkConnectivityUtil.batchFpingCheck(vertx, ipList, config())
             .compose(fpingResults ->
@@ -734,8 +705,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                 var pingAliveIps = ipList.stream()
                     .filter(ip -> fpingResults.getOrDefault(ip, false))
                     .collect(Collectors.toList());
-
-                logger.debug("📊 fping results: {}/{} IPs alive", pingAliveIps.size(), ipList.size());
 
                 if (pingAliveIps.isEmpty())
                 {
@@ -777,8 +746,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                             }
                         }
 
-                        logger.info("✅ Connectivity checks complete: {}/{} IPs reachable (ICMP+TCP)",
-                            reachableIPs.size(), ipList.size());
+                        logger.debug("Connectivity checks: {}/{} IPs reachable", reachableIPs.size(), ipList.size());
 
                         return new JsonObject()
                             .put("reachable", reachableIPs)
@@ -802,7 +770,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         vertx.executeBlocking(() ->
         {
-            // Create GoEngine discovery_request format for reachable IPs only
+            // Create GoEngine discovery_request (--targets) format for reachable IPs only
             var discoveryRequest = createDiscoveryRequest(profileData, reachableIPs, batchId);
 
             // Prepare GoEngine command
@@ -812,8 +780,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                 "--targets", discoveryRequest.encode(),
                 "--request-id", requestId
             );
-
-            logger.info("📋 GoEngine discovery request: {}", discoveryRequest.encodePrettily());
 
             var pb = new ProcessBuilder(command);
 
@@ -856,7 +822,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
             var exitCode = process.exitValue();
 
-            logger.info("🏁 GoEngine v7.0.0 discovery completed with exit code: {}, {} results", exitCode, results.size());
+            logger.debug("GoEngine discovery completed with exit code: {}, {} results", exitCode, results.size());
 
             // Combine GoEngine results with unreachable IPs
             var finalResults = new JsonArray();
@@ -920,24 +886,21 @@ public class DiscoveryVerticle extends AbstractVerticle
             var goEngineCredential = new JsonObject()
                 .put("credential_id", credential.getString("credential_profile_id"))
                 .put("username", credential.getString("username"))
-                .put("password", credential.getString("password_encrypted")); // Password is stored encrypted
+                .put("password", credential.getString("password"));
 
             credentials.add(goEngineCredential);
         }
 
-        // Map device type from database format to GoEngine format
+        // Get device type (already in GoEngine format from database)
         var deviceTypeName = profileData.getString("device_type_name");
-
-        var goEngineDeviceType = mapDeviceTypeToGoEngine(deviceTypeName);
 
         // Create discovery_config
         var discoveryConfig = new JsonObject()
-            .put("device_type", goEngineDeviceType)
+            .put("device_type", deviceTypeName)
             .put("port", profileData.getInteger("port"))
             .put("protocol", profileData.getString("protocol"))
             .put("timeout_seconds", timeoutSeconds)
             .put("connection_timeout", connectionTimeoutSeconds);
-            // Note: retry_count handled by Java, not passed to GoEngine v7.0.0
 
         // Create and return the complete discovery_request
         return new JsonObject()
@@ -947,20 +910,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                 .put("credentials", credentials)
                 .put("discovery_config", discoveryConfig)
             );
-    }
-
-    /**
-     * Map database device type to GoEngine device type format
-     */
-    private String mapDeviceTypeToGoEngine(String dbDeviceType)
-    {
-        if (dbDeviceType == null)
-        {
-            return "server linux"; // Default fallback
-        }
-
-        // Convert database format (server_linux) to GoEngine format (server linux)
-        return dbDeviceType.replace("_", " ");
     }
 
     /**
@@ -997,7 +946,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             }
         }
 
-        logger.info("📊 Discovery results: {} successful, {} failed, {} existing",
+        logger.info("Discovery results: {} successful, {} failed, {} existing",
                    successfulDevices.size(), failedDevices.size(), existingDevices.size());
 
         if (successfulDevices.isEmpty())
@@ -1088,12 +1037,9 @@ public class DiscoveryVerticle extends AbstractVerticle
             .put("credential_profile_id", discovery.getString("credential_id")) // ONLY the successful credential ID
             .put("host_name", discovery.getString("hostname", discovery.getString("ip_address")));
 
-        logger.info("🔧 Creating device from test discovery: {}", deviceData.getString("ip_address"));
-
         deviceService.deviceCreateFromDiscovery(deviceData)
             .onSuccess(result ->
             {
-                logger.info("✅ Device created from test discovery: {}", result.getString("device_id"));
 
                 // Return device info for response
                 promise.complete(new JsonObject()
@@ -1105,7 +1051,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Failed to create device from test discovery: {}", cause.getMessage());
+                logger.error("Failed to create device from test discovery: {}", cause.getMessage());
 
                 promise.complete(null); // Return null for failed creation
             });
@@ -1176,10 +1122,6 @@ public class DiscoveryVerticle extends AbstractVerticle
             this.profileData = profileData;
 
             var credentials = profileData.getJsonArray("credentials");
-
-            logger.info("📋 Discovery batch processor initialized: {} credentials, {} IPs",
-
-                credentials.size(), getTotalItems());
         }
 
         /**
@@ -1196,8 +1138,6 @@ public class DiscoveryVerticle extends AbstractVerticle
         {
             var ipArray = new JsonArray(batch);
 
-            logger.info("🔄 Executing GoEngine discovery for {} IPs (credential iteration)", batch.size());
-
             return executeGoEngineDiscovery(profileData, ipArray);
         }
 
@@ -1213,9 +1153,7 @@ public class DiscoveryVerticle extends AbstractVerticle
         @Override
         protected void handleBatchFailure(List<String> batch, Throwable cause)
         {
-            logger.warn("⚠️ Failed to discover {} IPs in batch: {}", batch.size(), cause.getMessage());
-
-            logger.debug("Failed IPs: {}", batch);
+            logger.warn("Failed to discover {} IPs in batch: {}", batch.size(), cause.getMessage());
         }
     }
 
@@ -1227,7 +1165,7 @@ public class DiscoveryVerticle extends AbstractVerticle
     @Override
     public void stop(Promise<Void> stopPromise)
     {
-        logger.info("🛑 Stopping DiscoveryVerticle");
+        logger.info("Stopping DiscoveryVerticle");
 
         stopPromise.complete();
     }

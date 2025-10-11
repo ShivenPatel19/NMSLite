@@ -44,10 +44,6 @@ public interface MetricsService
             .build(MetricsService.class);
     }
 
-    // ========================================
-    // METRICS MANAGEMENT OPERATIONS
-    // ========================================
-
     /**
      * Store new metrics data (used by PollingMetricsVerticle)
      *

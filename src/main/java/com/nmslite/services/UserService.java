@@ -44,10 +44,6 @@ public interface UserService
             .build(UserService.class);
     }
 
-    // ========================================
-    // USER MANAGEMENT OPERATIONS
-    // ========================================
-
     /**
      * Get all users
      *
@@ -97,14 +93,5 @@ public interface UserService
      * @return Future containing JsonObject with user data or not found
      */
     Future<JsonObject> userGetById(String userId);
-
-    /**
-     * Activate or deactivate user
-     *
-     * @param userId User ID
-     * @param isActive Active status
-     * @return Future containing JsonObject with update result
-     */
-    Future<JsonObject> userSetActive(String userId, boolean isActive);
 
 }

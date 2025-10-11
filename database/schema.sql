@@ -145,7 +145,6 @@ CREATE TABLE device_availability (
     last_success_time TIMESTAMP,
     last_failure_time TIMESTAMP,
     current_status VARCHAR(10) DEFAULT 'unknown' CHECK (current_status IN ('up', 'down', 'unknown')),
-    status_since TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Constraints

@@ -38,10 +38,6 @@ public class CredentialHandler
         this.credentialProfileService = credentialProfileService;
     }
 
-    // ========================================
-    // CREDENTIAL CRUD OPERATIONS
-    // ========================================
-
     /**
      * Get all credential profiles.
      *
@@ -65,8 +61,6 @@ public class CredentialHandler
     {
         var requestBody = ctx.body().asJsonObject();
 
-        // ===== COMPREHENSIVE HANDLER VALIDATION =====
-        // Using common validation methods to reduce code redundancy
         if (!ValidationUtil.Credential.validateCreate(ctx, requestBody))
         {
             return; // Validation failed, response already sent
@@ -90,28 +84,10 @@ public class CredentialHandler
 
         var requestBody = ctx.body().asJsonObject();
 
-        // ===== COMPREHENSIVE HANDLER VALIDATION =====
-        // Using common validation methods to reduce code redundancy
-
         // 1. Validate path parameter
-        if (credentialId == null || credentialId.trim().isEmpty())
+        if (!ValidationUtil.validatePathParameterUUID(ctx, credentialId, "Credential ID"))
         {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Credential ID is required"),
-                "Credential ID path parameter is required");
-
-            return;
-        }
-
-        try
-        {
-            java.util.UUID.fromString(credentialId);
-        }
-        catch (IllegalArgumentException exception)
-        {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
-                "Credential ID must be a valid UUID");
-
-            return;
+            return; // Validation failed, response already sent
         }
 
         // 2. Validate credential update fields
@@ -137,24 +113,9 @@ public class CredentialHandler
         var credentialId = ctx.pathParam("id");
 
         // ===== PATH PARAMETER VALIDATION =====
-        if (credentialId == null || credentialId.trim().isEmpty())
+        if (!ValidationUtil.validatePathParameterUUID(ctx, credentialId, "Credential ID"))
         {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Credential ID is required"),
-                "Credential ID path parameter is required");
-
-            return;
-        }
-
-        try
-        {
-            java.util.UUID.fromString(credentialId);
-        }
-        catch (IllegalArgumentException exception)
-        {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid UUID format"),
-                "Credential ID must be a valid UUID");
-
-            return;
+            return; // Validation failed, response already sent
         }
 
         credentialProfileService.credentialDelete(credentialId)

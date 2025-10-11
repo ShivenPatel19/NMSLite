@@ -77,7 +77,7 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                         var credentialIds = (UUID[]) row.getValue("credential_profile_ids");
 
                         // Convert UUID array to JsonArray
-                        var credentialIdsArray = new io.vertx.core.json.JsonArray();
+                        var credentialIdsArray = new JsonArray();
 
                         for (var credId : credentialIds)
                         {
@@ -129,7 +129,7 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
 
         var ipAddress = profileData.getString("ip_address");
 
-        var isRange = profileData.getBoolean("is_range", false);  // Default to false for backward compatibility
+        var isRange = profileData.getBoolean("is_range");
 
         var deviceTypeId = profileData.getString("device_type_id");
 
@@ -146,10 +146,6 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
         {
             credentialUUIDs[i] = UUID.fromString(credentialProfileIds.getString(i));
         }
-
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
-        // Service focuses purely on database operations
 
         var sql = """
                 INSERT INTO discovery_profiles (discovery_name, ip_address, is_range, device_type_id, credential_profile_ids,
@@ -292,16 +288,16 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                     var credentialIds = (UUID[]) profileRow.getValue("credential_profile_ids");
 
                     // Convert UUID array to JsonArray for response
-                    var credentialIdsArray = new io.vertx.core.json.JsonArray();
+                    var credentialIdsArray = new JsonArray();
 
                     for (var credId : credentialIds)
                     {
                         credentialIdsArray.add(credId.toString());
                     }
 
-                    // Get credential profiles details
+                    // Get credential profiles details (including encrypted password for discovery use)
                     var credentialSql = """
-                            SELECT credential_profile_id, profile_name, username
+                            SELECT credential_profile_id, profile_name, username, password_encrypted
                             FROM credential_profiles
                             WHERE credential_profile_id = ANY($1)
                             ORDER BY profile_name
@@ -311,14 +307,15 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                             .execute(Tuple.of(credentialIds))
                             .onSuccess(credentialRows ->
                             {
-                                var credentialProfiles = new io.vertx.core.json.JsonArray();
+                                var credentialProfiles = new JsonArray();
 
                                 for (var credRow : credentialRows)
                                 {
                                     var credProfile = new JsonObject()
                                             .put("credential_profile_id", credRow.getUUID("credential_profile_id").toString())
                                             .put("profile_name", credRow.getString("profile_name"))
-                                            .put("username", credRow.getString("username"));
+                                            .put("username", credRow.getString("username"))
+                                            .put("password_encrypted", credRow.getString("password_encrypted"));
 
                                     credentialProfiles.add(credProfile);
                                 }

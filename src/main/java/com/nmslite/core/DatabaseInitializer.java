@@ -28,15 +28,15 @@ import org.slf4j.LoggerFactory;
 
 /**
  * DatabaseInitializer - One-time Database Setup and Service Registration
- *
+
  * This class replaces DatabaseVerticle by performing all database initialization
  * tasks during application startup, before any verticles are deployed.
- *
+
  * Tasks performed:
  * - Creates PostgreSQL connection pool
  * - Instantiates all service implementations
  * - Registers all ProxyGen services on event bus
- *
+
  * Benefits:
  * - No thread consumed by idle verticle
  * - Database services ready before other verticles start
@@ -53,8 +53,6 @@ public class DatabaseInitializer
     private final JsonObject databaseConfig;
 
     private Pool pgPool;
-
-    private ServiceBinder serviceBinder;
 
     // Service implementations
     private UserServiceImpl userService;
@@ -91,7 +89,7 @@ public class DatabaseInitializer
      */
     public Future<Void> initialize()
     {
-        logger.info("🔧 Starting Database Initialization - Setting up all services");
+        logger.info("Initializing database services");
 
         // Setup PostgreSQL connection
         return setupDatabaseConnection()
@@ -99,20 +97,29 @@ public class DatabaseInitializer
             {
                 this.pgPool = pool;
 
-                logger.info("✅ Database connection established");
+                try
+                {
+                    // Create all service implementations
+                    setupAllServices();
 
-                // Create all service implementations
-                setupAllServices();
+                    // Register all services with ProxyGen
+                    registerAllServiceProxies();
 
-                // Register all services with ProxyGen
-                registerAllServiceProxies();
+                    logger.info("Database initialization completed - all 7 services registered");
 
-                logger.info("🚀 Database initialization completed successfully with all 7 services");
+                    return Future.<Void>succeededFuture();
+                }
+                catch (Exception exception)
+                {
+                    logger.error("Failed to setup services", exception);
 
-                return Future.<Void>succeededFuture();
+                    // Close the pool since we opened it but failed to set up services
+                    return cleanup()
+                        .compose(v -> Future.failedFuture(exception));
+                }
             })
             .onFailure(cause ->
-                logger.error("❌ Failed to initialize database services", cause));
+                logger.error("Failed to initialize database services", cause));
     }
 
     /**
@@ -150,7 +157,7 @@ public class DatabaseInitializer
             pool.getConnection()
                 .onSuccess(connection ->
                 {
-                    logger.info("✅ Database connection test successful");
+                    logger.info("Database connection established");
 
                     connection.close();
 
@@ -158,14 +165,14 @@ public class DatabaseInitializer
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("❌ Database connection test failed", cause);
+                    logger.error("Database connection failed", cause);
 
                     promise.fail(cause);
                 });
         }
         catch (Exception exception)
         {
-            logger.error("❌ Failed to setup database connection", exception);
+            logger.error("Failed to setup database connection", exception);
 
             promise.fail(exception);
         }
@@ -195,78 +202,57 @@ public class DatabaseInitializer
 
         this.availabilityService = new AvailabilityServiceImpl(pgPool);
 
-        logger.info("🔧 All 7 service implementations created successfully");
+        logger.debug("All 7 service implementations created");
     }
 
     /**
      * Registers all service implementations with Vert.x ProxyGen on the event bus.
      * Binds each service to its SERVICE_ADDRESS via ServiceBinder so clients can use
      * generated proxies (e.g., UserService.createProxy(vertx)).
+     *
+     * @throws RuntimeException if service registration fails
      */
     private void registerAllServiceProxies()
     {
-        try
-        {
-            // Create service binder
-            this.serviceBinder = new ServiceBinder(vertx);
+        // Create service binder
+        var serviceBinder = new ServiceBinder(vertx);
 
-            // Register UserService
-            serviceBinder
-                .setAddress(UserService.SERVICE_ADDRESS)
-                .register(UserService.class, userService);
+        // Register UserService
+        serviceBinder
+            .setAddress(UserService.SERVICE_ADDRESS)
+            .register(UserService.class, userService);
 
-            logger.info("📡 UserService registered at: {}", UserService.SERVICE_ADDRESS);
+        // Register DeviceTypeService
+        serviceBinder
+            .setAddress(DeviceTypeService.SERVICE_ADDRESS)
+            .register(DeviceTypeService.class, deviceTypeService);
 
-            // Register DeviceTypeService
-            serviceBinder
-                .setAddress(DeviceTypeService.SERVICE_ADDRESS)
-                .register(DeviceTypeService.class, deviceTypeService);
+        // Register CredentialService
+        serviceBinder
+            .setAddress(CredentialProfileService.SERVICE_ADDRESS)
+            .register(CredentialProfileService.class, credentialService);
 
-            logger.info("📡 DeviceTypeService registered at: {}", DeviceTypeService.SERVICE_ADDRESS);
+        // Register DiscoveryService
+        serviceBinder
+            .setAddress(DiscoveryProfileService.SERVICE_ADDRESS)
+            .register(DiscoveryProfileService.class, discoveryService);
 
-            // Register CredentialService
-            serviceBinder
-                .setAddress(CredentialProfileService.SERVICE_ADDRESS)
-                .register(CredentialProfileService.class, credentialService);
+        // Register DeviceService
+        serviceBinder
+            .setAddress(DeviceService.SERVICE_ADDRESS)
+            .register(DeviceService.class, deviceService);
 
-            logger.info("📡 CredentialService registered at: {}", CredentialProfileService.SERVICE_ADDRESS);
+        // Register MetricsService
+        serviceBinder
+            .setAddress(MetricsService.SERVICE_ADDRESS)
+            .register(MetricsService.class, metricsService);
 
-            // Register DiscoveryService
-            serviceBinder
-                .setAddress(DiscoveryProfileService.SERVICE_ADDRESS)
-                .register(DiscoveryProfileService.class, discoveryService);
+        // Register AvailabilityService
+        serviceBinder
+            .setAddress(AvailabilityService.SERVICE_ADDRESS)
+            .register(AvailabilityService.class, availabilityService);
 
-            logger.info("📡 DiscoveryService registered at: {}", DiscoveryProfileService.SERVICE_ADDRESS);
-
-            // Register DeviceService
-            serviceBinder
-                .setAddress(DeviceService.SERVICE_ADDRESS)
-                .register(DeviceService.class, deviceService);
-
-            logger.info("📡 DeviceService registered at: {}", DeviceService.SERVICE_ADDRESS);
-
-            // Register MetricsService
-            serviceBinder
-                .setAddress(MetricsService.SERVICE_ADDRESS)
-                .register(MetricsService.class, metricsService);
-
-            logger.info("📡 MetricsService registered at: {}", MetricsService.SERVICE_ADDRESS);
-
-            // Register AvailabilityService
-            serviceBinder
-                .setAddress(AvailabilityService.SERVICE_ADDRESS)
-                .register(AvailabilityService.class, availabilityService);
-
-            logger.info("📡 AvailabilityService registered at: {}", AvailabilityService.SERVICE_ADDRESS);
-
-            logger.info("🎉 All 7 database services registered with ProxyGen successfully");
-        }
-        catch (Exception exception)
-        {
-            logger.error("❌ Failed to register service proxies", exception);
-
-            throw new RuntimeException("Failed to register service proxies", exception);
-        }
+        logger.debug("All 7 services registered with ProxyGen");
     }
 
     /**
@@ -277,7 +263,7 @@ public class DatabaseInitializer
      */
     public Future<Void> cleanup()
     {
-        logger.info("🛑 Cleaning up database resources");
+        logger.info("Cleaning up database resources");
 
         var promise = Promise.<Void>promise();
 
@@ -287,13 +273,13 @@ public class DatabaseInitializer
             pgPool.close()
                 .onSuccess(v ->
                 {
-                    logger.info("✅ Database connection pool closed");
+                    logger.debug("Database connection pool closed");
 
                     promise.complete();
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("❌ Failed to close database pool", cause);
+                    logger.error("Failed to close database pool", cause);
 
                     promise.fail(cause);
                 });

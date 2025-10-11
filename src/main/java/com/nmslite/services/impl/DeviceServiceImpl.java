@@ -568,7 +568,7 @@ public class DeviceServiceImpl implements DeviceService
                                 vertx.eventBus().publish("device.monitoring.enabled", new JsonObject()
                                         .put("device_id", deviceId));
 
-                                logger.debug("📡 Published device.monitoring.enabled event for device: {}", deviceId);
+                                logger.debug("Published device.monitoring.enabled event for device: {}", deviceId);
                             })
                             .onFailure(cause ->
                             {
@@ -598,46 +598,87 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                UPDATE devices
-                SET is_monitoring_enabled = false
-                WHERE device_id = $1 AND is_deleted = false
-                RETURNING device_id, is_monitoring_enabled, monitoring_enabled_at
+        // First check if device exists and is not deleted
+        var checkSql = """
+                SELECT is_deleted
+                FROM devices
+                WHERE device_id = $1
                 """;
 
-        pgPool.preparedQuery(sql)
+        pgPool.preparedQuery(checkSql)
                 .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(rows ->
+                .onSuccess(checkRows ->
                 {
-                    if (rows.size() == 0)
+                    if (checkRows.size() == 0)
                     {
                         promise.complete(new JsonObject()
                                 .put("updated", false)
-                                .put("reason", "Device not found or deleted"));
+                                .put("reason", "Device not found"));
 
                         return;
                     }
 
-                    var row = rows.iterator().next();
+                    var checkRow = checkRows.iterator().next();
 
-                    var result = new JsonObject()
-                            .put("updated", true)
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                            .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                    row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+                    var isDeleted = checkRow.getBoolean("is_deleted");
 
-                    promise.complete(result);
+                    if (isDeleted)
+                    {
+                        promise.complete(new JsonObject()
+                                .put("updated", false)
+                                .put("reason", "Device is deleted"));
 
-                    // Publish event to notify PollingMetricsVerticle to remove device from cache
-                    vertx.eventBus().publish("device.monitoring.disabled", new JsonObject()
-                            .put("device_id", deviceId));
+                        return;
+                    }
 
-                    logger.debug("📡 Published device.monitoring.disabled event for device: {}", deviceId);
+                    // Device exists and is not deleted, proceed with disabling monitoring
+                    var sql = """
+                            UPDATE devices
+                            SET is_monitoring_enabled = false
+                            WHERE device_id = $1 AND is_deleted = false
+                            RETURNING device_id, is_monitoring_enabled, monitoring_enabled_at
+                            """;
+
+                    pgPool.preparedQuery(sql)
+                            .execute(Tuple.of(UUID.fromString(deviceId)))
+                            .onSuccess(rows ->
+                            {
+                                if (rows.size() == 0)
+                                {
+                                    promise.complete(new JsonObject()
+                                            .put("updated", false)
+                                            .put("reason", "Device not found or deleted"));
+
+                                    return;
+                                }
+
+                                var row = rows.iterator().next();
+
+                                var result = new JsonObject()
+                                        .put("updated", true)
+                                        .put("device_id", row.getUUID("device_id").toString())
+                                        .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                        .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
+                                                row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+
+                                promise.complete(result);
+
+                                // Publish event to notify PollingMetricsVerticle to remove device from cache
+                                vertx.eventBus().publish("device.monitoring.disabled", new JsonObject()
+                                        .put("device_id", deviceId));
+
+                                logger.debug("Published device.monitoring.disabled event for device: {}", deviceId);
+                            })
+                            .onFailure(cause ->
+                            {
+                                logger.error("Failed to disable monitoring for device", cause);
+
+                                promise.fail(cause);
+                            });
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("Failed to disable monitoring for device", cause);
+                    logger.error("Failed to check device status", cause);
 
                     promise.fail(cause);
                 });
@@ -779,7 +820,7 @@ public class DeviceServiceImpl implements DeviceService
                                                 .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
                                                         row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
-                                        // Initialize device availability record with "unknown" status
+                                        // Initialize device availability record with "unknown" status (Important to NOTE)
                                         var initAvailabilitySql = """
                                                 INSERT INTO device_availability (device_id, current_status)
                                                 VALUES ($1, 'unknown')
@@ -794,7 +835,7 @@ public class DeviceServiceImpl implements DeviceService
                                                     vertx.eventBus().publish("device.monitoring.enabled", new JsonObject()
                                                             .put("device_id", deviceId));
 
-                                                    logger.info("✅ Provisioned and enabled monitoring for device: {} ({})", row.getString("device_name"), deviceId);
+                                                    logger.info("Provisioned and enabled monitoring for device: {} ({})", row.getString("device_name"), deviceId);
 
                                                     promise.complete(deviceResult);
                                                 })
@@ -885,7 +926,7 @@ public class DeviceServiceImpl implements DeviceService
                                 .put("port", row.getInteger("port"))
                                 .put("protocol", row.getString("protocol"))
                                 .put("username", row.getString("username"))
-                                .put("password_encrypted", row.getString("password_encrypted"))
+                                .put("password_encrypted", row.getString("password_encrypted"))  // encrypted password
                                 .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                 .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
                                 .put("timeout_seconds", row.getInteger("timeout_seconds"))
@@ -927,9 +968,6 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
-
         var deviceName = deviceData.getString("device_name");
 
         var ipAddress = deviceData.getString("ip_address");
@@ -944,7 +982,7 @@ public class DeviceServiceImpl implements DeviceService
 
         var hostName = deviceData.getString("host_name");
 
-        // Create device with discovery defaults: is_provisioned = false, is_monitoring_enabled = false
+        // Create device with discovery defaults: is_provisioned = false, is_monitoring_enabled = false -> show its only being "discovered"
         // device_name = host_name initially (user can change later)
         var sql = """
                 INSERT INTO devices (device_name, ip_address, device_type, port, protocol, credential_profile_id,
@@ -1153,7 +1191,7 @@ public class DeviceServiceImpl implements DeviceService
                                     vertx.eventBus().publish("device.config.updated", new JsonObject()
                                             .put("device_id", deviceId));
 
-                                    logger.debug("📡 Published device.config.updated event for device: {}", deviceId);
+                                    logger.debug("Published device.config.updated event for device: {}", deviceId);
                                 }
                             })
                             .onFailure(cause ->

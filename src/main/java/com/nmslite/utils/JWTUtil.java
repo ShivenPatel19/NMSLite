@@ -55,7 +55,7 @@ public class JWTUtil
 
         this.jwtAuth = JWTAuth.create(vertx, config);
 
-        logger.info("🔐 JWT authentication configured with {} algorithm", JWT_ALGORITHM);
+        logger.debug("JWT authentication configured with {} algorithm", JWT_ALGORITHM);
     }
 
     /**
@@ -84,14 +84,14 @@ public class JWTUtil
 
             var token = jwtAuth.generateToken(claims, options);
 
-            logger.info("🔑 JWT token generated for user: {} (expires in {} hours)", username, TOKEN_EXPIRY_HOURS);
+            logger.debug("JWT token generated for user: {}", username);
 
             return token;
 
         }
         catch (Exception exception)
         {
-            logger.error("❌ Failed to generate JWT token for user: {}", username, exception);
+            logger.error("Failed to generate JWT token for user: {}", username, exception);
 
             throw new RuntimeException("Failed to generate JWT token", exception);
         }
@@ -109,12 +109,10 @@ public class JWTUtil
         {
             if (token == null || token.trim().isEmpty())
             {
-                logger.warn("⚠️ Empty or null JWT token provided");
+                logger.debug("Empty or null JWT token provided");
 
                 return null;
             }
-
-            logger.debug("🔍 Validating JWT token: {}", token.substring(0, Math.min(20, token.length())) + "...");
 
             // Use Auth0 JWT library for validation
             try
@@ -135,14 +133,12 @@ public class JWTUtil
                     .put("iat", decodedJWT.getClaim("iat").asLong())
                     .put("exp", decodedJWT.getExpiresAt().getTime() / 1000);
 
-                logger.debug("✅ JWT token validated for user: {}", userInfo.getString("username"));
-
                 return userInfo;
 
             }
             catch (JWTVerificationException exception)
             {
-                logger.warn("❌ JWT verification failed: {}", exception.getMessage());
+                logger.debug("JWT verification failed: {}", exception.getMessage());
 
                 return null;
             }
@@ -150,7 +146,7 @@ public class JWTUtil
         }
         catch (Exception exception)
         {
-            logger.warn("❌ Invalid JWT token: {}", exception.getMessage());
+            logger.debug("Invalid JWT token: {}", exception.getMessage());
 
             return null;
         }

@@ -59,7 +59,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
         var sql = """
                 SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
                        da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
-                       da.current_status, da.status_since, da.updated_at,
+                       da.current_status, da.updated_at,
                        d.device_name, d.ip_address::text as ip_address, d.device_type, d.is_monitoring_enabled
                 FROM device_availability da
                 JOIN devices d ON da.device_id = d.device_id
@@ -79,6 +79,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
 
                     var row = rows.iterator().next();
 
+                    // Removing CIDR notation
                     var ipAddr = row.getString("ip_address");
 
                     if (ipAddr != null && ipAddr.contains("/"))
@@ -104,8 +105,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
                             .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ?
                                 row.getLocalDateTime("last_failure_time").toString() : null)
                             .put("current_status", row.getString("current_status"))
-                            .put("status_since", row.getLocalDateTime("status_since") != null ?
-                                row.getLocalDateTime("status_since").toString() : null)
                             .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                 row.getLocalDateTime("updated_at").toString() : null);
 
@@ -168,6 +167,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
 
                     var ipAddressRaw = deviceRow.getString("ip_address");
 
+                    // Removing CIDR notation
                     final var ipAddress = (ipAddressRaw != null && ipAddressRaw.contains("/"))
                             ? ipAddressRaw.split("/")[0]  // Remove CIDR notation
                             : ipAddressRaw;
@@ -193,14 +193,10 @@ public class AvailabilityServiceImpl implements AvailabilityService
                                 current_status = CASE
                                     WHEN current_status != $4 THEN $4
                                     ELSE current_status
-                                END,
-                                status_since = CASE
-                                    WHEN current_status != $4 THEN $3
-                                    ELSE status_since
                                 END
                             WHERE device_id = $5
                             RETURNING device_id, total_checks, successful_checks, failed_checks, availability_percent,
-                                     last_check_time, current_status, status_since, updated_at
+                                     last_check_time, current_status, updated_at
                             """;
 
                     pgPool.preparedQuery(updateSql)
@@ -227,7 +223,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
                                         .put("availability_percent", row.getBigDecimal("availability_percent"))
                                         .put("last_check_time", row.getLocalDateTime("last_check_time").toString())
                                         .put("current_status", row.getString("current_status"))
-                                        .put("status_since", row.getLocalDateTime("status_since").toString())
                                         .put("updated_at", row.getLocalDateTime("updated_at").toString())
                                         .put("response_time", responseTime)
                                         .put("message", "Device status updated successfully");

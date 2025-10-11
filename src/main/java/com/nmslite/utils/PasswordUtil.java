@@ -15,6 +15,10 @@ import java.util.Base64;
 /**
  * Password Utility for NMSLite
  * Provides password hashing and encryption functionality
+ *
+ * Uses:
+ * - SHA-256 for one-way password hashing (user authentication)
+ * - AES symmetric encryption for two-way password encryption (credential storage)
  */
 public class PasswordUtil
 {
@@ -23,7 +27,8 @@ public class PasswordUtil
 
     private static final String ENCRYPTION_ALGORITHM = "AES";
 
-    private static final String ENCRYPTION_KEY = "NMSLite2025SecretKey123456789012"; // Exactly 32 bytes for AES-256
+    // Shared secret key for AES symmetric encryption (must be kept confidential)
+    private static final String SHARED_SECRET_KEY = "NMSLite2025SecretKey123456789012"; // Exactly 32 bytes for AES-256
 
     /**
      * Hash a password using SHA-256 for user authentication (ONE-WAY hashing)
@@ -62,7 +67,8 @@ public class PasswordUtil
     }
 
     /**
-     * Encrypt a password for storage in credential profiles (TWO-WAY encryption)
+     * Encrypt a password for storage in credential profiles (TWO-WAY symmetric encryption)
+     * Uses AES with shared secret key - same key is used for encryption and decryption
      *
      * @param password Plain text password
      * @return Encrypted password (reversible)
@@ -72,7 +78,7 @@ public class PasswordUtil
         try
         {
             var secretKey = new SecretKeySpec(
-                ENCRYPTION_KEY.getBytes(StandardCharsets.UTF_8),
+                SHARED_SECRET_KEY.getBytes(StandardCharsets.UTF_8),
                 ENCRYPTION_ALGORITHM
             );
 
@@ -92,7 +98,8 @@ public class PasswordUtil
     }
 
     /**
-     * Decrypt a password from credential profiles (TWO-WAY decryption)
+     * Decrypt a password from credential profiles (TWO-WAY symmetric decryption)
+     * Uses AES with shared secret key - same key is used for encryption and decryption
      *
      * @param encryptedPassword Encrypted password
      * @return Plain text password (original password)
@@ -102,7 +109,7 @@ public class PasswordUtil
         try
         {
             var secretKey = new SecretKeySpec(
-                ENCRYPTION_KEY.getBytes(StandardCharsets.UTF_8),
+                SHARED_SECRET_KEY.getBytes(StandardCharsets.UTF_8),
                 ENCRYPTION_ALGORITHM
             );
 

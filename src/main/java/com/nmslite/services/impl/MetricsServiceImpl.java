@@ -167,6 +167,7 @@ public class MetricsServiceImpl implements MetricsService
                     {
                         var ipAddr = row.getString("ip_address");
 
+                        // Removing CIDR notation
                         if (ipAddr != null && ipAddr.contains("/"))
                         {
                             ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation

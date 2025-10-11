@@ -60,10 +60,10 @@
             <version>${vertx.version}</version>
         </dependency>
 
-        <!-- Vert.x Web OpenAPI for Swagger/OpenAPI Support -->
+        <!-- Vert.x Web OpenAPI Router for Swagger/OpenAPI Support (Vert.x 5) -->
         <dependency>
             <groupId>io.vertx</groupId>
-            <artifactId>vertx-web-openapi</artifactId>
+            <artifactId>vertx-web-openapi-router</artifactId>
             <version>${vertx.version}</version>
         </dependency>
 

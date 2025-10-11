@@ -79,35 +79,27 @@ public class IPRangeUtil
 
     /**
      * Validate if a string is a valid single IP address
+     
+     * Note: Assumes input is already trimmed and non-null (caller's responsibility)
      *
-     * @param ip The IP address string to validate
-     * @return true if valid, false otherwise
+     * @param ip The IP address string to validate (must be non-null and trimmed)
+     * @return true if valid IP format, false otherwise
      */
     public static boolean isValidSingleIP(String ip)
     {
-        if (ip == null || ip.trim().isEmpty())
-        {
-            return false;
-        }
-
-        return SINGLE_IP_PATTERN.matcher(ip.trim()).matches();
+        return SINGLE_IP_PATTERN.matcher(ip).matches();
     }
 
     /**
      * Validate if a string is a valid IP range format
      *
-     * @param ipRange The IP range string to validate (e.g., "192.168.1.1-50")
-     * @return true if valid, false otherwise
+     * Note: Assumes input is already trimmed and non-null (caller's responsibility)
+     *
+     * @param ipRange The IP range string to validate (e.g., "192.168.1.1-50", must be non-null and trimmed)
+     * @return true if valid IP range format, false otherwise
      */
     public static boolean isValidIPRange(String ipRange)
     {
-        if (ipRange == null || ipRange.trim().isEmpty())
-        {
-            return false;
-        }
-
-        ipRange = ipRange.trim();
-
         // Check basic format
         if (!IP_RANGE_PATTERN.matcher(ipRange).matches())
         {

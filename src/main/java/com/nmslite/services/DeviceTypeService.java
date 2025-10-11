@@ -46,10 +46,6 @@ public interface DeviceTypeService
             .build(DeviceTypeService.class);
     }
 
-    // ========================================
-    // DEVICE TYPE READ-ONLY OPERATIONS
-    // ========================================
-
     /**
      * Get all device types (active by default)
      *

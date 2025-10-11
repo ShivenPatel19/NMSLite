@@ -90,19 +90,15 @@ public class ServerVerticle extends AbstractVerticle
     @Override
     public void start(Promise<Void> startPromise)
     {
-        logger.info("🌐 Starting ServerVerticle - HTTP API with ProxyGen");
+        logger.info("Starting ServerVerticle");
 
         httpPort = config().getInteger("http.port", 8080);
 
         // Initialize all service proxies
         initializeServiceProxies();
 
-        logger.info("🔧 All service proxies initialized");
-
         // Create handler instances
         createHandlers();
-
-        logger.info("🎯 All handlers created");
 
         // Setup HTTP server with routing
         httpServer = vertx.createHttpServer();
@@ -114,13 +110,13 @@ public class ServerVerticle extends AbstractVerticle
             .listen(httpPort)
             .onSuccess(server ->
             {
-                logger.info("✅ HTTP Server started on port {}", httpPort);
+                logger.info("HTTP Server started on port {}", httpPort);
 
                 startPromise.complete();
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Failed to start HTTP server", cause);
+                logger.error("Failed to start HTTP server", cause);
 
                 startPromise.fail(cause);
             });
@@ -229,9 +225,6 @@ public class ServerVerticle extends AbstractVerticle
         // User Authentication APIs (No authentication required for login)
         router.post("/api/auth/login").handler(userHandler::authenticateUser);
 
-        // User Logout API (Authentication required)
-        router.post("/api/auth/logout").handler(authMiddleware.requireAuthentication()).handler(userHandler::logoutUser);
-
         // User Management APIs (Authentication required)
         router.get("/api/users").handler(authMiddleware.requireAuthentication()).handler(userHandler::getUsers);
 
@@ -285,7 +278,6 @@ public class ServerVerticle extends AbstractVerticle
     private void setupDeviceRoutes(Router router)
     {
         // Device Management API (Authentication required)
-        // Listing routes split by provision status
         router.get("/api/devices/discovered").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDiscoveredDevices);
 
         // Provision devices (bulk operation - sets is_provisioned=true AND is_monitoring_enabled=true)

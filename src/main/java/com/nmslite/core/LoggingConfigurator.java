@@ -114,33 +114,6 @@ public class LoggingConfigurator
                 logDir.mkdirs();
             }
         }
-
-        // Log configuration summary
-        if (loggingEnabled)
-        {
-            var logger = LoggerFactory.getLogger(LoggingConfigurator.class);
-
-            logger.info("=".repeat(60));
-
-            logger.info("NMSLite Logging Configuration");
-
-            logger.info("=".repeat(60));
-
-            logger.info("Logging Enabled: {}", loggingEnabled);
-
-            logger.info("Log Level: {}", logLevel);
-
-            logger.info("Console Logging: {}", consoleEnabled);
-
-            logger.info("File Logging: {}", fileEnabled);
-
-            if (fileEnabled)
-            {
-                logger.info("Log File Path: {}", filePath);
-            }
-
-            logger.info("=".repeat(60));
-        }
     }
 
 }

@@ -47,10 +47,6 @@ public class DeviceHandler
         this.deviceTypeService = deviceTypeService;
     }
 
-    // ========================================
-    // DEVICE MANAGEMENT
-    // ========================================
-
     /**
      * Get all discovered (unprovisioned) devices.
      *
@@ -198,13 +194,9 @@ public class DeviceHandler
         // Validate all device IDs are valid UUIDs
         for (var i = 0; i < deviceIds.size(); i++)
         {
-            try
-            {
-                var deviceId = deviceIds.getString(i);
+            var deviceId = deviceIds.getString(i);
 
-                UUID.fromString(deviceId);
-            }
-            catch (Exception exception)
+            if (!ValidationUtil.isValidUUID(deviceId))
             {
                 ExceptionUtil.handleHttp(ctx,
                     new IllegalArgumentException("Invalid device ID at index " + i),
@@ -247,17 +239,13 @@ public class DeviceHandler
             return;
         }
 
-        // 4) Invoke service
+        // 3) Invoke service
         deviceService.deviceUpdateConfig(deviceId, body)
             .onSuccess(result ->
                     ResponseUtil.handleSuccess(ctx, result))
             .onFailure(cause ->
                     ExceptionUtil.handleHttp(ctx, cause, "Failed to update device configuration"));
     }
-
-    // ========================================
-    // DEVICE TYPES
-    // ========================================
 
     /**
      * Get all active device types.

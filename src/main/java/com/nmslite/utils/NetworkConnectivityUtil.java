@@ -28,6 +28,8 @@ import java.util.List;
 
 import java.util.Map;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -53,7 +55,7 @@ public class NetworkConnectivityUtil
 
      * 2-Level Timeout Hierarchy:
      * - Level 2: Per-IP timeout (tools.fping.timeout.seconds) - fping -t parameter
-     * - Level 1: Batch operation timeout (fping.batch.blocking.timeout.seconds) - process.waitFor
+     * - Level 1: Batch operation timeout (fping.batch.blocking.timeout.seconds) - process.waitFor()
      *
      * @param vertx Vert.x instance
      * @param ipAddresses List of IP addresses to check
@@ -169,6 +171,53 @@ public class NetworkConnectivityUtil
     }
 
     /**
+     * Single port check for one IP address
+     *
+     * Checks if a specific port is open on a single IP address.
+     * Uses TCP socket connection with configurable timeout.
+     *
+     * @param vertx Vert.x instance
+     * @param ipAddress IP address to check
+     * @param port Port number to check
+     * @param config Configuration object
+     * @return Future<Boolean> - true if port is open, false otherwise
+     */
+    public static Future<Boolean> portCheck(Vertx vertx, String ipAddress, int port, JsonObject config)
+    {
+        var promise = Promise.<Boolean>promise();
+
+        var perSocketTimeoutSeconds = config.getInteger("tools.port.check.timeout.seconds", 5);
+
+        vertx.executeBlocking(() ->
+        {
+            try (var socket = new Socket())
+            {
+                socket.connect(new InetSocketAddress(ipAddress, port), perSocketTimeoutSeconds * 1000);
+
+                logger.debug("Port {} open on {}", port, ipAddress);
+
+                return true;
+            }
+            catch (IOException exception)
+            {
+                logger.debug("Port {} not reachable on {}: {}", port, ipAddress, exception.getMessage());
+
+                return false;
+            }
+        })
+
+        .onSuccess(promise::complete)
+        .onFailure(cause ->
+        {
+            logger.error("Port check failed for {}:{}", ipAddress, port, cause);
+
+            promise.complete(false);
+        });
+
+        return promise.future();
+    }
+
+    /**
      * Batch port check for multiple IPs (PARALLEL - concurrent checks)
 
      * Uses Java parallel streams to check multiple ports concurrently.
@@ -200,7 +249,8 @@ public class NetworkConnectivityUtil
 
         vertx.executeBlocking(() ->
         {
-            var results = new HashMap<String, Boolean>();
+            // Use ConcurrentHashMap for thread-safe parallel access
+            var results = new ConcurrentHashMap<String, Boolean>();
 
             // Use parallel stream for concurrent port checks
             ipAddresses.parallelStream().forEach(ip ->
@@ -221,10 +271,8 @@ public class NetworkConnectivityUtil
                     logger.debug("Port {} not reachable on {}: {}", port, ip, exception.getMessage());
                 }
 
-                synchronized (results)
-                {
-                    results.put(ip, portOpen);
-                }
+                // ConcurrentHashMap.put() is thread-safe, no synchronization needed
+                results.put(ip, portOpen);
             });
 
             logger.debug("Batch port check (port {}): {}/{} ports reachable",

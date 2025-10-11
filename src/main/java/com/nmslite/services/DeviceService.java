@@ -45,10 +45,6 @@ public interface DeviceService
                 .build(DeviceService.class);
     }
 
-    // ========================================
-    // DEVICE MANAGEMENT OPERATIONS
-    // ========================================
-
     /**
      * List devices by provision status only
      * FILTER: is_provisioned = <param>, is_deleted = false

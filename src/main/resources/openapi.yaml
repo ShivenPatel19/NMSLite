@@ -257,25 +257,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /api/auth/logout:
-    post:
-      tags:
-        - Authentication
-      summary: User logout
-      description: Logout user (client should discard JWT token)
-      responses:
-        '200':
-          description: Logout successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  message:
-                    type: string
-
   /api/users:
     get:
       tags:

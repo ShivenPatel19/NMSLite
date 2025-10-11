@@ -77,63 +77,54 @@ public class NMSLiteApplication
      */
     public static void main(String[] args)
     {
-        logger.info("🚀 Starting NMSLite Application...");
+        logger.info("Starting NMSLite Application");
 
         vertx = Vertx.vertx();
 
         // Load configuration, initialize database, and deploy all verticles
+        // Deploy all verticles using single method
         loadConfiguration()
             .compose(config ->
             {
                 // Configure logging based on application.conf
                 LoggingConfigurator.configure(config);
 
-                logger.info("✅ Configuration loaded from application.conf");
+                logger.info("Configuration loaded successfully");
 
                 // Create shared worker executor
                 setupWorkerExecutor(config);
 
-                // Initialize database services BEFORE deploying verticles
+                // Initialize database services before deploying verticles
                 return initializeDatabase(config);
             })
-            .compose(config ->
-            {
-                // Deploy all verticles using single method
-                return deployAllVerticles(config);
-            })
+            .compose(NMSLiteApplication::deployAllVerticles)
             .onSuccess(v ->
             {
-                logger.info("🎉 NMSLite Application started successfully!");
-
-                logger.info("📡 HTTP API available at: http://localhost:8080");
+                logger.info("NMSLite Application started successfully - HTTP API available at http://localhost:8080");
 
                 // Add shutdown hook for graceful shutdown
                 Runtime.getRuntime().addShutdownHook(new Thread(() ->
                 {
-                    logger.info("🛑 Shutdown signal received, stopping application gracefully...");
+                    logger.info("Shutdown signal received");
 
                     cleanup()
                         .compose(cleanupResult -> vertx.close())
-                        .onSuccess(closeResult -> logger.info("✅ Application stopped gracefully"))
-                        .onFailure(cause -> logger.error("❌ Error during graceful shutdown", cause));
+                        .onSuccess(closeResult -> logger.info("Application stopped gracefully"))
+                        .onFailure(cause -> logger.error("Error during graceful shutdown", cause));
                 }));
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Failed to start NMSLite Application", cause);
+                logger.error("Failed to start NMSLite Application", cause);
 
                 // Cleanup and close Vertx on startup failure
                 cleanup()
                     .compose(cleanupResult -> vertx.close())
                     .onComplete(closeResult ->
                     {
-                        if (closeResult.succeeded())
+                        if (closeResult.failed())
                         {
-                            logger.info("✅ Vertx instance closed after startup failure");
-                        }
-                        else
-                        {
-                            logger.error("❌ Failed to close Vertx instance", closeResult.cause());
+                            logger.error("Failed to close Vertx instance", closeResult.cause());
                         }
 
                         System.exit(1);
@@ -150,17 +141,10 @@ public class NMSLiteApplication
      */
     private static Future<JsonObject> initializeDatabase(JsonObject config)
     {
-        logger.info("🔧 Initializing database services before verticle deployment");
-
         databaseInitializer = new DatabaseInitializer(vertx, config.getJsonObject("database", new JsonObject()));
 
         return databaseInitializer.initialize()
-            .compose(v ->
-            {
-                logger.info("✅ Database services initialized and ready");
-
-                return Future.succeededFuture(config);
-            });
+            .compose(v -> Future.succeededFuture(config));
     }
 
     /**
@@ -173,7 +157,7 @@ public class NMSLiteApplication
      */
     private static Future<Void> deployAllVerticles(JsonObject config)
     {
-        logger.info("🚀 Deploying all verticles - 3-Verticle Architecture");
+        logger.info("Deploying verticles");
 
         // Deploy ServerVerticle
         var serverOptions = new DeploymentOptions()
@@ -184,7 +168,7 @@ public class NMSLiteApplication
             {
                 deployedVerticleIds.add(serverId);
 
-                logger.info("✅ ServerVerticle deployed: {}", serverId);
+                logger.debug("ServerVerticle deployed: {}", serverId);
 
                 // Deploy PollingMetricsVerticle
                 var pollingOptions = new DeploymentOptions()
@@ -196,7 +180,7 @@ public class NMSLiteApplication
             {
                 deployedVerticleIds.add(pollingId);
 
-                logger.info("✅ PollingMetricsVerticle deployed: {}", pollingId);
+                logger.debug("PollingMetricsVerticle deployed: {}", pollingId);
 
                 // Deploy DiscoveryVerticle
                 var discoveryOptions = new DeploymentOptions()
@@ -208,18 +192,14 @@ public class NMSLiteApplication
             {
                 deployedVerticleIds.add(discoveryId);
 
-                logger.info("✅ DiscoveryVerticle deployed: {}", discoveryId);
+                logger.debug("DiscoveryVerticle deployed: {}", discoveryId);
 
-                logger.info("🎯 All verticles deployed successfully!");
-
-                logger.info("📊 Total verticles deployed: {}", deployedVerticleIds.size());
-
-                logger.info("🎯 NMSLite is ready with 3-verticle architecture + database services!");
+                logger.info("All {} verticles deployed successfully", deployedVerticleIds.size());
 
                 return Future.<Void>succeededFuture();
             })
             .onFailure(cause ->
-                    logger.error("❌ Failed to deploy verticles", cause));
+                    logger.error("Failed to deploy verticles", cause));
     }
 
     /**
@@ -229,7 +209,7 @@ public class NMSLiteApplication
      */
     private static Future<Void> cleanup()
     {
-        logger.info("🧹 Starting cleanup...");
+        logger.info("Starting cleanup");
 
         var cleanupFutures = new ArrayList<Future<Void>>();
 
@@ -239,74 +219,39 @@ public class NMSLiteApplication
             cleanupFutures.add(databaseInitializer.cleanup());
         }
 
-        if (deployedVerticleIds.isEmpty())
+        // Undeploy all verticles if any exist
+        if (!deployedVerticleIds.isEmpty())
         {
-            logger.info("✅ No verticles to cleanup");
+            for (var deploymentId : deployedVerticleIds)
+            {
+                var undeployFuture = vertx.undeploy(deploymentId)
+                    .onSuccess(v -> logger.debug("Verticle undeployed: {}", deploymentId))
+                    .onFailure(cause -> logger.error("Failed to undeploy verticle: {}", deploymentId, cause));
 
-            // Wait for database cleanup
-            return Future.join(cleanupFutures)
-                .compose(result ->
-                {
-                    // Close worker executor
-                    if (workerExecutor != null)
-                    {
-                        workerExecutor.close();
-
-                        logger.info("✅ Worker executor closed");
-                    }
-
-                    return Future.<Void>succeededFuture();
-                });
+                cleanupFutures.add(undeployFuture);
+            }
         }
 
-        // Undeploy all verticles
-        var undeployFutures = new ArrayList<Future<Void>>();
-
-        for (var deploymentId : deployedVerticleIds)
-        {
-            var undeployFuture = vertx.undeploy(deploymentId)
-                .onSuccess(v -> logger.info("✅ Verticle undeploy: {}", deploymentId))
-                .onFailure(cause -> logger.error("❌ Failed to undeploy verticle: {}", deploymentId, cause));
-
-            undeployFutures.add(undeployFuture);
-        }
-
-        // Wait for all undeployments to complete
-        cleanupFutures.addAll(undeployFutures);
-
+        // Wait for all cleanup operations to complete
         return Future.join(cleanupFutures)
-            .compose(result ->
+            .onSuccess(result -> deployedVerticleIds.clear())
+            .onFailure(cause ->
             {
-                logger.info("✅ All verticles undeploy successfully");
+                logger.error("Some cleanup operations failed", cause);
 
                 deployedVerticleIds.clear();
-
-                // Close worker executor
-                if (workerExecutor != null)
-                {
-                    workerExecutor.close();
-
-                    logger.info("✅ Worker executor closed");
-                }
-
-                return Future.<Void>succeededFuture();
             })
-            .recover(cause ->
+            .onComplete(result ->
             {
-                logger.error("❌ Some verticles failed to undeploy", cause);
-
-                deployedVerticleIds.clear();
-
-                // Still close worker executor
+                // Always close worker executor, regardless of success or failure
                 if (workerExecutor != null)
                 {
                     workerExecutor.close();
 
-                    logger.info("✅ Worker executor closed (with errors)");
+                    logger.debug("Worker executor closed");
                 }
-
-                return Future.succeededFuture();
-            });
+            })
+            .mapEmpty();
     }
 
     /**
@@ -323,7 +268,7 @@ public class NMSLiteApplication
         // Create shared worker executor for all blocking operations
         workerExecutor = vertx.createSharedWorkerExecutor("nmslite-worker", workerPoolSize);
 
-        logger.info("🔧 Worker executor created: pool-size={}", workerPoolSize);
+        logger.debug("Worker executor created with pool size: {}", workerPoolSize);
     }
 
     /**
@@ -348,24 +293,24 @@ public class NMSLiteApplication
         retriever.getConfig()
             .onSuccess(config ->
             {
-                logger.info("📋 Configuration loaded successfully");
+                var dbConfig = config.getJsonObject("database");
 
-                logger.info("🗄️  Database: {}:{}/{}",
-                    config.getJsonObject("database").getString("host"),
-                    config.getJsonObject("database").getInteger("port"),
-                    config.getJsonObject("database").getString("database"));
+                var serverConfig = config.getJsonObject("server");
 
-                logger.info("🌐 HTTP Port: {}",
-                    config.getJsonObject("server").getInteger("http.port"));
+                var toolsConfig = config.getJsonObject("tools");
 
-                logger.info("🔧 GoEngine Path: {}",
-                    config.getJsonObject("tools").getString("goengine.path"));
+                logger.info("Configuration loaded - Database: {}:{}/{}, HTTP Port: {}, GoEngine: {}",
+                    dbConfig.getString("host"),
+                    dbConfig.getInteger("port"),
+                    dbConfig.getString("database"),
+                    serverConfig.getJsonObject("http").getInteger("port"),
+                    toolsConfig.getJsonObject("goengine").getString("path"));
 
                 promise.complete(config);
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Failed to load configuration from application.conf", cause);
+                logger.error("Failed to load configuration from application.conf", cause);
 
                 promise.fail(cause);
             });

@@ -44,10 +44,6 @@ public interface CredentialProfileService
             .build(CredentialProfileService.class);
     }
 
-    // ========================================
-    // CREDENTIAL MANAGEMENT OPERATIONS
-    // ========================================
-
     /**
      * Get all credential profiles
      *

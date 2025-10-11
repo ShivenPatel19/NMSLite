@@ -90,8 +90,6 @@ public abstract class QueueBatchProcessor<T>
         this.processedBatches = 0;
 
         this.totalItems = items.size();
-
-        logger.debug("📋 Queue initialized: {} items, batch size: {}", totalItems, batchSize);
     }
 
     /**
@@ -117,9 +115,7 @@ public abstract class QueueBatchProcessor<T>
     {
         if (remainingItems.isEmpty())
         {
-            logger.info("🎉 All batches completed: {} results from {} items",
-
-                allResults.size(), totalItems);
+            logger.info("Batch processing completed: {} results from {} items", allResults.size(), totalItems);
 
             promise.complete(allResults);
 
@@ -130,8 +126,6 @@ public abstract class QueueBatchProcessor<T>
 
         if (currentBatch.isEmpty())
         {
-            logger.info("🎉 Queue empty, completing with {} results", allResults.size());
-
             promise.complete(allResults);
 
             return;
@@ -139,11 +133,7 @@ public abstract class QueueBatchProcessor<T>
 
         processedBatches++;
 
-        var remainingCount = remainingItems.size();
-
-        logger.info("🔄 Processing batch {} ({} items, {} remaining in queue)",
-
-            processedBatches, currentBatch.size(), remainingCount);
+        logger.debug("Processing batch {}: {} items, {} remaining", processedBatches, currentBatch.size(), remainingItems.size());
 
         processBatch(currentBatch)
             .onSuccess(batchResults ->
@@ -156,19 +146,13 @@ public abstract class QueueBatchProcessor<T>
                     }
                 }
 
-                logger.info("✅ Batch {} completed: {} results, {} total results, {} items remaining",
-
-                    processedBatches, batchResults != null ? batchResults.size() : 0,
-
-                    allResults.size(), remainingItems.size());
-
                 currentBatch.clear();
 
                 processNext(promise);
             })
             .onFailure(cause ->
             {
-                logger.error("❌ Batch {} failed: {}", processedBatches, cause.getMessage());
+                logger.error("Batch {} failed: {}", processedBatches, cause.getMessage());
 
                 handleBatchFailure(currentBatch, cause);
 
@@ -252,24 +236,5 @@ public abstract class QueueBatchProcessor<T>
         return totalItems;
     }
 
-    /**
-     * Get the number of batches processed so far.
-     *
-     * @return Number of batches processed
-     */
-    public int getProcessedBatches()
-    {
-        return processedBatches;
-    }
-
-    /**
-     * Get the number of items remaining in the queue.
-     *
-     * @return Number of items not yet processed
-     */
-    public int getRemainingCount()
-    {
-        return remainingItems.size();
-    }
 }
 

@@ -50,7 +50,7 @@ public class AuthenticationMiddleware
 
                 if (authHeader == null || authHeader.trim().isEmpty())
                 {
-                    logger.warn("🚫 Missing Authorization header for {}", ctx.request().path());
+                    logger.debug("Missing Authorization header for {}", ctx.request().path());
 
                     handleUnauthorized(ctx, "Missing Authorization header");
 
@@ -60,7 +60,7 @@ public class AuthenticationMiddleware
                 // Validate token format
                 if (!authHeader.startsWith("Bearer "))
                 {
-                    logger.warn("🚫 Invalid Authorization header format for {}", ctx.request().path());
+                    logger.debug("Invalid Authorization header format for {}", ctx.request().path());
 
                     handleUnauthorized(ctx, "Invalid Authorization header format. Use 'Bearer <token>'");
 
@@ -69,14 +69,12 @@ public class AuthenticationMiddleware
 
                 var token = authHeader.substring(7); // Remove "Bearer " prefix
 
-                logger.debug("🔍 Extracted token for validation: {}", token.substring(0, Math.min(20, token.length())) + "...");
-
                 // Validate JWT token
                 var userInfo = jwtUtil.validateToken(token);
 
                 if (userInfo == null)
                 {
-                    logger.warn("🚫 Invalid JWT token for {}", ctx.request().path());
+                    logger.debug("Invalid JWT token for {}", ctx.request().path());
 
                     handleUnauthorized(ctx, "Invalid or expired JWT token");
 
@@ -88,22 +86,12 @@ public class AuthenticationMiddleware
 
                 if (!isActive)
                 {
-                    logger.warn("🚫 Inactive user attempted access: {}", userInfo.getString("username"));
+                    logger.debug("Inactive user attempted access: {}", userInfo.getString("username"));
 
                     handleUnauthorized(ctx, "User account is inactive");
 
                     return;
                 }
-
-                // Store user information in context for use in handlers
-                ctx.put("user", userInfo);
-
-                ctx.put("user_id", userInfo.getString("user_id"));
-
-                ctx.put("username", userInfo.getString("username"));
-
-                logger.debug("✅ Authentication successful for user: {} accessing {}",
-                           userInfo.getString("username"), ctx.request().path());
 
                 // Continue to next handler
                 ctx.next();
@@ -111,8 +99,7 @@ public class AuthenticationMiddleware
             }
             catch (Exception exception)
             {
-                logger.error("❌ Authentication middleware error for {}: {}",
-                           ctx.request().path(), exception.getMessage());
+                logger.error("Authentication middleware error for {}: {}", ctx.request().path(), exception.getMessage());
 
                 handleUnauthorized(ctx, "Authentication failed");
             }

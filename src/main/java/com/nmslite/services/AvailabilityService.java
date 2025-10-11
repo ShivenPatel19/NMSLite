@@ -44,10 +44,6 @@ public interface AvailabilityService
             .build(AvailabilityService.class);
     }
 
-    // ========================================
-    // AVAILABILITY STATUS OPERATIONS
-    // ========================================
-
     /**
      * Get current availability status for specific device (device must be active, non-deleted)
      *

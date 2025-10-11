@@ -58,10 +58,11 @@ public class ExceptionUtil
 
     /**
      * Extract meaningful error message from exception
+     * Combines default message (context) with exception message (specific error) when both are available
      *
      * @param cause Exception cause
-     * @param defaultMessage Default message if cause message is null
-     * @return Error message
+     * @param defaultMessage Default message providing context
+     * @return Error message (combined or default only)
      */
     private static String getMessage(Throwable cause, String defaultMessage)
     {
@@ -70,9 +71,16 @@ public class ExceptionUtil
             return defaultMessage;
         }
 
-        var message = cause.getMessage();
+        var exceptionMessage = cause.getMessage();
 
-        return (message != null && !message.trim().isEmpty()) ? message : defaultMessage;
+        // If exception has a message, combine it with default message for better context
+        if (exceptionMessage != null && !exceptionMessage.trim().isEmpty())
+        {
+            return defaultMessage + ": " + exceptionMessage;
+        }
+
+        // If no exception message, use default message only
+        return defaultMessage;
     }
 
 }

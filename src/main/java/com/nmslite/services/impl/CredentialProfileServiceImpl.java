@@ -110,9 +110,6 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
 
         var password = credentialData.getString("password");
 
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
-
         // Encrypt password for secure storage
         var encryptedPassword = PasswordUtil.encryptPassword(password);
 
@@ -201,9 +198,6 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
 
             params.add(encryptedPassword);
         }
-
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
 
         // Remove trailing comma and space, add WHERE clause
         var sqlStr = sqlBuilder.toString();
@@ -453,6 +447,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
             uuidArray[i] = UUID.fromString(credentialIds.getString(i));
         }
 
+        // ANY(list of ids) -> compares each row's UUID against every UUID in the array, returning row if matched.
         var sql = """
                 SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
                 FROM credential_profiles

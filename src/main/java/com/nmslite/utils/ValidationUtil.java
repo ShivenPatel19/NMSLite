@@ -245,6 +245,31 @@ public class ValidationUtil
     }
 
     /**
+     * Validate UUID string (simple check without HTTP response)
+     *
+     * @param uuidValue UUID string to validate
+     * @return true if valid UUID, false otherwise
+     */
+    public static boolean isValidUUID(String uuidValue)
+    {
+        if (uuidValue == null || uuidValue.trim().isEmpty())
+        {
+            return false;
+        }
+
+        try
+        {
+            UUID.fromString(uuidValue);
+
+            return true;
+        }
+        catch (IllegalArgumentException exception)
+        {
+            return false;
+        }
+    }
+
+    /**
      * Validate timeout range (0-600 seconds)
      *
      * @param ctx Routing context
@@ -438,67 +463,6 @@ public class ValidationUtil
 
     }
 
-    /**
-     * Device - Device-related validations
-     */
-    public static class Device
-    {
-
-        /**
-         * Validate device update fields
-         *
-         * @param ctx routing context
-         * @param requestBody request body to validate
-         * @return true if validation passes, false otherwise
-         */
-        public static boolean validateUpdate(RoutingContext ctx, JsonObject requestBody)
-        {
-            if (!validateUpdateFields(ctx, requestBody, "device_name", "port",
-                "polling_interval_seconds", "timeout_seconds", "retry_count",
-                "alert_threshold_cpu", "alert_threshold_memory", "alert_threshold_disk"))
-            {
-                return false;
-            }
-
-            if (!validateNumericRange(ctx, requestBody, "port", 1, 65535))
-            {
-                return false;
-            }
-
-            if (!validateNumericRange(ctx, requestBody, "polling_interval_seconds", 60, 86400))
-            {
-                return false;
-            }
-
-            if (!validateTimeoutRange(ctx, requestBody.getInteger("timeout_seconds")))
-            {
-                return false;
-            }
-
-            if (!validateRetryCountRange(ctx, requestBody.getInteger("retry_count")))
-            {
-                return false;
-            }
-
-            if (!validatePercentageRange(ctx, requestBody.getInteger("alert_threshold_cpu"), "alert_threshold_cpu"))
-            {
-                return false;
-            }
-
-            if (!validatePercentageRange(ctx, requestBody.getInteger("alert_threshold_memory"), "alert_threshold_memory"))
-            {
-                return false;
-            }
-
-            if (!validatePercentageRange(ctx, requestBody.getInteger("alert_threshold_disk"), "alert_threshold_disk"))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-    }
 
     /**
      * Credential - Credential profile validations
@@ -549,8 +513,9 @@ public class ValidationUtil
 
             return true;
         }
-
+        
     }
+
 
     /**
      * DiscoveryProfile - Discovery profile validations
@@ -601,15 +566,13 @@ public class ValidationUtil
         {
             var credentialProfileIdsObj = profileData.getValue("credential_profile_ids");
 
-            if (!(credentialProfileIdsObj instanceof JsonArray))
+            if (!(credentialProfileIdsObj instanceof JsonArray credentialProfileIds))
             {
                 ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid credential_profile_ids format"),
                     "credential_profile_ids must be an array of UUID strings");
 
                 return false;
             }
-
-            var credentialProfileIds = (JsonArray) credentialProfileIdsObj;
 
             if (credentialProfileIds.isEmpty())
             {
@@ -652,6 +615,68 @@ public class ValidationUtil
 
                 return false;
             }
+        }
+
+    }
+
+    /**
+     * Device - Device-related validations
+     */
+    public static class Device
+    {
+
+        /**
+         * Validate device update fields
+         *
+         * @param ctx routing context
+         * @param requestBody request body to validate
+         * @return true if validation passes, false otherwise
+         */
+        public static boolean validateUpdate(RoutingContext ctx, JsonObject requestBody)
+        {
+            if (!validateUpdateFields(ctx, requestBody, "device_name", "port",
+                    "polling_interval_seconds", "timeout_seconds", "retry_count",
+                    "alert_threshold_cpu", "alert_threshold_memory", "alert_threshold_disk"))
+            {
+                return false;
+            }
+
+            if (!validateNumericRange(ctx, requestBody, "port", 1, 65535))
+            {
+                return false;
+            }
+
+            if (!validateNumericRange(ctx, requestBody, "polling_interval_seconds", 60, 86400))
+            {
+                return false;
+            }
+
+            if (!validateTimeoutRange(ctx, requestBody.getInteger("timeout_seconds")))
+            {
+                return false;
+            }
+
+            if (!validateRetryCountRange(ctx, requestBody.getInteger("retry_count")))
+            {
+                return false;
+            }
+
+            if (!validatePercentageRange(ctx, requestBody.getInteger("alert_threshold_cpu"), "alert_threshold_cpu"))
+            {
+                return false;
+            }
+
+            if (!validatePercentageRange(ctx, requestBody.getInteger("alert_threshold_memory"), "alert_threshold_memory"))
+            {
+                return false;
+            }
+
+            if (!validatePercentageRange(ctx, requestBody.getInteger("alert_threshold_disk"), "alert_threshold_disk"))
+            {
+                return false;
+            }
+
+            return true;
         }
 
     }
