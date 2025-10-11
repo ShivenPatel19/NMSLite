@@ -32,9 +32,9 @@ public class PollingDevice
     public String deviceName;            // devices.device_name
 
     // GoEngine required fields
-    public String address;               // devices.ip_address (GoEngine uses "address")
+    public String address;               // devices.ip_address
 
-    public String deviceType;            // devices.device_type (convert "server_linux" → "server linux")
+    public String deviceType;            // devices.device_type
 
     public String username;              // credential_profiles.username
 
@@ -50,7 +50,7 @@ public class PollingDevice
     public long pollingIntervalSeconds;  // devices.polling_interval_seconds
 
     // Global configuration (from config file, same for all devices)
-    public int connectionTimeoutSeconds; // device.defaults.connection.timeout.seconds (NOT in database)
+    public int connectionTimeoutSeconds; // polling.connection.timeout.seconds (NOT in database)
 
     // Timestamps
     public Instant monitoringEnabledAt;  // devices.monitoring_enabled_at (anchor for scheduling)
@@ -60,6 +60,8 @@ public class PollingDevice
     public Instant nextScheduledAt;      // Computed: aligned next poll time
 
     public int consecutiveFailures;      // Tracked: failure count for auto-disable
+
+    public PollingResult pollingResult;  // Transient: result of current polling cycle
 
     // ===== HELPER METHODS =====
 
@@ -145,6 +147,27 @@ public class PollingDevice
     public boolean shouldAutoDisable(int maxCyclesSkipped)
     {
         return consecutiveFailures >= maxCyclesSkipped;
+    }
+
+    /**
+     * Resets the polling result to NOT_PROCESSED.
+     * Should be called at the start of each polling cycle.
+     */
+    public void resetPollingResult()
+    {
+        pollingResult = PollingResult.NOT_PROCESSED;
+    }
+
+    /**
+     * Checks if the device failed during the current polling cycle.
+     *
+     * @return true if device failed (connectivity or GoEngine), false otherwise
+     */
+    public boolean hasFailed()
+    {
+        return pollingResult == PollingResult.CONNECTIVITY_FAILED ||
+
+               pollingResult == PollingResult.GOENGINE_FAILED;
     }
 
     /**
