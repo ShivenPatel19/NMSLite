@@ -1,8 +1,10 @@
 package com.nmslite;
 
-import com.nmslite.core.DatabaseInitializer;
+import ch.qos.logback.classic.Level;
 
-import com.nmslite.core.LoggingConfigurator;
+import ch.qos.logback.classic.LoggerContext;
+
+import com.nmslite.core.DatabaseInitializer;
 
 import com.nmslite.verticles.DiscoveryVerticle;
 
@@ -87,7 +89,7 @@ public class NMSLiteApplication
             .compose(config ->
             {
                 // Configure logging based on application.conf
-                LoggingConfigurator.configure(config);
+                configureLogging(config);
 
                 logger.info("Configuration loaded successfully");
 
@@ -203,6 +205,106 @@ public class NMSLiteApplication
     }
 
     /**
+     * Configure logging based on application configuration.
+
+     * Features:
+     * - Enable/disable logging globally
+     * - Set log level (TRACE, DEBUG, INFO, WARN, ERROR)
+     * - Enable/disable file logging
+     * - Enable/disable console logging
+     * - Configure log file path
+
+     * Configuration in application.conf:
+     * logging {
+     *   enabled = true                    # Enable/disable all logging
+     *   level = "INFO"                    # Log level
+     *   file.path = "logs/nmslite.log"   # Log file path
+     *   file.enabled = true               # Enable file logging
+     *   console.enabled = true            # Enable console logging
+     * }
+     *
+     * @param config Application configuration JsonObject
+     */
+    private static void configureLogging(JsonObject config)
+    {
+        var loggingConfig = config.getJsonObject("logging", new JsonObject());
+
+        var loggingEnabled = loggingConfig.getBoolean("enabled", true);
+
+        var logLevel = loggingConfig.getString("level", "INFO");
+
+        var fileEnabled = loggingConfig.getBoolean("file.enabled", true);
+
+        var consoleEnabled = loggingConfig.getBoolean("console.enabled", true);
+
+        var filePath = loggingConfig.getString("file.path", "logs/nmslite.log");
+
+        // Set system properties for logback.xml
+        System.setProperty("nmslite.log.level", loggingEnabled ? logLevel : "OFF");
+
+        System.setProperty("nmslite.log.file.path", filePath);
+
+        // Configure appender based on enabled flags
+        if (!consoleEnabled)
+        {
+            System.setProperty("nmslite.log.console.appender", "NULL");
+        }
+        else
+        {
+            System.setProperty("nmslite.log.console.appender", "CONSOLE");
+        }
+
+        if (!fileEnabled)
+        {
+            System.setProperty("nmslite.log.file.appender", "NULL");
+        }
+        else
+        {
+            System.setProperty("nmslite.log.file.appender", "FILE");
+        }
+
+        // Programmatically configure logback
+        var loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+
+        // Set root logger level
+        var rootLogger = loggerContext.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
+
+        if (loggingEnabled)
+        {
+            rootLogger.setLevel(Level.toLevel(logLevel, Level.INFO));
+        }
+        else
+        {
+            rootLogger.setLevel(Level.OFF);
+        }
+
+        // Set application logger level
+        var appLogger = loggerContext.getLogger("com.nmslite");
+
+        if (loggingEnabled)
+        {
+            appLogger.setLevel(Level.toLevel(logLevel, Level.INFO));
+        }
+        else
+        {
+            appLogger.setLevel(Level.OFF);
+        }
+
+        // Create logs directory if file logging is enabled
+        if (fileEnabled && loggingEnabled)
+        {
+            var logFile = new java.io.File(filePath);
+
+            var logDir = logFile.getParentFile();
+
+            if (logDir != null && !logDir.exists())
+            {
+                logDir.mkdirs();
+            }
+        }
+    }
+
+    /**
      * Cleans up all deployed verticles, database resources, and worker executor.
      *
      * @return Future that completes when cleanup is done
@@ -225,7 +327,7 @@ public class NMSLiteApplication
             for (var deploymentId : deployedVerticleIds)
             {
                 var undeployFuture = vertx.undeploy(deploymentId)
-                    .onSuccess(v -> logger.debug("Verticle undeployed: {}", deploymentId))
+                    .onSuccess(v -> logger.debug("Verticle undeploy: {}", deploymentId))
                     .onFailure(cause -> logger.error("Failed to undeploy verticle: {}", deploymentId, cause));
 
                 cleanupFutures.add(undeployFuture);

@@ -226,15 +226,5 @@ public abstract class QueueBatchProcessor<T>
      */
     protected abstract void handleBatchFailure(List<T> batch, Throwable cause);
 
-    /**
-     * Get the total number of items initially queued for processing.
-     *
-     * @return Total number of items
-     */
-    public int getTotalItems()
-    {
-        return totalItems;
-    }
-
 }
 

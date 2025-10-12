@@ -609,10 +609,6 @@ public class DiscoveryVerticle extends AbstractVerticle
             return promise.future();
         }
 
-        var requestId = "DISC_" + System.currentTimeMillis();
-
-        var batchId = "batch_" + System.currentTimeMillis();
-
         // Step 1: Perform connectivity checks first
         performConnectivityChecks(targetIps, profileData)
             .compose(connectivityResults ->
@@ -648,7 +644,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
                 // Step 2: Proceed with GoEngine discovery for reachable IPs only
 
-                return executeGoEngineForReachableIPs(profileData, reachableIPs, unreachableIPs, batchId, requestId);
+                return executeGoEngineForReachableIPs(profileData, reachableIPs, unreachableIPs);
             })
             .onSuccess(promise::complete)
             .onFailure(promise::fail);
@@ -764,21 +760,20 @@ public class DiscoveryVerticle extends AbstractVerticle
      * Execute GoEngine discovery for reachable IPs and create results including unreachable ones
      */
     private Future<JsonArray> executeGoEngineForReachableIPs(JsonObject profileData, JsonArray reachableIPs,
-                                                             JsonArray unreachableIPs, String batchId, String requestId)
+                                                             JsonArray unreachableIPs)
     {
         var promise = Promise.<JsonArray>promise();
 
         vertx.executeBlocking(() ->
         {
             // Create GoEngine discovery_request (--targets) format for reachable IPs only
-            var discoveryRequest = createDiscoveryRequest(profileData, reachableIPs, batchId);
+            var discoveryRequest = createDiscoveryRequest(profileData, reachableIPs);
 
             // Prepare GoEngine command
             var command = Arrays.asList(
                 goEnginePath,
                 "--mode", "discovery",
-                "--targets", discoveryRequest.encode(),
-                "--request-id", requestId
+                "--targets", discoveryRequest.encode()
             );
 
             var pb = new ProcessBuilder(command);
@@ -864,7 +859,7 @@ public class DiscoveryVerticle extends AbstractVerticle
     /**
      * Create GoEngine discovery_request format with credential iteration
      */
-    private JsonObject createDiscoveryRequest(JsonObject profileData, JsonArray targetIps, String batchId)
+    private JsonObject createDiscoveryRequest(JsonObject profileData, JsonArray targetIps)
     {
         // Convert target IPs to string array
         var targetIpArray = new JsonArray();
@@ -898,14 +893,12 @@ public class DiscoveryVerticle extends AbstractVerticle
         var discoveryConfig = new JsonObject()
             .put("device_type", deviceTypeName)
             .put("port", profileData.getInteger("port"))
-            .put("protocol", profileData.getString("protocol"))
             .put("timeout_seconds", timeoutSeconds)
             .put("connection_timeout", connectionTimeoutSeconds);
 
         // Create and return the complete discovery_request
         return new JsonObject()
             .put("discovery_request", new JsonObject()
-                .put("batch_id", batchId)
                 .put("target_ips", targetIpArray)
                 .put("credentials", credentials)
                 .put("discovery_config", discoveryConfig)

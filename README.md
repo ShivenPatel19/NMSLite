@@ -1,6 +1,6 @@
 # NMSLite - Network Monitoring System
 
-**Version:** 2.0-SNAPSHOT
+**Version:** 3.0-SNAPSHOT
 **Framework:** Vert.x 5.0.4
 **Java Version:** 21
 **Database:** PostgreSQL 12+
@@ -135,9 +135,10 @@ NMSLite implements **hierarchical timeout strategy** for reliability:
 2. **GoEngine Device**: 30s - Per-device discovery timeout
 3. **GoEngine Credential**: 10s - Per-credential attempt timeout
 
-**Polling Timeouts (2 Levels):**
+**Polling/Metrics Timeouts (3 Levels):**
 1. **Vert.x Batch**: 330s - Overall batch operation timeout
 2. **GoEngine Device**: 60s - Per-device metrics collection timeout
+3. **GoEngine Connection**: 10s - SSH/WinRM connection timeout
 
 **Network Timeouts:**
 - **fping**: 5s per-IP, 180s batch timeout
@@ -733,9 +734,10 @@ NMSLite integrates with **GoEngine** (external Go binary) for SSH/WinRM device c
 2. **GoEngine Per-Device**: 30s (per IP address)
 3. **GoEngine Per-Credential**: 10s (per credential attempt)
 
-**Polling (2 Levels):**
+**Polling/Metrics (3 Levels):**
 1. **Vert.x Batch Timeout**: 330s (entire batch operation)
 2. **GoEngine Per-Device**: 60s (per device metrics collection)
+3. **GoEngine Connection**: 10s (SSH/WinRM connection timeout)
 
 ### Platform Support
 

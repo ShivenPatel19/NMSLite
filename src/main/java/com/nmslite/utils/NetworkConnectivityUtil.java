@@ -172,7 +172,7 @@ public class NetworkConnectivityUtil
 
     /**
      * Single port check for one IP address
-     *
+
      * Checks if a specific port is open on a single IP address.
      * Uses TCP socket connection with configurable timeout.
      *
@@ -205,7 +205,6 @@ public class NetworkConnectivityUtil
                 return false;
             }
         })
-
         .onSuccess(promise::complete)
         .onFailure(cause ->
         {

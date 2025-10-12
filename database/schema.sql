@@ -112,7 +112,6 @@ CREATE TABLE metrics (
     metric_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id UUID NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    duration_ms INTEGER,
 
     -- System metrics (only successful metrics stored)
     cpu_usage_percent DECIMAL(5,2) NOT NULL,
@@ -126,7 +125,6 @@ CREATE TABLE metrics (
     disk_free_bytes BIGINT NOT NULL,
 
     -- Constraints
-    CONSTRAINT chk_duration_positive CHECK (duration_ms >= 0),
     CONSTRAINT chk_cpu_range CHECK (cpu_usage_percent BETWEEN 0 AND 100),
     CONSTRAINT chk_memory_range CHECK (memory_usage_percent BETWEEN 0 AND 100),
     CONSTRAINT chk_disk_range CHECK (disk_usage_percent BETWEEN 0 AND 100)

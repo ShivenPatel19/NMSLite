@@ -57,6 +57,8 @@ import java.util.concurrent.TimeUnit;
 
 import java.util.stream.Collectors;
 
+import static java.util.stream.Collectors.toMap;
+
 /**
  * PollingMetricsVerticle - Continuous Device Monitoring
 
@@ -190,7 +192,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         deviceService.deviceListProvisionedAndMonitoringEnabled()
             .compose(devices ->
             {
-                // avoid blocking event loop, if large number of devices to cache
+                // avoid blocking event loop, if large number of devices to be cached
                 return vertx.executeBlocking(() ->
                 {
                     var count = 0;
@@ -320,6 +322,195 @@ public class PollingMetricsVerticle extends AbstractVerticle
         return anchor.plusSeconds(nextCycle * intervalSeconds);
     }
 
+    private void setupEventBusConsumers()
+    {
+        // Cache update consumers
+        vertx.eventBus().consumer("device.monitoring.enabled", msg ->
+        {
+            var data = (JsonObject) msg.body();
+
+            var deviceId = data.getString("device_id");
+
+            onDeviceMonitoringEnabled(deviceId);
+        });
+
+        vertx.eventBus().consumer("device.monitoring.disabled", msg ->
+        {
+            var data = (JsonObject) msg.body();
+
+            var deviceId = data.getString("device_id");
+
+            onDeviceMonitoringDisabled(deviceId);
+        });
+
+        vertx.eventBus().consumer("device.config.updated", msg ->
+        {
+            var data = (JsonObject) msg.body();
+
+            var deviceId = data.getString("device_id");
+
+            onDeviceConfigUpdated(deviceId);
+        });
+    }
+
+    /**
+     * Handle device monitoring enabled event.
+
+     * Event is only published after successful database update,
+     * so no validation checks are needed - just fetch and cache.
+     *
+     * @param deviceId Device ID to add to cache
+     */
+    private void onDeviceMonitoringEnabled(String deviceId)
+    {
+        logger.debug("Device monitoring enabled event: {}", deviceId);
+
+        deviceService.deviceGetById(deviceId)
+                .onSuccess(deviceData ->
+                {
+                    try
+                    {
+                        var pd = createPollingDeviceFromJson(deviceData);
+
+                        deviceCache.put(pd.deviceId, pd);
+
+                        logger.info("Device cache updated: {} added (total cached: {})", pd.deviceName, deviceCache.size());
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.error("Failed to add device {} to cache", deviceId, exception);
+                    }
+                })
+                .onFailure(cause ->
+                        logger.error("Failed to fetch device {} for cache", deviceId, cause));
+    }
+
+    /**
+     * Handle device monitoring disabled event.
+     * Remove device from cache.
+     */
+    private void onDeviceMonitoringDisabled(String deviceId)
+    {
+        logger.debug("Device monitoring disabled event: {}", deviceId);
+
+        var removed = deviceCache.remove(deviceId);
+
+        if (removed != null)
+        {
+            logger.info("Device cache updated: {} removed (total cached: {})", removed.deviceName, deviceCache.size());
+        }
+        else
+        {
+            logger.debug("Device {} not found in cache", deviceId);
+        }
+    }
+
+    /**
+     * Handle device config updated event.
+     * Reload device from database and update cache.
+     */
+    private void onDeviceConfigUpdated(String deviceId)
+    {
+        logger.debug("Device config updated event: {}", deviceId);
+
+        deviceService.deviceGetById(deviceId)
+                .onSuccess(deviceData ->
+                {
+                    try
+                    {
+                        var pd = createPollingDeviceFromJson(deviceData);
+
+                        deviceCache.put(pd.deviceId, pd);  // simply overwrite existing entry
+
+                        logger.info("Device cache updated: {} config refreshed (total cached: {})", pd.deviceName, deviceCache.size());
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.error("Failed to update device {} in cache", deviceId, exception);
+                    }
+                })
+                .onFailure(cause ->
+                        logger.error("Failed to fetch device {} for cache update", deviceId, cause));
+    }
+
+    private void startPeriodicPolling()
+    {
+        pollingTimerId = vertx.setPeriodic(cycleIntervalSeconds * 1000L, timerId -> executePollingCycle());
+
+        logger.info("Periodic polling started with {} second interval", cycleIntervalSeconds);
+    }
+
+    /**
+     * Execute 4-phase polling cycle:
+
+     * Phase 1: Batch Processing
+     *   - Filter devices due for polling (using aligned scheduling)
+     *   - Process in batches with fping + GoEngine
+     *   - Track failures
+
+     * Phase 2: Retry Failed Devices
+     *   - Retry devices that failed in Phase 1
+     *   - Use per-device retry_count
+
+     * Phase 3: Log Exhausted Failures
+     *   - Log devices that failed after all retries to file
+
+     * Phase 4: Auto-Disable
+     *   - Disable monitoring for devices exceeding max_cycles_skipped
+     */
+    private void executePollingCycle()
+    {
+        var startTime = System.currentTimeMillis();
+
+        var now = Instant.now();
+
+        var totalCachedDevices = deviceCache.size();
+
+        // Get devices due for polling from cache (moved to worker thread to avoid blocking)
+        vertx.executeBlocking(() ->
+                        deviceCache.values().stream()
+                                .filter(pd -> pd.isDue(now))
+                                .collect(Collectors.toList()))
+                .onSuccess(dueDevices ->
+                {
+                    if (dueDevices.isEmpty())
+                    {
+                        logger.debug("Polling cycle: 0 devices due (total cached: {})", totalCachedDevices);
+
+                        return;
+                    }
+
+                    logger.info("Polling cycle: {} devices due for polling (total cached: {})", dueDevices.size(), totalCachedDevices);
+
+                    // Phase 1: Batch Processing
+                    // Phase 2: Retry Failed Devices, for current batch only
+                    // Phase 3: Log Exhausted Failures, for current batch only
+                    executeBatchProcessing(dueDevices)
+                            .compose(this::executeRetryFailures)
+                            .compose(this::executeLogFailures)
+                            .compose(v ->
+                            {
+                                // Phase 4: Auto-Disable
+                                return executePhaseAutoDisable();
+                            })
+                            .onComplete(result ->
+                            {
+                                var duration = System.currentTimeMillis() - startTime;
+
+                                if (result.succeeded())
+                                {
+                                    logger.info("Polling cycle completed successfully in {}ms", duration);
+                                }
+                                else
+                                {
+                                    logger.error("Polling cycle failed in {}ms", duration, result.cause());
+                                }
+                            });
+                })
+                .onFailure(cause ->
+                        logger.error("Failed to filter due devices from cache", cause));
+    }
+
     // ========== 4-PHASE POLLING CYCLE IMPLEMENTATION ==========
 
     /**
@@ -388,8 +579,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         batch.forEach(PollingDevice::resetPollingResult);
 
         // Create device map ONCE for O(1) lookups throughout the method
-        var deviceMap = batch.stream()
-            .collect(java.util.stream.Collectors.toMap(d -> d.deviceId, d -> d));
+        var deviceMap = batch.stream().collect(toMap(d -> d.deviceId, d -> d));
 
         // Step 1: Perform connectivity checks (fping + port check)
         return performConnectivityChecksForPolling(batch)
@@ -416,6 +606,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         pd.pollingResult = PollingResult.CONNECTIVITY_FAILED;
 
                         pd.incrementFailures();
+
+                        updateDeviceAvailability(pd.deviceId, false);
                     }
                 }
 
@@ -549,15 +741,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 devicesArray.add(pd.toGoEngineJson());
             }
 
-            // Generate request ID
-            var requestId = "POLL_BATCH_" + System.currentTimeMillis();
-
             // Execute GoEngine with batch input
             var pb = new ProcessBuilder(
                 goEnginePath,
                 "--mode", "metrics",
-                "--devices", devicesArray.encode(),
-                "--request-id", requestId
+                "--devices", devicesArray.encode()
             );
 
             var process = pb.start();
@@ -877,8 +1065,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Store metrics in database
 
      * Transforms GoEngine response format to database schema format:
-     * GoEngine: {"cpu":{"usage_percent":15.2},"memory":{...},"disk":{...},"duration_ms":582}
-     * Database: {"cpu_usage_percent":15.2,"memory_usage_percent":...,"duration_ms":582}
+     * GoEngine: {"cpu":{"usage_percent":15.2},"memory":{...},"disk":{...}}
+     * Database: {"cpu_usage_percent":15.2,"memory_usage_percent":...}
      */
     private void storeMetrics(String deviceId, JsonObject goEngineResult)
     {
@@ -892,7 +1080,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
         // Transform to database schema format
         var metricsData = new JsonObject()
             .put("device_id", deviceId)
-            .put("duration_ms", goEngineResult.getInteger("duration_ms"))
             .put("cpu_usage_percent", cpu.getDouble("usage_percent"))
             .put("memory_usage_percent", memory.getDouble("usage_percent"))
             .put("memory_total_bytes", memory.getLong("total_bytes"))
@@ -920,196 +1107,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
         availabilityService.availabilityUpdateDeviceStatus(deviceId, status, responseTime)
             .onFailure(cause ->
                     logger.error("Failed to record availability for device: {}", deviceId, cause));
-    }
-
-    private void setupEventBusConsumers()
-    {
-        // Cache update consumers
-        vertx.eventBus().consumer("device.monitoring.enabled", msg ->
-        {
-            var data = (JsonObject) msg.body();
-
-            var deviceId = data.getString("device_id");
-
-            onDeviceMonitoringEnabled(deviceId);
-        });
-
-        vertx.eventBus().consumer("device.monitoring.disabled", msg ->
-        {
-            var data = (JsonObject) msg.body();
-
-            var deviceId = data.getString("device_id");
-
-            onDeviceMonitoringDisabled(deviceId);
-        });
-
-        vertx.eventBus().consumer("device.config.updated", msg ->
-        {
-            var data = (JsonObject) msg.body();
-
-            var deviceId = data.getString("device_id");
-
-            onDeviceConfigUpdated(deviceId);
-        });
-    }
-
-    /**
-     * Handle device monitoring enabled event.
-
-     * Event is only published after successful database update,
-     * so no validation checks are needed - just fetch and cache.
-     *
-     * @param deviceId Device ID to add to cache
-     */
-    private void onDeviceMonitoringEnabled(String deviceId)
-    {
-        logger.debug("Device monitoring enabled event: {}", deviceId);
-
-        deviceService.deviceGetById(deviceId)
-            .onSuccess(deviceData ->
-            {
-                try
-                {
-                    var pd = createPollingDeviceFromJson(deviceData);
-
-                    deviceCache.put(pd.deviceId, pd);
-
-                    logger.info("Device cache updated: {} added (total cached: {})", pd.deviceName, deviceCache.size());
-                }
-                catch (Exception exception)
-                {
-                    logger.error("Failed to add device {} to cache", deviceId, exception);
-                }
-            })
-            .onFailure(cause ->
-                    logger.error("Failed to fetch device {} for cache", deviceId, cause));
-    }
-
-    /**
-     * Handle device monitoring disabled event.
-     * Remove device from cache.
-     */
-    private void onDeviceMonitoringDisabled(String deviceId)
-    {
-        logger.debug("Device monitoring disabled event: {}", deviceId);
-
-        var removed = deviceCache.remove(deviceId);
-
-        if (removed != null)
-        {
-            logger.info("Device cache updated: {} removed (total cached: {})", removed.deviceName, deviceCache.size());
-        }
-        else
-        {
-            logger.debug("Device {} not found in cache", deviceId);
-        }
-    }
-
-    /**
-     * Handle device config updated event.
-     * Reload device from database and update cache.
-     */
-    private void onDeviceConfigUpdated(String deviceId)
-    {
-        logger.debug("Device config updated event: {}", deviceId);
-
-        deviceService.deviceGetById(deviceId)
-            .onSuccess(deviceData ->
-            {
-                try
-                {
-                    var pd = createPollingDeviceFromJson(deviceData);
-
-                    deviceCache.put(pd.deviceId, pd);  // simply overwrite existing entry
-
-                    logger.info("Device cache updated: {} config refreshed (total cached: {})", pd.deviceName, deviceCache.size());
-                }
-                catch (Exception exception)
-                {
-                    logger.error("Failed to update device {} in cache", deviceId, exception);
-                }
-            })
-            .onFailure(cause ->
-                    logger.error("Failed to fetch device {} for cache update", deviceId, cause));
-    }
-
-    private void startPeriodicPolling()
-    {
-        pollingTimerId = vertx.setPeriodic(cycleIntervalSeconds * 1000L, timerId ->
-                executePollingCycle());
-
-        logger.info("Periodic polling started with {} second interval", cycleIntervalSeconds);
-    }
-
-    /**
-     * Execute 4-phase polling cycle:
-
-     * Phase 1: Batch Processing
-     *   - Filter devices due for polling (using aligned scheduling)
-     *   - Process in batches with fping + GoEngine
-     *   - Track failures
-
-     * Phase 2: Retry Failed Devices
-     *   - Retry devices that failed in Phase 1
-     *   - Use per-device retry_count
-
-     * Phase 3: Log Exhausted Failures
-     *   - Log devices that failed after all retries to file
-
-     * Phase 4: Auto-Disable
-     *   - Disable monitoring for devices exceeding max_cycles_skipped
-     */
-    private void executePollingCycle()
-    {
-        var startTime = System.currentTimeMillis();
-
-        var now = Instant.now();
-
-        var totalCachedDevices = deviceCache.size();
-
-        // Get devices due for polling from cache (moved to worker thread to avoid blocking)
-        vertx.executeBlocking(() ->
-                        deviceCache.values().stream()
-                            .filter(pd -> pd.isDue(now))
-                            .collect(Collectors.toList()))
-        .onSuccess(dueDevices ->
-        {
-            if (dueDevices.isEmpty())
-            {
-                logger.debug("Polling cycle: 0 devices due (total cached: {})", totalCachedDevices);
-
-                return;
-            }
-
-            logger.info("Polling cycle: {} devices due for polling (total cached: {})", dueDevices.size(), totalCachedDevices);
-
-            // Phase 1: Batch Processing
-            // Phase 2: Retry Failed Devices
-            // Phase 3: Log Exhausted Failures
-            executeBatchProcessing(dueDevices)
-                .compose(this::executeRetryFailures)
-                .compose(this::executeLogFailures)
-                .compose(v ->
-                {
-                    // Phase 4: Auto-Disable
-                    return executePhaseAutoDisable();
-                })
-                .onComplete(result ->
-                {
-                    var duration = System.currentTimeMillis() - startTime;
-
-                    if (result.succeeded())
-                    {
-                        logger.info("Polling cycle completed successfully in {}ms", duration);
-                    }
-                    else
-                    {
-                        logger.error("Polling cycle failed in {}ms", duration, result.cause());
-                    }
-                });
-        })
-        .onFailure(cause ->
-                logger.error("Failed to filter due devices from cache", cause));
     }
 
     /**

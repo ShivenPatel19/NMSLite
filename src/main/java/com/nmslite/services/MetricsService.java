@@ -47,7 +47,7 @@ public interface MetricsService
     /**
      * Store new metrics data (used by PollingMetricsVerticle)
      *
-     * @param metricsData JsonObject containing metrics data (device_id, duration_ms, cpu_usage_percent, memory_usage_percent, memory_total_bytes, memory_used_bytes, memory_free_bytes, disk_usage_percent, disk_total_bytes, disk_used_bytes, disk_free_bytes)
+     * @param metricsData JsonObject containing metrics data (device_id, cpu_usage_percent, memory_usage_percent, memory_total_bytes, memory_used_bytes, memory_free_bytes, disk_usage_percent, disk_total_bytes, disk_used_bytes, disk_free_bytes)
      * @return Future containing JsonObject with creation result
      */
     Future<JsonObject> metricsCreate(JsonObject metricsData);

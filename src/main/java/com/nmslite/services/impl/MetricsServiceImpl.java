@@ -58,8 +58,6 @@ public class MetricsServiceImpl implements MetricsService
 
         var deviceId = metricsData.getString("device_id");
 
-        var durationMs = metricsData.getInteger("duration_ms");
-
         var cpuUsage = metricsData.getDouble("cpu_usage_percent");
 
         var memoryUsage = metricsData.getDouble("memory_usage_percent");
@@ -79,16 +77,16 @@ public class MetricsServiceImpl implements MetricsService
         var diskFree = metricsData.getLong("disk_free_bytes");
 
         var sql = """
-                INSERT INTO metrics (device_id, duration_ms, cpu_usage_percent, memory_usage_percent,
+                INSERT INTO metrics (device_id, cpu_usage_percent, memory_usage_percent,
                                    memory_total_bytes, memory_used_bytes, memory_free_bytes, disk_usage_percent,
                                    disk_total_bytes, disk_used_bytes, disk_free_bytes)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                RETURNING metric_id, device_id, timestamp, duration_ms, cpu_usage_percent, memory_usage_percent,
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING metric_id, device_id, timestamp, cpu_usage_percent, memory_usage_percent,
                          disk_usage_percent
                 """;
 
         pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceId), durationMs, cpuUsage, memoryUsage,
+                .execute(Tuple.of(UUID.fromString(deviceId), cpuUsage, memoryUsage,
                                 memoryTotal, memoryUsed, memoryFree, diskUsage, diskTotal, diskUsed, diskFree))
                 .onSuccess(rows ->
                 {
@@ -99,7 +97,6 @@ public class MetricsServiceImpl implements MetricsService
                             .put("metric_id", row.getUUID("metric_id").toString())
                             .put("device_id", row.getUUID("device_id").toString())
                             .put("timestamp", row.getLocalDateTime("timestamp").toString())
-                            .put("duration_ms", row.getInteger("duration_ms"))
                             .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
                             .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
                             .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
@@ -114,10 +111,6 @@ public class MetricsServiceImpl implements MetricsService
                     if (cause.getMessage().contains("foreign key"))
                     {
                         promise.fail(new IllegalArgumentException("Invalid device ID"));
-                    }
-                    else if (cause.getMessage().contains("chk_duration_positive"))
-                    {
-                        promise.fail(new IllegalArgumentException("Duration must be positive"));
                     }
                     else if (cause.getMessage().contains("chk_cpu_range") ||
                              cause.getMessage().contains("chk_memory_range") ||
@@ -146,7 +139,7 @@ public class MetricsServiceImpl implements MetricsService
         var promise = Promise.<JsonArray>promise();
 
         var sql = """
-                SELECT m.metric_id, m.device_id, m.timestamp, m.duration_ms,
+                SELECT m.metric_id, m.device_id, m.timestamp,
                        m.cpu_usage_percent, m.memory_usage_percent, m.memory_total_bytes, m.memory_used_bytes,
                        m.memory_free_bytes, m.disk_usage_percent, m.disk_total_bytes, m.disk_used_bytes,
                        m.disk_free_bytes,
@@ -180,7 +173,6 @@ public class MetricsServiceImpl implements MetricsService
                                 .put("ip_address", ipAddr)
                                 .put("device_type", row.getString("device_type"))
                                 .put("timestamp", row.getLocalDateTime("timestamp").toString())
-                                .put("duration_ms", row.getInteger("duration_ms"))
                                 .put("cpu_usage_percent", row.getBigDecimal("cpu_usage_percent"))
                                 .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
                                 .put("memory_total_bytes", row.getLong("memory_total_bytes"))
