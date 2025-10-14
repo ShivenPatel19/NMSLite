@@ -49,171 +49,6 @@ components:
       bearerFormat: JWT
       description: JWT token obtained from /api/auth/login endpoint
 
-  schemas:
-    Error:
-      type: object
-      properties:
-        success:
-          type: boolean
-        error:
-          type: string
-        message:
-          type: string
-
-    User:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        username:
-          type: string
-        is_active:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
-    Credential:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        profile_name:
-          type: string
-        protocol:
-          type: string
-          enum: [ssh, snmp]
-        username:
-          type: string
-        password:
-          type: string
-        port:
-          type: integer
-        created_at:
-          type: string
-          format: date-time
-
-    DiscoveryProfile:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        profile_name:
-          type: string
-        device_type_id:
-          type: string
-          format: uuid
-        credential_profile_ids:
-          type: array
-          items:
-            type: string
-            format: uuid
-        port:
-          type: integer
-        created_at:
-          type: string
-          format: date-time
-
-    Device:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        device_name:
-          type: string
-        ip_address:
-          type: string
-        device_type_id:
-          type: string
-          format: uuid
-        credential_profile_id:
-          type: string
-          format: uuid
-        port:
-          type: integer
-        is_provisioned:
-          type: boolean
-        is_monitoring_enabled:
-          type: boolean
-        is_deleted:
-          type: boolean
-        polling_interval_seconds:
-          type: integer
-        timeout_seconds:
-          type: integer
-        retry_count:
-          type: integer
-        alert_threshold_cpu:
-          type: number
-          format: float
-        alert_threshold_memory:
-          type: number
-          format: float
-        alert_threshold_disk:
-          type: number
-          format: float
-        created_at:
-          type: string
-          format: date-time
-
-    DeviceType:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        type_name:
-          type: string
-        default_port:
-          type: integer
-
-    Metrics:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        device_id:
-          type: string
-          format: uuid
-        cpu_usage:
-          type: number
-          format: float
-        memory_usage:
-          type: number
-          format: float
-        disk_usage:
-          type: number
-          format: float
-        collected_at:
-          type: string
-          format: date-time
-
-    Availability:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        device_id:
-          type: string
-          format: uuid
-        is_available:
-          type: boolean
-        last_checked_at:
-          type: string
-          format: date-time
-        created_at:
-          type: string
-          format: date-time
-
 paths:
   /api/auth/login:
     post:
@@ -249,13 +84,11 @@ paths:
                   token:
                     type: string
                   user:
-                    $ref: '#/components/schemas/User'
         '401':
           description: Invalid credentials
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
 
   /api/users:
     get:
@@ -284,13 +117,11 @@ paths:
                   users:
                     type: array
                     items:
-                      $ref: '#/components/schemas/User'
         '401':
           description: Unauthorized
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
 
     post:
       tags:
@@ -325,13 +156,11 @@ paths:
                   success:
                     type: boolean
                   user:
-                    $ref: '#/components/schemas/User'
         '400':
           description: Invalid input
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
 
   /api/users/{id}:
     put:
@@ -377,7 +206,6 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
 
     delete:
       tags:
@@ -409,7 +237,6 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
 
   /api/credentials:
     get:
@@ -430,7 +257,6 @@ paths:
                   credentials:
                     type: array
                     items:
-                      $ref: '#/components/schemas/Credential'
 
     post:
       tags:
@@ -471,7 +297,6 @@ paths:
                   success:
                     type: boolean
                   credential:
-                    $ref: '#/components/schemas/Credential'
 
   /api/credentials/{id}:
     put:
@@ -564,7 +389,6 @@ paths:
                   discovery_profiles:
                     type: array
                     items:
-                      $ref: '#/components/schemas/DiscoveryProfile'
 
     post:
       tags:
@@ -605,7 +429,6 @@ paths:
                   success:
                     type: boolean
                   profile:
-                    $ref: '#/components/schemas/DiscoveryProfile'
 
   /api/discovery-profiles/{id}:
     delete:
@@ -709,7 +532,6 @@ paths:
                   devices:
                     type: array
                     items:
-                      $ref: '#/components/schemas/Device'
 
   /api/devices/provisioned:
     get:
@@ -730,7 +552,6 @@ paths:
                   devices:
                     type: array
                     items:
-                      $ref: '#/components/schemas/Device'
 
   /api/devices/provision:
     post:
@@ -945,7 +766,6 @@ paths:
                   device_types:
                     type: array
                     items:
-                      $ref: '#/components/schemas/DeviceType'
 
   /api/metrics/{deviceId}:
     get:
@@ -974,13 +794,11 @@ paths:
                   metrics:
                     type: array
                     items:
-                      $ref: '#/components/schemas/Metrics'
         '404':
           description: Device not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
 
   /api/availability/{deviceId}:
     get:
@@ -1009,10 +827,8 @@ paths:
                   availability:
                     type: array
                     items:
-                      $ref: '#/components/schemas/Availability'
         '404':
           description: Device not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'

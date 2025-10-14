@@ -53,7 +53,7 @@ public class ExceptionUtil
             .putHeader("Content-Type", "application/json")
             .end(errorResponse.encode());
 
-        logger.error("HTTP Error: {}", message, cause);
+        logger.error("HTTP Error: {}", message);
     }
 
     /**

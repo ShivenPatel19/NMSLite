@@ -56,39 +56,48 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     {
         var promise = Promise.<JsonArray>promise();
 
-        var sql = """
-                SELECT credential_profile_id, profile_name, username, created_at, updated_at
-                FROM credential_profiles
-                ORDER BY profile_name
-                """;
+        try
+        {
+            var sql = """
+                    SELECT credential_profile_id, profile_name, username, created_at, updated_at
+                    FROM credential_profiles
+                    ORDER BY profile_name
+                    """;
 
-        pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
-                {
-                    var credentials = new JsonArray();
-
-                    for (var row : rows)
+            pgPool.query(sql)
+                    .execute()
+                    .onSuccess(rows ->
                     {
-                        var credential = new JsonObject()
-                                .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
-                                .put("profile_name", row.getString("profile_name"))
-                                .put("username", row.getString("username"))
-                                .put("created_at", row.getLocalDateTime("created_at").toString())
-                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                    row.getLocalDateTime("updated_at").toString() : null);
+                        var credentials = new JsonArray();
 
-                        credentials.add(credential);
-                    }
+                        for (var row : rows)
+                        {
+                            var credential = new JsonObject()
+                                    .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                    .put("profile_name", row.getString("profile_name"))
+                                    .put("username", row.getString("username"))
+                                    .put("created_at", row.getLocalDateTime("created_at").toString())
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ?
+                                        row.getLocalDateTime("updated_at").toString() : null);
 
-                    promise.complete(credentials);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get credential profiles", cause);
+                            credentials.add(credential);
+                        }
 
-                    promise.fail(cause);
-                });
+                        promise.complete(credentials);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to get credential profiles: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in credentialList service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -104,50 +113,68 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var profileName = credentialData.getString("profile_name");
+        try
+        {
+            var profileName = credentialData.getString("profile_name");
 
-        var username = credentialData.getString("username");
+            var username = credentialData.getString("username");
 
-        var password = credentialData.getString("password");
+            var password = credentialData.getString("password");
 
-        // Encrypt password for secure storage
-        var encryptedPassword = PasswordUtil.encryptPassword(password);
+            // Encrypt password for secure storage
+            var encryptedPassword = PasswordUtil.encryptPassword(password);
 
-        var sql = """
-                INSERT INTO credential_profiles (profile_name, username, password_encrypted)
-                VALUES ($1, $2, $3)
-                RETURNING credential_profile_id, profile_name, username, created_at
-                """;
+            if (encryptedPassword == null)
+            {
+                logger.error("Failed to encrypt password for credential profile");
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(profileName, username, encryptedPassword))
-                .onSuccess(rows ->
-                {
-                    var row = rows.iterator().next();
+                promise.fail(new Exception("Failed to encrypt password"));
 
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
-                            .put("profile_name", row.getString("profile_name"))
-                            .put("username", row.getString("username"))
-                            .put("created_at", row.getLocalDateTime("created_at").toString())
-                            .put("message", "Credential profile created successfully");
+                return promise.future();
+            }
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to create credential profile", cause);
+            var sql = """
+                    INSERT INTO credential_profiles (profile_name, username, password_encrypted)
+                    VALUES ($1, $2, $3)
+                    RETURNING credential_profile_id, profile_name, username, created_at
+                    """;
 
-                    if (cause.getMessage().contains("duplicate key"))
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(profileName, username, encryptedPassword))
+                    .onSuccess(rows ->
                     {
-                        promise.fail(new IllegalArgumentException("Profile name already exists"));
-                    }
-                    else
+                        var row = rows.iterator().next();
+
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                .put("profile_name", row.getString("profile_name"))
+                                .put("username", row.getString("username"))
+                                .put("created_at", row.getLocalDateTime("created_at").toString())
+                                .put("message", "Credential profile created successfully");
+
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
                     {
-                        promise.fail(cause);
-                    }
-                });
+                        logger.error("Failed to create credential profile: {}", cause.getMessage());
+
+                        if (cause.getMessage().contains("duplicate key"))
+                        {
+                            promise.fail(new Exception("Profile name already exists"));
+                        }
+                        else
+                        {
+                            promise.fail(cause);
+                        }
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in credentialCreate service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -164,89 +191,107 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var profileName = credentialData.getString("profile_name");
-
-        var username = credentialData.getString("username");
-
-        var password = credentialData.getString("password");
-
-        var sqlBuilder = new StringBuilder("UPDATE credential_profiles SET ");
-
-        var params = new JsonArray();
-
-        var paramIndex = 1;
-
-        if (profileName != null)
+        try
         {
-            sqlBuilder.append("profile_name = $").append(paramIndex++).append(", ");
+            var profileName = credentialData.getString("profile_name");
 
-            params.add(profileName);
-        }
+            var username = credentialData.getString("username");
 
-        if (username != null)
-        {
-            sqlBuilder.append("username = $").append(paramIndex++).append(", ");
+            var password = credentialData.getString("password");
 
-            params.add(username);
-        }
+            var sqlBuilder = new StringBuilder("UPDATE credential_profiles SET ");
 
-        if (password != null)
-        {
-            var encryptedPassword = PasswordUtil.encryptPassword(password);
+            var params = new JsonArray();
 
-            sqlBuilder.append("password_encrypted = $").append(paramIndex++).append(", ");
+            var paramIndex = 1;
 
-            params.add(encryptedPassword);
-        }
+            if (profileName != null)
+            {
+                sqlBuilder.append("profile_name = $").append(paramIndex++).append(", ");
 
-        // Remove trailing comma and space, add WHERE clause
-        var sqlStr = sqlBuilder.toString();
+                params.add(profileName);
+            }
 
-        if (sqlStr.endsWith(", "))
-        {
-            sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
-        }
+            if (username != null)
+            {
+                sqlBuilder.append("username = $").append(paramIndex++).append(", ");
 
-        var sql = sqlStr + " WHERE credential_profile_id = $" + paramIndex +
-                " RETURNING credential_profile_id, profile_name, username";
+                params.add(username);
+            }
 
-        params.add(UUID.fromString(credentialId));
+            if (password != null)
+            {
+                var encryptedPassword = PasswordUtil.encryptPassword(password);
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.from(params.getList()))
-                .onSuccess(rows ->
+                if (encryptedPassword == null)
                 {
-                    if (rows.size() == 0)
+                    logger.error("Failed to encrypt password for credential profile update");
+
+                    promise.fail(new Exception("Failed to encrypt password"));
+
+                    return promise.future();
+                }
+
+                sqlBuilder.append("password_encrypted = $").append(paramIndex++).append(", ");
+
+                params.add(encryptedPassword);
+            }
+
+            // Remove trailing comma and space, add WHERE clause
+            var sqlStr = sqlBuilder.toString();
+
+            if (sqlStr.endsWith(", "))
+            {
+                sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
+            }
+
+            var sql = sqlStr + " WHERE credential_profile_id = $" + paramIndex +
+                    " RETURNING credential_profile_id, profile_name, username";
+
+            params.add(UUID.fromString(credentialId));
+
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.from(params.getList()))
+                    .onSuccess(rows ->
                     {
-                        promise.fail(new IllegalArgumentException("Credential profile not found"));
+                        if (rows.size() == 0)
+                        {
+                            promise.fail(new Exception("Credential profile not found"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var row = rows.iterator().next();
+                        var row = rows.iterator().next();
 
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
-                            .put("profile_name", row.getString("profile_name"))
-                            .put("username", row.getString("username"))
-                            .put("message", "Credential profile updated successfully");
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                .put("profile_name", row.getString("profile_name"))
+                                .put("username", row.getString("username"))
+                                .put("message", "Credential profile updated successfully");
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to update credential profile", cause);
-
-                    if (cause.getMessage().contains("duplicate key"))
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
                     {
-                        promise.fail(new IllegalArgumentException("Profile name already exists"));
-                    }
-                    else
-                    {
-                        promise.fail(cause);
-                    }
-                });
+                        logger.error("Failed to update credential profile: {}", cause.getMessage());
+
+                        if (cause.getMessage().contains("duplicate key"))
+                        {
+                            promise.fail(new Exception("Profile name already exists"));
+                        }
+                        else
+                        {
+                            promise.fail(cause);
+                        }
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in credentialUpdate service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -262,104 +307,113 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var credentialUuid = UUID.fromString(credentialId);
+        try
+        {
+            var credentialUuid = UUID.fromString(credentialId);
 
-        // Step 1: Check if credential is used in devices table
-        var checkDevicesSql = """
-                SELECT COUNT(*) as device_count
-                FROM devices
-                WHERE credential_profile_id = $1 AND is_deleted = false
-                """;
+            // Step 1: Check if credential is used in devices table
+            var checkDevicesSql = """
+                    SELECT COUNT(*) as device_count
+                    FROM devices
+                    WHERE credential_profile_id = $1 AND is_deleted = false
+                    """;
 
-        pgPool.preparedQuery(checkDevicesSql)
-                .execute(Tuple.of(credentialUuid))
-                .onSuccess(deviceRows ->
-                {
-                    var deviceCount = deviceRows.iterator().next().getLong("device_count");
-
-                    if (deviceCount > 0)
+            pgPool.preparedQuery(checkDevicesSql)
+                    .execute(Tuple.of(credentialUuid))
+                    .onSuccess(deviceRows ->
                     {
-                        var errorMsg = String.format(
-                            "Cannot delete credential profile - it is currently in use by %d device(s). " +
-                            "Please remove or reassign these devices before deleting the credential profile.",
-                            deviceCount
-                        );
+                        var deviceCount = deviceRows.iterator().next().getLong("device_count");
 
-                        promise.fail(new IllegalStateException(errorMsg));
+                        if (deviceCount > 0)
+                        {
+                            var errorMsg = String.format(
+                                "Cannot delete credential profile - it is currently in use by %d device(s). " +
+                                "Please remove or reassign these devices before deleting the credential profile.",
+                                deviceCount
+                            );
 
-                        return;
-                    }
+                            promise.fail(new Exception(errorMsg));
 
-                    // Step 2: Check if credential is used in discovery_profiles table
-                    var checkDiscoverySql = """
-                            SELECT COUNT(*) as discovery_count
-                            FROM discovery_profiles
-                            WHERE $1 = ANY(credential_profile_ids)
-                            """;
+                            return;
+                        }
 
-                    pgPool.preparedQuery(checkDiscoverySql)
-                            .execute(Tuple.of(credentialUuid))
-                            .onSuccess(discoveryRows ->
-                            {
-                                var discoveryCount = discoveryRows.iterator().next().getLong("discovery_count");
+                        // Step 2: Check if credential is used in discovery_profiles table
+                        var checkDiscoverySql = """
+                                SELECT COUNT(*) as discovery_count
+                                FROM discovery_profiles
+                                WHERE $1 = ANY(credential_profile_ids)
+                                """;
 
-                                if (discoveryCount > 0)
+                        pgPool.preparedQuery(checkDiscoverySql)
+                                .execute(Tuple.of(credentialUuid))
+                                .onSuccess(discoveryRows ->
                                 {
-                                    var errorMsg = String.format(
-                                        "Cannot delete credential profile - it is currently in use by %d discovery profile(s). " +
-                                        "Please remove it from these discovery profiles before deleting.",
-                                        discoveryCount
-                                    );
+                                    var discoveryCount = discoveryRows.iterator().next().getLong("discovery_count");
 
-                                    promise.fail(new IllegalStateException(errorMsg));
+                                    if (discoveryCount > 0)
+                                    {
+                                        var errorMsg = String.format(
+                                            "Cannot delete credential profile - it is currently in use by %d discovery profile(s). " +
+                                            "Please remove it from these discovery profiles before deleting.",
+                                            discoveryCount
+                                        );
 
-                                    return;
-                                }
+                                        promise.fail(new Exception(errorMsg));
 
-                                // Step 3: No usage found, proceed with deletion
-                                var deleteSql = """
-                                        DELETE FROM credential_profiles
-                                        WHERE credential_profile_id = $1
-                                        """;
+                                        return;
+                                    }
 
-                                pgPool.preparedQuery(deleteSql)
-                                        .execute(Tuple.of(credentialUuid))
-                                        .onSuccess(deleteRows ->
-                                        {
-                                            if (deleteRows.rowCount() == 0)
+                                    // Step 3: No usage found, proceed with deletion
+                                    var deleteSql = """
+                                            DELETE FROM credential_profiles
+                                            WHERE credential_profile_id = $1
+                                            """;
+
+                                    pgPool.preparedQuery(deleteSql)
+                                            .execute(Tuple.of(credentialUuid))
+                                            .onSuccess(deleteRows ->
                                             {
-                                                promise.fail(new IllegalArgumentException("Credential profile not found"));
+                                                if (deleteRows.rowCount() == 0)
+                                                {
+                                                    promise.fail(new Exception("Credential profile not found"));
 
-                                                return;
-                                            }
+                                                    return;
+                                                }
 
-                                            var result = new JsonObject()
-                                                    .put("success", true)
-                                                    .put("credential_profile_id", credentialId)
-                                                    .put("message", "Credential profile deleted successfully");
+                                                var result = new JsonObject()
+                                                        .put("success", true)
+                                                        .put("credential_profile_id", credentialId)
+                                                        .put("message", "Credential profile deleted successfully");
 
-                                            promise.complete(result);
-                                        })
-                                        .onFailure(cause ->
-                                        {
-                                            logger.error("Failed to delete credential profile", cause);
+                                                promise.complete(result);
+                                            })
+                                            .onFailure(cause ->
+                                            {
+                                                logger.error("Failed to delete credential profile: {}", cause.getMessage());
 
-                                            promise.fail(cause);
-                                        });
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to check discovery profile usage", cause);
+                                                promise.fail(cause);
+                                            });
+                                })
+                                .onFailure(cause ->
+                                {
+                                    logger.error("Failed to check discovery profile usage: {}", cause.getMessage());
 
-                                promise.fail(cause);
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to check device usage", cause);
+                                    promise.fail(cause);
+                                });
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to check device usage: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in credentialDelete service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -375,46 +429,64 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
-                FROM credential_profiles
-                WHERE credential_profile_id = $1
-                """;
+        try
+        {
+            var sql = """
+                    SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
+                    FROM credential_profiles
+                    WHERE credential_profile_id = $1
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(credentialId)))
-                .onSuccess(rows ->
-                {
-                    if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(credentialId)))
+                    .onSuccess(rows ->
                     {
-                        promise.complete(new JsonObject().put("found", false));
+                        if (rows.size() == 0)
+                        {
+                            promise.complete(new JsonObject().put("found", false));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var row = rows.iterator().next();
+                        var row = rows.iterator().next();
 
-                    // Decrypt password for response (be careful with this in production)
-                    var decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
+                        // Decrypt password for response (be careful with this in production)
+                        var decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
 
-                    var result = new JsonObject()
-                            .put("found", true)
-                            .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
-                            .put("profile_name", row.getString("profile_name"))
-                            .put("username", row.getString("username"))
-                            .put("password", decryptedPassword)  // Only for admin access
-                            .put("created_at", row.getLocalDateTime("created_at").toString())
-                            .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                row.getLocalDateTime("updated_at").toString() : null);
+                        if (decryptedPassword == null)
+                        {
+                            logger.error("Failed to decrypt password for credential profile: {}", credentialId);
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get credential profile by ID", cause);
+                            promise.fail(new Exception("Failed to decrypt credential password"));
 
-                    promise.fail(cause);
-                });
+                            return;
+                        }
+
+                        var result = new JsonObject()
+                                .put("found", true)
+                                .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                .put("profile_name", row.getString("profile_name"))
+                                .put("username", row.getString("username"))
+                                .put("password", decryptedPassword)  // Only for admin access
+                                .put("created_at", row.getLocalDateTime("created_at").toString())
+                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
+                                    row.getLocalDateTime("updated_at").toString() : null);
+
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to get credential profile by ID: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in credentialGetById service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -430,65 +502,84 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     {
         var promise = Promise.<JsonObject>promise();
 
-        if (credentialIds.isEmpty())
+        try
         {
-            promise.complete(new JsonObject()
-                .put("success", true)
-                .put("data", new JsonObject().put("credentials", new JsonArray())));
+            if (credentialIds.isEmpty())
+            {
+                promise.complete(new JsonObject()
+                    .put("success", true)
+                    .put("data", new JsonObject().put("credentials", new JsonArray())));
 
-            return promise.future();
-        }
+                return promise.future();
+            }
 
-        // Convert JsonArray to UUID array for PostgresSQL
-        var uuidArray = new UUID[credentialIds.size()];
+            // Convert JsonArray to UUID array for PostgresSQL
+            var uuidArray = new UUID[credentialIds.size()];
 
-        for (var i = 0; i < credentialIds.size(); i++)
-        {
-            uuidArray[i] = UUID.fromString(credentialIds.getString(i));
-        }
+            for (var i = 0; i < credentialIds.size(); i++)
+            {
+                uuidArray[i] = UUID.fromString(credentialIds.getString(i));
+            }
 
-        // ANY(list of ids) -> compares each row's UUID against every UUID in the array, returning row if matched.
-        var sql = """
-                SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
-                FROM credential_profiles
-                WHERE credential_profile_id = ANY($1)
-                """;
+            // ANY(list of ids) -> compares each row's UUID against every UUID in the array, returning row if matched.
+            var sql = """
+                    SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
+                    FROM credential_profiles
+                    WHERE credential_profile_id = ANY($1)
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(uuidArray))
-                .onSuccess(rows ->
-                {
-                    var credentials = new JsonArray();
-
-                    for (var row : rows)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(uuidArray))
+                    .onSuccess(rows ->
                     {
-                        // Decrypt password for discovery use
-                        var decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
+                        var credentials = new JsonArray();
 
-                        var credential = new JsonObject()
-                                .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
-                                .put("profile_name", row.getString("profile_name"))
-                                .put("username", row.getString("username"))
-                                .put("password_encrypted", decryptedPassword)  // For GoEngine use
-                                .put("created_at", row.getLocalDateTime("created_at").toString())
-                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                    row.getLocalDateTime("updated_at").toString() : null);
+                        for (var row : rows)
+                        {
+                            // Decrypt password for discovery use
+                            var decryptedPassword = PasswordUtil.decryptPassword(row.getString("password_encrypted"));
 
-                        credentials.add(credential);
-                    }
+                            if (decryptedPassword == null)
+                            {
+                                logger.error("Failed to decrypt password for credential profile: {}",
+                                    row.getUUID("credential_profile_id").toString());
 
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("data", new JsonObject().put("credentials", credentials));
+                                promise.fail(new Exception("Failed to decrypt credential password"));
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get credential profiles by IDs", cause);
+                                return;
+                            }
 
-                    promise.fail(cause);
-                });
+                            var credential = new JsonObject()
+                                    .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                    .put("profile_name", row.getString("profile_name"))
+                                    .put("username", row.getString("username"))
+                                    .put("password_encrypted", decryptedPassword)  // For GoEngine use
+                                    .put("created_at", row.getLocalDateTime("created_at").toString())
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ?
+                                        row.getLocalDateTime("updated_at").toString() : null);
+
+                            credentials.add(credential);
+                        }
+
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("data", new JsonObject().put("credentials", credentials));
+
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to get credential profiles by IDs: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in credentialGetByIds service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }

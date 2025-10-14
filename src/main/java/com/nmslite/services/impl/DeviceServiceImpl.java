@@ -1,5 +1,7 @@
 package com.nmslite.services.impl;
 
+import com.nmslite.Bootstrap;
+
 import com.nmslite.services.DeviceService;
 
 import io.vertx.core.Future;
@@ -47,12 +49,11 @@ public class DeviceServiceImpl implements DeviceService
     /**
      * Constructor for DeviceServiceImpl
      *
-     * @param vertx Vert.x instance
      * @param pgPool PostgresSQL connection pool
      */
-    public DeviceServiceImpl(Vertx vertx, Pool pgPool)
+    public DeviceServiceImpl(Pool pgPool)
     {
-        this.vertx = vertx;
+        this.vertx = Bootstrap.getVertxInstance();
 
         this.pgPool = pgPool;
 
@@ -96,17 +97,6 @@ public class DeviceServiceImpl implements DeviceService
     }
 
     /**
-     * Get database blocking timeout from config
-     *
-     * @return Database blocking timeout in seconds
-     */
-    private int getDatabaseBlockingTimeout()
-    {
-        return config.getJsonObject("database", new JsonObject())
-                .getInteger("blocking.timeout.seconds", 60);
-    }
-
-    /**
      * Get default polling interval from config
      *
      * @return Default polling interval in seconds
@@ -114,9 +104,7 @@ public class DeviceServiceImpl implements DeviceService
     private int getDefaultPollingInterval()
     {
         return config.getJsonObject("device", new JsonObject())
-
                 .getJsonObject("defaults", new JsonObject())
-
                 .getInteger("polling.interval.seconds", 300);
     }
 
@@ -135,18 +123,6 @@ public class DeviceServiceImpl implements DeviceService
     }
 
     /**
-     * Get default retry count from config
-     *
-     * @return Default retry count
-     */
-    private int getDefaultRetryCount()
-    {
-        return config.getJsonObject("device", new JsonObject())
-                .getJsonObject("defaults", new JsonObject())
-                .getInteger("retry.count", 2);
-    }
-
-    /**
      * List devices by provision status
      *
      * @param isProvisioned Provision status filter
@@ -157,62 +133,70 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonArray>promise();
 
-        var sql = """
-                SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                       d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
-                       d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
-                       d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
-                FROM devices d
-                JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
-                WHERE d.is_provisioned = $1 AND d.is_deleted = false
-                ORDER BY d.device_name
-                """;
+        try
+        {
+            var sql = """
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
+                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
+                           d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds,
+                           d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
+                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
+                    FROM devices d
+                    JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
+                    WHERE d.is_provisioned = $1 AND d.is_deleted = false
+                    ORDER BY d.device_name
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(isProvisioned))
-                .onSuccess(rows ->
-                {
-                    var devices = new JsonArray();
-
-                    for (var row : rows)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(isProvisioned))
+                    .onSuccess(rows ->
                     {
-                        var device = new JsonObject()
-                                .put("device_id", row.getUUID("device_id").toString())
-                                .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getString("ip_address"))
-                                .put("device_type", row.getString("device_type"))
-                                .put("port", row.getInteger("port"))
-                                .put("protocol", row.getString("protocol"))
-                                .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
-                                .put("username", row.getString("username"))
-                                .put("credential_profile_name", row.getString("credential_profile_name"))
-                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
-                                .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                                .put("retry_count", row.getInteger("retry_count"))
-                                .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                                .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                                .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
-                                .put("host_name", row.getString("host_name"))
-                                .put("is_provisioned", row.getBoolean("is_provisioned"))
-                                .put("is_deleted", row.getBoolean("is_deleted"))
-                                .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
-                                .put("created_at", row.getLocalDateTime("created_at").toString())
-                                .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null)
-                                .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ? row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+                        var devices = new JsonArray();
 
-                        devices.add(device);
-                    }
+                        for (var row : rows)
+                        {
+                            var device = new JsonObject()
+                                    .put("device_id", row.getUUID("device_id").toString())
+                                    .put("device_name", row.getString("device_name"))
+                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("device_type", row.getString("device_type"))
+                                    .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
+                                    .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                    .put("username", row.getString("username"))
+                                    .put("credential_profile_name", row.getString("credential_profile_name"))
+                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                    .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                    .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                    .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
+                                    .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
+                                    .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
+                                    .put("host_name", row.getString("host_name"))
+                                    .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                    .put("is_deleted", row.getBoolean("is_deleted"))
+                                    .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
+                                    .put("created_at", row.getLocalDateTime("created_at").toString())
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null)
+                                    .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ? row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
-                    promise.complete(devices);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to list devices by provision status", cause);
+                            devices.add(device);
+                        }
 
-                    promise.fail(cause);
-                });
+                        promise.complete(devices);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to list devices by provision status: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceListByProvisioned service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -228,40 +212,49 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                UPDATE devices
-                SET is_deleted = true, deleted_at = CURRENT_TIMESTAMP
-                WHERE device_id = $1 AND is_deleted = false
-                RETURNING device_id, device_name
-                """;
+        try
+        {
+            var sql = """
+                    UPDATE devices
+                    SET is_deleted = true, deleted_at = CURRENT_TIMESTAMP
+                    WHERE device_id = $1 AND is_deleted = false
+                    RETURNING device_id, device_name
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(rows ->
-                {
-                    if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(rows ->
                     {
-                        promise.fail(new IllegalArgumentException("Device not found or already deleted"));
+                        if (rows.size() == 0)
+                        {
+                            promise.fail(new Exception("Device not found or already deleted"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var row = rows.iterator().next();
+                        var row = rows.iterator().next();
 
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("device_name", row.getString("device_name"))
-                            .put("message", "Device deleted successfully");
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("device_name", row.getString("device_name"))
+                                .put("message", "Device deleted successfully");
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to delete device", cause);
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to delete device: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceDelete service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -277,40 +270,49 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                UPDATE devices
-                SET is_deleted = false, deleted_at = NULL
-                WHERE device_id = $1 AND is_deleted = true
-                RETURNING device_id, device_name
-                """;
+        try
+        {
+            var sql = """
+                    UPDATE devices
+                    SET is_deleted = false, deleted_at = NULL
+                    WHERE device_id = $1 AND is_deleted = true
+                    RETURNING device_id, device_name
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(rows ->
-                {
-                    if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(rows ->
                     {
-                        promise.fail(new IllegalArgumentException("Device not found or not deleted"));
+                        if (rows.size() == 0)
+                        {
+                            promise.fail(new Exception("Device not found or not deleted"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var row = rows.iterator().next();
+                        var row = rows.iterator().next();
 
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("device_name", row.getString("device_name"))
-                            .put("message", "Device restored successfully");
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("device_name", row.getString("device_name"))
+                                .put("message", "Device restored successfully");
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to restore device", cause);
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to restore device: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceRestore service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -326,68 +328,76 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                       d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name, cp.password_encrypted,
-                       d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
-                       d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
-                FROM devices d
-                JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
-                WHERE d.device_id = $1
-                AND d.is_deleted = false""";
+        try
+        {
+            var sql = """
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
+                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name, cp.password_encrypted,
+                           d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds,
+                           d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
+                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
+                    FROM devices d
+                    JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
+                    WHERE d.device_id = $1
+                    AND d.is_deleted = false""";
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(rows ->
-                {
-                    if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(rows ->
                     {
-                        promise.complete(new JsonObject().put("found", false));
+                        if (rows.size() == 0)
+                        {
+                            promise.complete(new JsonObject().put("found", false));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var row = rows.iterator().next();
+                        var row = rows.iterator().next();
 
-                    var result = new JsonObject()
-                            .put("found", true)
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("device_name", row.getString("device_name"))
-                            .put("ip_address", row.getString("ip_address"))
-                            .put("device_type", row.getString("device_type"))
-                            .put("port", row.getInteger("port"))
-                            .put("protocol", row.getString("protocol"))
-                            .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
-                            .put("username", row.getString("username"))
-                            .put("credential_profile_name", row.getString("credential_profile_name"))
-                            .put("password_encrypted", row.getString("password_encrypted"))
-                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                            .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
-                            .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                            .put("retry_count", row.getInteger("retry_count"))
-                            .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                            .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                            .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
-                            .put("host_name", row.getString("host_name"))
-                            .put("is_provisioned", row.getBoolean("is_provisioned"))
-                            .put("is_deleted", row.getBoolean("is_deleted"))
-                            .put("deleted_at", row.getLocalDateTime("deleted_at") != null ?
-                                    row.getLocalDateTime("deleted_at").toString() : null)
-                            .put("created_at", row.getLocalDateTime("created_at").toString())
-                            .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                    row.getLocalDateTime("updated_at").toString() : null)
-                            .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                    row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+                        var result = new JsonObject()
+                                .put("found", true)
+                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("device_name", row.getString("device_name"))
+                                .put("ip_address", row.getString("ip_address"))
+                                .put("device_type", row.getString("device_type"))
+                                .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
+                                .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                .put("username", row.getString("username"))
+                                .put("credential_profile_name", row.getString("credential_profile_name"))
+                                .put("password_encrypted", row.getString("password_encrypted"))
+                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
+                                .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
+                                .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
+                                .put("host_name", row.getString("host_name"))
+                                .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                .put("is_deleted", row.getBoolean("is_deleted"))
+                                .put("deleted_at", row.getLocalDateTime("deleted_at") != null ?
+                                        row.getLocalDateTime("deleted_at").toString() : null)
+                                .put("created_at", row.getLocalDateTime("created_at").toString())
+                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
+                                        row.getLocalDateTime("updated_at").toString() : null)
+                                .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
+                                        row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get device by ID", cause);
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to get device by ID: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceGetById service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -404,74 +414,82 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                       d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
-                       d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
-                       d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                       d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
-                FROM devices d
-                JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
-                WHERE host(d.ip_address) = $1
-                """ + (includeDeleted ? "" : " AND d.is_deleted = false");
+        try
+        {
+            var sql = """
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
+                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
+                           d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds,
+                           d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
+                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
+                    FROM devices d
+                    JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
+                    WHERE host(d.ip_address) = $1
+                    """ + (includeDeleted ? "" : " AND d.is_deleted = false");
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(ipAddress))
-                .onSuccess(rows ->
-                {
-                    if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(ipAddress))
+                    .onSuccess(rows ->
                     {
-                        promise.complete(new JsonObject().put("found", false));
+                        if (rows.size() == 0)
+                        {
+                            promise.complete(new JsonObject().put("found", false));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var row = rows.iterator().next();
+                        var row = rows.iterator().next();
 
-                    var ipAddr = row.getString("ip_address");
+                        var ipAddr = row.getString("ip_address");
 
-                    if (ipAddr != null && ipAddr.contains("/"))
+                        if (ipAddr != null && ipAddr.contains("/"))
+                        {
+                            ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
+                        }
+
+                        var result = new JsonObject()
+                                .put("found", true)
+                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("device_name", row.getString("device_name"))
+                                .put("ip_address", ipAddr)
+                                .put("device_type", row.getString("device_type"))
+                                .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
+                                .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                .put("username", row.getString("username"))
+                                .put("credential_profile_name", row.getString("credential_profile_name"))
+                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
+                                .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
+                                .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
+                                .put("host_name", row.getString("host_name"))
+                                .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                .put("is_deleted", row.getBoolean("is_deleted"))
+                                .put("deleted_at", row.getLocalDateTime("deleted_at") != null ?
+                                        row.getLocalDateTime("deleted_at").toString() : null)
+                                .put("created_at", row.getLocalDateTime("created_at").toString())
+                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
+                                        row.getLocalDateTime("updated_at").toString() : null)
+                                .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
+                                        row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
                     {
-                        ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
-                    }
+                        logger.error("Failed to find device by IP: {}", cause.getMessage());
 
-                    var result = new JsonObject()
-                            .put("found", true)
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("device_name", row.getString("device_name"))
-                            .put("ip_address", ipAddr)
-                            .put("device_type", row.getString("device_type"))
-                            .put("port", row.getInteger("port"))
-                            .put("protocol", row.getString("protocol"))
-                            .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
-                            .put("username", row.getString("username"))
-                            .put("credential_profile_name", row.getString("credential_profile_name"))
-                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                            .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
-                            .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                            .put("retry_count", row.getInteger("retry_count"))
-                            .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                            .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                            .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
-                            .put("host_name", row.getString("host_name"))
-                            .put("is_provisioned", row.getBoolean("is_provisioned"))
-                            .put("is_deleted", row.getBoolean("is_deleted"))
-                            .put("deleted_at", row.getLocalDateTime("deleted_at") != null ?
-                                    row.getLocalDateTime("deleted_at").toString() : null)
-                            .put("created_at", row.getLocalDateTime("created_at").toString())
-                            .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                    row.getLocalDateTime("updated_at").toString() : null)
-                            .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                    row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceFindByIp service: {}", exception.getMessage());
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to find device by IP", cause);
-
-                    promise.fail(cause);
-                });
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -487,102 +505,111 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        // First check if device is provisioned
-        var checkSql = """
-                SELECT is_provisioned, is_deleted
-                FROM devices
-                WHERE device_id = $1
-                """;
+        try
+        {
+            // First check if device is provisioned
+            var checkSql = """
+                    SELECT is_provisioned, is_deleted
+                    FROM devices
+                    WHERE device_id = $1
+                    """;
 
-        pgPool.preparedQuery(checkSql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(checkRows ->
-                {
-                    if (checkRows.size() == 0)
+            pgPool.preparedQuery(checkSql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(checkRows ->
                     {
-                        promise.complete(new JsonObject()
-                                .put("updated", false)
-                                .put("reason", "Device not found"));
+                        if (checkRows.size() == 0)
+                        {
+                            promise.complete(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Device not found"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var checkRow = checkRows.iterator().next();
+                        var checkRow = checkRows.iterator().next();
 
-                    var isDeleted = checkRow.getBoolean("is_deleted");
+                        var isDeleted = checkRow.getBoolean("is_deleted");
 
-                    var isProvisioned = checkRow.getBoolean("is_provisioned");
+                        var isProvisioned = checkRow.getBoolean("is_provisioned");
 
-                    if (isDeleted)
-                    {
-                        promise.complete(new JsonObject()
-                                .put("updated", false)
-                                .put("reason", "Device is deleted"));
+                        if (isDeleted)
+                        {
+                            promise.complete(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Device is deleted"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    if (!isProvisioned)
-                    {
-                        promise.complete(new JsonObject()
-                                .put("updated", false)
-                                .put("reason", "Cannot enable monitoring on unprovisioned device. Please provision the device first."));
+                        if (!isProvisioned)
+                        {
+                            promise.complete(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Cannot enable monitoring on unprovisioned device. Please provision the device first."));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    // Device is provisioned, proceed with enabling monitoring
-                    var sql = """
-                            UPDATE devices
-                            SET is_monitoring_enabled = true,
-                                monitoring_enabled_at = COALESCE(monitoring_enabled_at, NOW())
-                            WHERE device_id = $1 AND is_deleted = false
-                            RETURNING device_id, is_monitoring_enabled, monitoring_enabled_at
-                            """;
+                        // Device is provisioned, proceed with enabling monitoring
+                        var sql = """
+                                UPDATE devices
+                                SET is_monitoring_enabled = true,
+                                    monitoring_enabled_at = COALESCE(monitoring_enabled_at, NOW())
+                                WHERE device_id = $1 AND is_deleted = false
+                                RETURNING device_id, is_monitoring_enabled, monitoring_enabled_at
+                                """;
 
-                    pgPool.preparedQuery(sql)
-                            .execute(Tuple.of(UUID.fromString(deviceId)))
-                            .onSuccess(rows ->
-                            {
-                                if (rows.size() == 0)
+                        pgPool.preparedQuery(sql)
+                                .execute(Tuple.of(UUID.fromString(deviceId)))
+                                .onSuccess(rows ->
                                 {
-                                    promise.complete(new JsonObject()
-                                            .put("updated", false)
-                                            .put("reason", "Device not found or deleted"));
+                                    if (rows.size() == 0)
+                                    {
+                                        promise.complete(new JsonObject()
+                                                .put("updated", false)
+                                                .put("reason", "Device not found or deleted"));
 
-                                    return;
-                                }
+                                        return;
+                                    }
 
-                                var row = rows.iterator().next();
+                                    var row = rows.iterator().next();
 
-                                var result = new JsonObject()
-                                        .put("updated", true)
-                                        .put("device_id", row.getUUID("device_id").toString())
-                                        .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                        .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                                row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+                                    var result = new JsonObject()
+                                            .put("updated", true)
+                                            .put("device_id", row.getUUID("device_id").toString())
+                                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                            .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
+                                                    row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
-                                promise.complete(result);
+                                    promise.complete(result);
 
-                                // Publish event to notify PollingMetricsVerticle to add device to cache
-                                vertx.eventBus().publish("device.monitoring.enabled", new JsonObject()
-                                        .put("device_id", deviceId));
+                                    // Publish event to notify PollingMetricsVerticle to add device to cache
+                                    vertx.eventBus().publish("device.monitoring.enabled", new JsonObject()
+                                            .put("device_id", deviceId));
 
-                                logger.debug("Published device.monitoring.enabled event for device: {}", deviceId);
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to enable monitoring for device", cause);
+                                    logger.debug("Published device.monitoring.enabled event for device: {}", deviceId);
+                                })
+                                .onFailure(cause ->
+                                {
+                                    logger.error("Failed to enable monitoring for device: {}", cause.getMessage());
 
-                                promise.fail(cause);
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to check device provisioning status", cause);
+                                    promise.fail(cause);
+                                });
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to check device provisioning status: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceEnableMonitoring service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -598,90 +625,99 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        // First check if device exists and is not deleted
-        var checkSql = """
-                SELECT is_deleted
-                FROM devices
-                WHERE device_id = $1
-                """;
+        try
+        {
+            // First check if device exists and is not deleted
+            var checkSql = """
+                    SELECT is_deleted
+                    FROM devices
+                    WHERE device_id = $1
+                    """;
 
-        pgPool.preparedQuery(checkSql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(checkRows ->
-                {
-                    if (checkRows.size() == 0)
+            pgPool.preparedQuery(checkSql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(checkRows ->
                     {
-                        promise.complete(new JsonObject()
-                                .put("updated", false)
-                                .put("reason", "Device not found"));
+                        if (checkRows.size() == 0)
+                        {
+                            promise.complete(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Device not found"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var checkRow = checkRows.iterator().next();
+                        var checkRow = checkRows.iterator().next();
 
-                    var isDeleted = checkRow.getBoolean("is_deleted");
+                        var isDeleted = checkRow.getBoolean("is_deleted");
 
-                    if (isDeleted)
-                    {
-                        promise.complete(new JsonObject()
-                                .put("updated", false)
-                                .put("reason", "Device is deleted"));
+                        if (isDeleted)
+                        {
+                            promise.complete(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Device is deleted"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    // Device exists and is not deleted, proceed with disabling monitoring
-                    var sql = """
-                            UPDATE devices
-                            SET is_monitoring_enabled = false
-                            WHERE device_id = $1 AND is_deleted = false
-                            RETURNING device_id, is_monitoring_enabled, monitoring_enabled_at
-                            """;
+                        // Device exists and is not deleted, proceed with disabling monitoring
+                        var sql = """
+                                UPDATE devices
+                                SET is_monitoring_enabled = false
+                                WHERE device_id = $1 AND is_deleted = false
+                                RETURNING device_id, is_monitoring_enabled, monitoring_enabled_at
+                                """;
 
-                    pgPool.preparedQuery(sql)
-                            .execute(Tuple.of(UUID.fromString(deviceId)))
-                            .onSuccess(rows ->
-                            {
-                                if (rows.size() == 0)
+                        pgPool.preparedQuery(sql)
+                                .execute(Tuple.of(UUID.fromString(deviceId)))
+                                .onSuccess(rows ->
                                 {
-                                    promise.complete(new JsonObject()
-                                            .put("updated", false)
-                                            .put("reason", "Device not found or deleted"));
+                                    if (rows.size() == 0)
+                                    {
+                                        promise.complete(new JsonObject()
+                                                .put("updated", false)
+                                                .put("reason", "Device not found or deleted"));
 
-                                    return;
-                                }
+                                        return;
+                                    }
 
-                                var row = rows.iterator().next();
+                                    var row = rows.iterator().next();
 
-                                var result = new JsonObject()
-                                        .put("updated", true)
-                                        .put("device_id", row.getUUID("device_id").toString())
-                                        .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                        .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                                row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+                                    var result = new JsonObject()
+                                            .put("updated", true)
+                                            .put("device_id", row.getUUID("device_id").toString())
+                                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                            .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
+                                                    row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
-                                promise.complete(result);
+                                    promise.complete(result);
 
-                                // Publish event to notify PollingMetricsVerticle to remove device from cache
-                                vertx.eventBus().publish("device.monitoring.disabled", new JsonObject()
-                                        .put("device_id", deviceId));
+                                    // Publish event to notify PollingMetricsVerticle to remove device from cache
+                                    vertx.eventBus().publish("device.monitoring.disabled", new JsonObject()
+                                            .put("device_id", deviceId));
 
-                                logger.debug("Published device.monitoring.disabled event for device: {}", deviceId);
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to disable monitoring for device", cause);
+                                    logger.debug("Published device.monitoring.disabled event for device: {}", deviceId);
+                                })
+                                .onFailure(cause ->
+                                {
+                                    logger.error("Failed to disable monitoring for device: {}", cause.getMessage());
 
-                                promise.fail(cause);
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to check device status", cause);
+                                    promise.fail(cause);
+                                });
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to check device status: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceDisableMonitoring service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -697,32 +733,41 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonArray>promise();
 
-        var results = new JsonArray();
-
-        var futures = new ArrayList<Future<JsonObject>>();
-
-        for (var i = 0; i < deviceIds.size(); i++)
+        try
         {
-            var deviceId = deviceIds.getString(i);
+            var results = new JsonArray();
 
-            futures.add(provisionSingleDevice(deviceId));
+            var futures = new ArrayList<Future<JsonObject>>();
+
+            for (var i = 0; i < deviceIds.size(); i++)
+            {
+                var deviceId = deviceIds.getString(i);
+
+                futures.add(provisionSingleDevice(deviceId));
+            }
+
+            Future.all(futures)
+                    .onSuccess(compositeFuture ->
+                    {
+                        for (Future<JsonObject> future : futures) {
+                            results.add(future.result());
+                        }
+
+                        promise.complete(results);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to provision devices: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
         }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceProvisionAndEnableMonitoring service: {}", exception.getMessage());
 
-        Future.all(futures)
-                .onSuccess(compositeFuture ->
-                {
-                    for (Future<JsonObject> future : futures) {
-                        results.add(future.result());
-                    }
-
-                    promise.complete(results);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to provision devices", cause);
-
-                    promise.fail(cause);
-                });
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -841,7 +886,7 @@ public class DeviceServiceImpl implements DeviceService
                                                 })
                                                 .onFailure(cause ->
                                                 {
-                                                    logger.error("Failed to initialize availability for device: {}", deviceId, cause);
+                                                    logger.error("Failed to initialize availability for device: {}: {}", deviceId, cause.getMessage());
 
                                                     deviceResult.put("success", false)
                                                             .put("reason", "Failed to initialize availability: " + cause.getMessage());
@@ -859,7 +904,7 @@ public class DeviceServiceImpl implements DeviceService
                                 })
                                 .onFailure(cause ->
                                 {
-                                    logger.error("Failed to provision device: {}", deviceId, cause);
+                                    logger.error("Failed to provision device: {}: {}", deviceId, cause.getMessage());
 
                                     deviceResult.put("success", false)
                                             .put("reason", "Internal error: " + cause.getMessage());
@@ -869,7 +914,7 @@ public class DeviceServiceImpl implements DeviceService
                     })
                     .onFailure(cause ->
                     {
-                        logger.error("Failed to check device status: {}", deviceId, cause);
+                        logger.error("Failed to check device status: {}: {}", deviceId, cause.getMessage());
 
                         deviceResult.put("success", false)
                                 .put("reason", "Internal error: " + cause.getMessage());
@@ -877,7 +922,7 @@ public class DeviceServiceImpl implements DeviceService
                         promise.complete(deviceResult);
                     });
         }
-        catch (IllegalArgumentException exception)
+        catch (Exception exception)
         {
             deviceResult.put("success", false)
                     .put("reason", "Invalid device ID format");
@@ -897,62 +942,70 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonArray>promise();
 
-        var sql = """
-                SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                       d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds, d.retry_count,
-                       d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk,
-                       d.host_name, d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at,
-                       d.monitoring_enabled_at,
-                       cp.username, cp.password_encrypted
-                FROM devices d
-                JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
-                WHERE d.is_provisioned = true AND d.is_monitoring_enabled = true AND d.is_deleted = false
-                ORDER BY d.device_name
-                """;
+        try
+        {
+            var sql = """
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
+                           d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds,
+                           d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk,
+                           d.host_name, d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at,
+                           d.monitoring_enabled_at,
+                           cp.username, cp.password_encrypted
+                    FROM devices d
+                    JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
+                    WHERE d.is_provisioned = true AND d.is_monitoring_enabled = true AND d.is_deleted = false
+                    ORDER BY d.device_name
+                    """;
 
-        pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
-                {
-                    var devices = new JsonArray();
-
-                    for (var row : rows)
+            pgPool.query(sql)
+                    .execute()
+                    .onSuccess(rows ->
                     {
-                        var device = new JsonObject()
-                                .put("device_id", row.getUUID("device_id").toString())
-                                .put("device_name", row.getString("device_name"))
-                                .put("ip_address", row.getString("ip_address"))
-                                .put("device_type", row.getString("device_type"))
-                                .put("port", row.getInteger("port"))
-                                .put("protocol", row.getString("protocol"))
-                                .put("username", row.getString("username"))
-                                .put("password_encrypted", row.getString("password_encrypted"))  // encrypted password
-                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
-                                .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                                .put("retry_count", row.getInteger("retry_count"))
-                                .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                                .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                                .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
-                                .put("host_name", row.getString("host_name"))
-                                .put("is_provisioned", row.getBoolean("is_provisioned"))
-                                .put("is_deleted", row.getBoolean("is_deleted"))
-                                .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
-                                .put("created_at", row.getLocalDateTime("created_at").toString())
-                                .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null)
-                                .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ? row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+                        var devices = new JsonArray();
 
-                        devices.add(device);
-                    }
+                        for (var row : rows)
+                        {
+                            var device = new JsonObject()
+                                    .put("device_id", row.getUUID("device_id").toString())
+                                    .put("device_name", row.getString("device_name"))
+                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("device_type", row.getString("device_type"))
+                                    .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
+                                    .put("username", row.getString("username"))
+                                    .put("password_encrypted", row.getString("password_encrypted"))  // encrypted password
+                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                    .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                    .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                    .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
+                                    .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
+                                    .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
+                                    .put("host_name", row.getString("host_name"))
+                                    .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                    .put("is_deleted", row.getBoolean("is_deleted"))
+                                    .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
+                                    .put("created_at", row.getLocalDateTime("created_at").toString())
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null)
+                                    .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ? row.getLocalDateTime("monitoring_enabled_at").toString() : null);
 
-                    promise.complete(devices);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to list provisioned and monitoring-enabled devices", cause);
+                            devices.add(device);
+                        }
 
-                    promise.fail(cause);
-                });
+                        promise.complete(devices);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to list provisioned and monitoring-enabled devices: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceListProvisionedAndMonitoringEnabled service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -968,66 +1021,75 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var deviceName = deviceData.getString("device_name");
+        try
+        {
+            var deviceName = deviceData.getString("device_name");
 
-        var ipAddress = deviceData.getString("ip_address");
+            var ipAddress = deviceData.getString("ip_address");
 
-        var deviceType = deviceData.getString("device_type");
+            var deviceType = deviceData.getString("device_type");
 
-        var port = deviceData.getInteger("port");
+            var port = deviceData.getInteger("port");
 
-        var protocol = deviceData.getString("protocol");
+            var protocol = deviceData.getString("protocol");
 
-        var credentialProfileId = deviceData.getString("credential_profile_id");
+            var credentialProfileId = deviceData.getString("credential_profile_id");
 
-        var hostName = deviceData.getString("host_name");
+            var hostName = deviceData.getString("host_name");
 
-        // Create device with discovery defaults: is_provisioned = false, is_monitoring_enabled = false -> show its only being "discovered"
-        // device_name = host_name initially (user can change later)
-        var sql = """
-                INSERT INTO devices (device_name, ip_address, device_type, port, protocol, credential_profile_id,
-                                   timeout_seconds, retry_count, is_monitoring_enabled, alert_threshold_cpu,
-                                   alert_threshold_memory, alert_threshold_disk, polling_interval_seconds,
-                                   host_name, is_provisioned)
-                VALUES ($1, '%s'::inet, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                RETURNING device_id, device_name, ip_address::text as ip_address, device_type, host_name, is_provisioned, is_monitoring_enabled
-                """.formatted(ipAddress);
+            // Create device with discovery defaults: is_provisioned = false, is_monitoring_enabled = false -> show its only being "discovered"
+            // device_name = host_name initially (user can change later)
+            var sql = """
+                    INSERT INTO devices (device_name, ip_address, device_type, port, protocol, credential_profile_id,
+                                       timeout_seconds, is_monitoring_enabled, alert_threshold_cpu,
+                                       alert_threshold_memory, alert_threshold_disk, polling_interval_seconds,
+                                       host_name, is_provisioned)
+                    VALUES ($1, '%s'::inet, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    RETURNING device_id, device_name, ip_address::text as ip_address, device_type, host_name, is_provisioned, is_monitoring_enabled
+                    """.formatted(ipAddress);
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(deviceName, deviceType, port, protocol, UUID.fromString(credentialProfileId),
-                                getDefaultTimeout(), getDefaultRetryCount(), false, // is_monitoring_enabled = false
-                                getDefaultCpuThreshold(), getDefaultMemoryThreshold(), getDefaultDiskThreshold(),
-                                getDefaultPollingInterval(), hostName, false)) // is_provisioned = false
-                .onSuccess(rows ->
-                {
-                    var row = rows.iterator().next();
-
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("device_name", row.getString("device_name"))
-                            .put("ip_address", row.getString("ip_address"))
-                            .put("device_type", row.getString("device_type"))
-                            .put("host_name", row.getString("host_name"))
-                            .put("is_provisioned", row.getBoolean("is_provisioned"))
-                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                            .put("message", "Device created from discovery successfully");
-
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to create device from discovery", cause);
-
-                    if (cause.getMessage().contains("duplicate key") || cause.getMessage().contains("unique constraint"))
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(deviceName, deviceType, port, protocol, UUID.fromString(credentialProfileId),
+                                    getDefaultTimeout(), false, // is_monitoring_enabled = false
+                                    getDefaultCpuThreshold(), getDefaultMemoryThreshold(), getDefaultDiskThreshold(),
+                                    getDefaultPollingInterval(), hostName, false)) // is_provisioned = false
+                    .onSuccess(rows ->
                     {
-                        promise.fail(new IllegalArgumentException("Device with this IP address already exists"));
-                    }
-                    else
+                        var row = rows.iterator().next();
+
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("device_name", row.getString("device_name"))
+                                .put("ip_address", row.getString("ip_address"))
+                                .put("device_type", row.getString("device_type"))
+                                .put("host_name", row.getString("host_name"))
+                                .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                .put("message", "Device created from discovery successfully");
+
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
                     {
-                        promise.fail(cause);
-                    }
-                });
+                        logger.error("Failed to create device from discovery: {}", cause.getMessage());
+
+                        if (cause.getMessage().contains("duplicate key") || cause.getMessage().contains("unique constraint"))
+                        {
+                            promise.fail(new Exception("Device with this IP address already exists"));
+                        }
+                        else
+                        {
+                            promise.fail(cause);
+                        }
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceCreateFromDiscovery service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -1044,189 +1106,188 @@ public class DeviceServiceImpl implements DeviceService
     {
         var promise = Promise.<JsonObject>promise();
 
-        // Basic existence and deletion check
-        var checkSql = """
-                SELECT device_id, is_deleted
-                FROM devices
-                WHERE device_id = $1
-                """;
+        try
+        {
+            // Basic existence and deletion check
+            var checkSql = """
+                    SELECT device_id, is_deleted
+                    FROM devices
+                    WHERE device_id = $1
+                    """;
 
-        pgPool.preparedQuery(checkSql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(checkRows ->
-                {
-                    if (checkRows.size() == 0)
+            pgPool.preparedQuery(checkSql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(checkRows ->
                     {
-                        promise.fail(new IllegalArgumentException("Device not found"));
+                        if (checkRows.size() == 0)
+                        {
+                            promise.fail(new Exception("Device not found"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var checkRow = checkRows.iterator().next();
+                        var checkRow = checkRows.iterator().next();
 
-                    if (Boolean.TRUE.equals(checkRow.getBoolean("is_deleted")))
-                    {
-                        promise.fail(new IllegalArgumentException("Device is deleted and cannot be updated"));
+                        if (Boolean.TRUE.equals(checkRow.getBoolean("is_deleted")))
+                        {
+                            promise.fail(new Exception("Device is deleted and cannot be updated"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    // Build dynamic update for allowed fields only
-                    var sqlBuilder = new StringBuilder("UPDATE devices SET ");
+                        // Build dynamic update for allowed fields only
+                        var sqlBuilder = new StringBuilder("UPDATE devices SET ");
 
-                    var params = new JsonArray();
+                        var params = new JsonArray();
 
-                    var paramIndex = 1;
+                        var paramIndex = 1;
 
-                    if (updateFields.containsKey("device_name"))
-                    {
-                        sqlBuilder.append("device_name = $").append(paramIndex++).append(", ");
+                        if (updateFields.containsKey("device_name"))
+                        {
+                            sqlBuilder.append("device_name = $").append(paramIndex++).append(", ");
 
-                        params.add(updateFields.getString("device_name"));
-                    }
+                            params.add(updateFields.getString("device_name"));
+                        }
 
-                    if (updateFields.containsKey("port"))
-                    {
-                        sqlBuilder.append("port = $").append(paramIndex++).append(", ");
+                        if (updateFields.containsKey("port"))
+                        {
+                            sqlBuilder.append("port = $").append(paramIndex++).append(", ");
 
-                        params.add(updateFields.getInteger("port"));
-                    }
+                            params.add(updateFields.getInteger("port"));
+                        }
 
-                    if (updateFields.containsKey("polling_interval_seconds"))
-                    {
-                        sqlBuilder.append("polling_interval_seconds = $").append(paramIndex++).append(", ");
+                        if (updateFields.containsKey("polling_interval_seconds"))
+                        {
+                            sqlBuilder.append("polling_interval_seconds = $").append(paramIndex++).append(", ");
 
-                        params.add(updateFields.getInteger("polling_interval_seconds"));
-                    }
+                            params.add(updateFields.getInteger("polling_interval_seconds"));
+                        }
 
-                    if (updateFields.containsKey("timeout_seconds"))
-                    {
-                        sqlBuilder.append("timeout_seconds = $").append(paramIndex++).append(", ");
+                        if (updateFields.containsKey("timeout_seconds"))
+                        {
+                            sqlBuilder.append("timeout_seconds = $").append(paramIndex++).append(", ");
 
-                        params.add(updateFields.getInteger("timeout_seconds"));
-                    }
+                            params.add(updateFields.getInteger("timeout_seconds"));
+                        }
 
-                    if (updateFields.containsKey("retry_count"))
-                    {
-                        sqlBuilder.append("retry_count = $").append(paramIndex++).append(", ");
+                        if (updateFields.containsKey("alert_threshold_cpu"))
+                        {
+                            sqlBuilder.append("alert_threshold_cpu = $").append(paramIndex++).append(", ");
 
-                        params.add(updateFields.getInteger("retry_count"));
-                    }
+                            params.add(updateFields.getDouble("alert_threshold_cpu"));
+                        }
 
-                    if (updateFields.containsKey("alert_threshold_cpu"))
-                    {
-                        sqlBuilder.append("alert_threshold_cpu = $").append(paramIndex++).append(", ");
+                        if (updateFields.containsKey("alert_threshold_memory"))
+                        {
+                            sqlBuilder.append("alert_threshold_memory = $").append(paramIndex++).append(", ");
 
-                        params.add(updateFields.getDouble("alert_threshold_cpu"));
-                    }
+                            params.add(updateFields.getDouble("alert_threshold_memory"));
+                        }
 
-                    if (updateFields.containsKey("alert_threshold_memory"))
-                    {
-                        sqlBuilder.append("alert_threshold_memory = $").append(paramIndex++).append(", ");
+                        if (updateFields.containsKey("alert_threshold_disk"))
+                        {
+                            sqlBuilder.append("alert_threshold_disk = $").append(paramIndex++).append(", ");
 
-                        params.add(updateFields.getDouble("alert_threshold_memory"));
-                    }
+                            params.add(updateFields.getDouble("alert_threshold_disk"));
+                        }
 
-                    if (updateFields.containsKey("alert_threshold_disk"))
-                    {
-                        sqlBuilder.append("alert_threshold_disk = $").append(paramIndex++).append(", ");
+                        if (params.isEmpty())
+                        {
+                            promise.fail(new Exception("No updatable fields provided"));
 
-                        params.add(updateFields.getDouble("alert_threshold_disk"));
-                    }
+                            return;
+                        }
 
-                    if (params.isEmpty())
-                    {
-                        promise.fail(new IllegalArgumentException("No updatable fields provided"));
+                        var sqlStr = sqlBuilder.toString();
 
-                        return;
-                    }
+                        if (sqlStr.endsWith(", "))
+                        {
+                            sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
+                        }
 
-                    var sqlStr = sqlBuilder.toString();
+                        var sql = sqlStr + " WHERE device_id = $" + paramIndex + " AND is_deleted = false" +
+                                " RETURNING device_id, device_name, port, polling_interval_seconds, timeout_seconds, " +
+                                "alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk, is_provisioned, is_monitoring_enabled";
 
-                    if (sqlStr.endsWith(", "))
-                    {
-                        sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
-                    }
+                        params.add(UUID.fromString(deviceId));
 
-                    var sql = sqlStr + " WHERE device_id = $" + paramIndex + " AND is_deleted = false" +
-                            " RETURNING device_id, device_name, port, polling_interval_seconds, timeout_seconds, retry_count, " +
-                            "alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk, is_provisioned, is_monitoring_enabled";
-
-                    params.add(UUID.fromString(deviceId));
-
-                    pgPool.preparedQuery(sql)
-                            .execute(Tuple.from(params.getList()))
-                            .onSuccess(rows ->
-                            {
-                                if (rows.size() == 0)
+                        pgPool.preparedQuery(sql)
+                                .execute(Tuple.from(params.getList()))
+                                .onSuccess(rows ->
                                 {
-                                    promise.fail(new IllegalArgumentException("Device not found or already deleted"));
+                                    if (rows.size() == 0)
+                                    {
+                                        promise.fail(new Exception("Device not found or already deleted"));
 
-                                    return;
-                                }
+                                        return;
+                                    }
 
-                                var row = rows.iterator().next();
+                                    var row = rows.iterator().next();
 
-                                var result = new JsonObject()
-                                        .put("success", true)
-                                        .put("device_id", row.getUUID("device_id").toString())
-                                        .put("device_name", row.getString("device_name"))
-                                        .put("port", row.getInteger("port"))
-                                        .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
-                                        .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                                        .put("retry_count", row.getInteger("retry_count"))
-                                        .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                                        .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                                        .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
-                                        .put("is_provisioned", row.getBoolean("is_provisioned"))
-                                        .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                        .put("message", "Device configuration updated successfully");
+                                    var result = new JsonObject()
+                                            .put("success", true)
+                                            .put("device_id", row.getUUID("device_id").toString())
+                                            .put("device_name", row.getString("device_name"))
+                                            .put("port", row.getInteger("port"))
+                                            .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                            .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                            .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
+                                            .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
+                                            .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
+                                            .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                            .put("message", "Device configuration updated successfully");
 
-                                promise.complete(result);
+                                    promise.complete(result);
 
-                                // Publish event to notify PollingMetricsVerticle to update device in cache
-                                // Only publish if device is monitoring enabled (otherwise not in cache)
-                                if (row.getBoolean("is_monitoring_enabled"))
+                                    // Publish event to notify PollingMetricsVerticle to update device in cache
+                                    // Only publish if device is monitoring enabled (otherwise not in cache)
+                                    if (row.getBoolean("is_monitoring_enabled"))
+                                    {
+                                        vertx.eventBus().publish("device.config.updated", new JsonObject()
+                                                .put("device_id", deviceId));
+
+                                        logger.debug("Published device.config.updated event for device: {}", deviceId);
+                                    }
+                                })
+                                .onFailure(cause ->
                                 {
-                                    vertx.eventBus().publish("device.config.updated", new JsonObject()
-                                            .put("device_id", deviceId));
+                                    logger.error("Failed to update device configuration: {}", cause.getMessage());
 
-                                    logger.debug("Published device.config.updated event for device: {}", deviceId);
-                                }
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to update device configuration", cause);
+                                    if (cause.getMessage() != null && (
+                                            cause.getMessage().contains("chk_cpu_threshold") ||
+                                            cause.getMessage().contains("chk_memory_threshold") ||
+                                            cause.getMessage().contains("chk_disk_threshold")))
+                                    {
+                                        promise.fail(new Exception("Threshold values must be between 0 and 100"));
+                                    }
+                                    else if (cause.getMessage() != null && cause.getMessage().contains("chk_port_range"))
+                                    {
+                                        promise.fail(new Exception("Port must be between 1 and 65535"));
+                                    }
+                                    else if (cause.getMessage() != null && cause.getMessage().contains("chk_timeout_range"))
+                                    {
+                                        promise.fail(new Exception("Invalid timeout value"));
+                                    }
+                                    else
+                                    {
+                                        promise.fail(cause);
+                                    }
+                                });
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to check device status: {}", cause.getMessage());
 
-                                if (cause.getMessage() != null && (
-                                        cause.getMessage().contains("chk_cpu_threshold") ||
-                                        cause.getMessage().contains("chk_memory_threshold") ||
-                                        cause.getMessage().contains("chk_disk_threshold")))
-                                {
-                                    promise.fail(new IllegalArgumentException("Threshold values must be between 0 and 100"));
-                                }
-                                else if (cause.getMessage() != null && cause.getMessage().contains("chk_port_range"))
-                                {
-                                    promise.fail(new IllegalArgumentException("Port must be between 1 and 65535"));
-                                }
-                                else if (cause.getMessage() != null && (
-                                        cause.getMessage().contains("chk_timeout_range") ||
-                                        cause.getMessage().contains("chk_retry_count")))
-                                {
-                                    promise.fail(new IllegalArgumentException("Invalid timeout or retry count value"));
-                                }
-                                else
-                                {
-                                    promise.fail(cause);
-                                }
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to check device status", cause);
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceUpdateConfig service: {}", exception.getMessage());
 
-                    promise.fail(cause);
-                });
+            promise.fail(exception);
+        }
 
         return promise.future();
     }

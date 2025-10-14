@@ -1,12 +1,11 @@
 package com.nmslite.services;
 
+import com.nmslite.Bootstrap;
 import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
 import io.vertx.core.Future;
-
-import io.vertx.core.Vertx;
 
 import io.vertx.core.json.JsonArray;
 
@@ -35,12 +34,11 @@ public interface DeviceService
     /**
      * Create a proxy instance for the device service
      *
-     * @param vertx Vert.x instance
      * @return DeviceService proxy instance
      */
-    static DeviceService createProxy(Vertx vertx)
+    static DeviceService createProxy()
     {
-        return new ServiceProxyBuilder(vertx)
+        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
                 .setAddress(SERVICE_ADDRESS)
                 .build(DeviceService.class);
     }
@@ -65,7 +63,7 @@ public interface DeviceService
     /**
      * Update device configuration in a single call.
      * Allows updating any subset of: device_name, port, polling_interval_seconds,
-     * timeout_seconds, retry_count, alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk.
+     * timeout_seconds, alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk.
 
      * NOTE: ip_address, device_type, host_name are IMMUTABLE and cannot be updated here.
      *

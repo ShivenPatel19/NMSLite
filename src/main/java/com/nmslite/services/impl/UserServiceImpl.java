@@ -58,37 +58,46 @@ public class UserServiceImpl implements UserService
     {
         var promise = Promise.<JsonArray>promise();
 
-        var sql = """
-            SELECT user_id, username, is_active
-            FROM users
-            """ + (includeInactive ? "" : "WHERE is_active = true ") + """
-            ORDER BY username
-            """;
+        try
+        {
+            var sql = """
+                SELECT user_id, username, is_active
+                FROM users
+                """ + (includeInactive ? "" : "WHERE is_active = true ") + """
+                ORDER BY username
+                """;
 
-        pgPool.query(sql)
-            .execute()
-            .onSuccess(rows ->
-            {
-                var users = new JsonArray();
-
-                for (var row : rows)
+            pgPool.query(sql)
+                .execute()
+                .onSuccess(rows ->
                 {
-                    var user = new JsonObject()
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("is_active", row.getBoolean("is_active"));
+                    var users = new JsonArray();
 
-                    users.add(user);
-                }
+                    for (var row : rows)
+                    {
+                        var user = new JsonObject()
+                            .put("user_id", row.getUUID("user_id").toString())
+                            .put("username", row.getString("username"))
+                            .put("is_active", row.getBoolean("is_active"));
 
-                promise.complete(users);
-            })
-            .onFailure(cause ->
-            {
-                logger.error("Failed to get users", cause);
+                        users.add(user);
+                    }
 
-                promise.fail(cause);
-            });
+                    promise.complete(users);
+                })
+                .onFailure(cause ->
+                {
+                    logger.error("Failed to get users: {}", cause.getMessage());
+
+                    promise.fail(cause);
+                });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in userList service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -104,52 +113,70 @@ public class UserServiceImpl implements UserService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var username = userData.getString("username");
+        try
+        {
+            var username = userData.getString("username");
 
-        var password = userData.getString("password");
+            var password = userData.getString("password");
 
-        var isActive = userData.getBoolean("is_active", true);
+            var isActive = userData.getBoolean("is_active", true);
 
-        // Hash password for user authentication
-        var passwordHash = PasswordUtil.hashPassword(password);
+            // Hash password for user authentication
+            var passwordHash = PasswordUtil.hashPassword(password);
 
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
-
-        var sql = """
-            INSERT INTO users (username, password_hash, is_active)
-            VALUES ($1, $2, $3)
-            RETURNING user_id, username, is_active
-            """;
-
-        pgPool.preparedQuery(sql)
-            .execute(Tuple.of(username, passwordHash, isActive))
-            .onSuccess(rows ->
+            if (passwordHash == null)
             {
-                var row = rows.iterator().next();
+                logger.error("Failed to hash password");
 
-                var result = new JsonObject()
-                    .put("success", true)
-                    .put("user_id", row.getUUID("user_id").toString())
-                    .put("username", row.getString("username"))
-                    .put("is_active", row.getBoolean("is_active"))
-                    .put("message", "User created successfully");
+                promise.fail(new Exception("Failed to hash password"));
 
-                promise.complete(result);
-            })
-            .onFailure(cause ->
-            {
-                logger.error("Failed to create user", cause);
+                return promise.future();
+            }
 
-                if (cause.getMessage().contains("duplicate key"))
+            // ===== TRUST HANDLER VALIDATION =====
+            // No validation here - handler has already validated all input
+
+            var sql = """
+                INSERT INTO users (username, password_hash, is_active)
+                VALUES ($1, $2, $3)
+                RETURNING user_id, username, is_active
+                """;
+
+            pgPool.preparedQuery(sql)
+                .execute(Tuple.of(username, passwordHash, isActive))
+                .onSuccess(rows ->
                 {
-                    promise.fail(new IllegalArgumentException("Username already exists"));
-                }
-                else
+                    var row = rows.iterator().next();
+
+                    var result = new JsonObject()
+                        .put("success", true)
+                        .put("user_id", row.getUUID("user_id").toString())
+                        .put("username", row.getString("username"))
+                        .put("is_active", row.getBoolean("is_active"))
+                        .put("message", "User created successfully");
+
+                    promise.complete(result);
+                })
+                .onFailure(cause ->
                 {
-                    promise.fail(cause);
-                }
-            });
+                    logger.error("Failed to create user: {}", cause.getMessage());
+
+                    if (cause.getMessage().contains("duplicate key"))
+                    {
+                        promise.fail(new Exception("Username already exists"));
+                    }
+                    else
+                    {
+                        promise.fail(cause);
+                    }
+                });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in userCreate service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -166,91 +193,109 @@ public class UserServiceImpl implements UserService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var username = userData.getString("username");
-
-        var password = userData.getString("password");
-
-        var isActive = userData.getBoolean("is_active");
-
-        // ===== TRUST HANDLER VALIDATION =====
-        // No validation here - handler has already validated all input
-
-        var sqlBuilder = new StringBuilder("UPDATE users SET ");
-
-        var params = new JsonArray();
-
-        var paramIndex = 1;
-
-        if (username != null)
+        try
         {
-            sqlBuilder.append("username = $").append(paramIndex++).append(", ");
+            var username = userData.getString("username");
 
-            params.add(username);
-        }
+            var password = userData.getString("password");
 
-        if (password != null)
-        {
-            var passwordHash = PasswordUtil.hashPassword(password);
+            var isActive = userData.getBoolean("is_active");
 
-            sqlBuilder.append("password_hash = $").append(paramIndex++).append(", ");
+            // ===== TRUST HANDLER VALIDATION =====
+            // No validation here - handler has already validated all input
 
-            params.add(passwordHash);
-        }
+            var sqlBuilder = new StringBuilder("UPDATE users SET ");
 
-        if (isActive != null)
-        {
-            sqlBuilder.append("is_active = $").append(paramIndex++).append(", ");
+            var params = new JsonArray();
 
-            params.add(isActive);
-        }
+            var paramIndex = 1;
 
-        // Remove trailing comma and space, add WHERE clause
-        var sqlStr = sqlBuilder.toString();
-
-        if (sqlStr.endsWith(", "))
-        {
-            sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
-        }
-
-        var sql = sqlStr + " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active";
-
-        params.add(UUID.fromString(userId));
-
-        pgPool.preparedQuery(sql)
-            .execute(Tuple.from(params.getList()))
-            .onSuccess(rows ->
+            if (username != null)
             {
-                if (rows.size() == 0)
-                {
-                    promise.fail(new IllegalArgumentException("User not found"));
+                sqlBuilder.append("username = $").append(paramIndex++).append(", ");
 
-                    return;
-                }
+                params.add(username);
+            }
 
-                var row = rows.iterator().next();
-
-                var result = new JsonObject()
-                    .put("success", true)
-                    .put("user_id", row.getUUID("user_id").toString())
-                    .put("username", row.getString("username"))
-                    .put("is_active", row.getBoolean("is_active"))
-                    .put("message", "User updated successfully");
-
-                promise.complete(result);
-            })
-            .onFailure(cause ->
+            if (password != null)
             {
-                logger.error("Failed to update user", cause);
+                var passwordHash = PasswordUtil.hashPassword(password);
 
-                if (cause.getMessage().contains("duplicate key"))
+                if (passwordHash == null)
                 {
-                    promise.fail(new IllegalArgumentException("Username already exists"));
+                    logger.error("Failed to hash password");
+
+                    promise.fail(new Exception("Failed to hash password"));
+
+                    return promise.future();
                 }
-                else
+
+                sqlBuilder.append("password_hash = $").append(paramIndex++).append(", ");
+
+                params.add(passwordHash);
+            }
+
+            if (isActive != null)
+            {
+                sqlBuilder.append("is_active = $").append(paramIndex++).append(", ");
+
+                params.add(isActive);
+            }
+
+            // Remove trailing comma and space, add WHERE clause
+            var sqlStr = sqlBuilder.toString();
+
+            if (sqlStr.endsWith(", "))
+            {
+                sqlStr = sqlStr.substring(0, sqlStr.length() - 2);
+            }
+
+            var sql = sqlStr + " WHERE user_id = $" + paramIndex + " RETURNING user_id, username, is_active";
+
+            params.add(UUID.fromString(userId));
+
+            pgPool.preparedQuery(sql)
+                .execute(Tuple.from(params.getList()))
+                .onSuccess(rows ->
                 {
-                    promise.fail(cause);
-                }
-            });
+                    if (rows.size() == 0)
+                    {
+                        promise.fail(new Exception("User not found"));
+
+                        return;
+                    }
+
+                    var row = rows.iterator().next();
+
+                    var result = new JsonObject()
+                        .put("success", true)
+                        .put("user_id", row.getUUID("user_id").toString())
+                        .put("username", row.getString("username"))
+                        .put("is_active", row.getBoolean("is_active"))
+                        .put("message", "User updated successfully");
+
+                    promise.complete(result);
+                })
+                .onFailure(cause ->
+                {
+                    logger.error("Failed to update user: {}", cause.getMessage());
+
+                    if (cause.getMessage().contains("duplicate key"))
+                    {
+                        promise.fail(new Exception("Username already exists"));
+                    }
+                    else
+                    {
+                        promise.fail(cause);
+                    }
+                });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in userUpdate service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -266,39 +311,48 @@ public class UserServiceImpl implements UserService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-            DELETE FROM users
-            WHERE user_id = $1
-            RETURNING user_id, username
-            """;
+        try
+        {
+            var sql = """
+                DELETE FROM users
+                WHERE user_id = $1
+                RETURNING user_id, username
+                """;
 
-        pgPool.preparedQuery(sql)
-            .execute(Tuple.of(UUID.fromString(userId)))
-            .onSuccess(rows ->
-            {
-                if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                .execute(Tuple.of(UUID.fromString(userId)))
+                .onSuccess(rows ->
                 {
-                    promise.fail(new IllegalArgumentException("User not found"));
+                    if (rows.size() == 0)
+                    {
+                        promise.fail(new Exception("User not found"));
 
-                    return;
-                }
+                        return;
+                    }
 
-                var row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                var result = new JsonObject()
-                    .put("success", true)
-                    .put("user_id", row.getUUID("user_id").toString())
-                    .put("username", row.getString("username"))
-                    .put("message", "User deleted successfully");
+                    var result = new JsonObject()
+                        .put("success", true)
+                        .put("user_id", row.getUUID("user_id").toString())
+                        .put("username", row.getString("username"))
+                        .put("message", "User deleted successfully");
 
-                promise.complete(result);
-            })
-            .onFailure(cause ->
-            {
-                logger.error("Failed to delete user", cause);
+                    promise.complete(result);
+                })
+                .onFailure(cause ->
+                {
+                    logger.error("Failed to delete user: {}", cause.getMessage());
 
-                promise.fail(cause);
-            });
+                    promise.fail(cause);
+                });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in userDelete service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -315,53 +369,62 @@ public class UserServiceImpl implements UserService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-            SELECT user_id, username, password_hash, is_active
-            FROM users
-            WHERE username = $1 AND is_active = true
-            """;
+        try
+        {
+            var sql = """
+                SELECT user_id, username, password_hash, is_active
+                FROM users
+                WHERE username = $1 AND is_active = true
+                """;
 
-        pgPool.preparedQuery(sql)
-            .execute(Tuple.of(username))
-            .onSuccess(rows ->
-            {
-                if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                .execute(Tuple.of(username))
+                .onSuccess(rows ->
                 {
-                    promise.complete(new JsonObject()
-                        .put("authenticated", false)
-                        .put("message", "Invalid username or password"));
+                    if (rows.size() == 0)
+                    {
+                        promise.complete(new JsonObject()
+                            .put("authenticated", false)
+                            .put("message", "Invalid username or password"));
 
-                    return;
-                }
+                        return;
+                    }
 
-                var row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                var storedPasswordHash = row.getString("password_hash");
+                    var storedPasswordHash = row.getString("password_hash");
 
-                if (PasswordUtil.verifyPassword(password, storedPasswordHash))
+                    if (PasswordUtil.verifyPassword(password, storedPasswordHash))
+                    {
+                        var result = new JsonObject()
+                            .put("authenticated", true)
+                            .put("user_id", row.getUUID("user_id").toString())
+                            .put("username", row.getString("username"))
+                            .put("is_active", row.getBoolean("is_active"))
+                            .put("message", "Authentication successful");
+
+                        promise.complete(result);
+                    }
+                    else
+                    {
+                        promise.complete(new JsonObject()
+                            .put("authenticated", false)
+                            .put("message", "Invalid username or password"));
+                    }
+                })
+                .onFailure(cause ->
                 {
-                    var result = new JsonObject()
-                        .put("authenticated", true)
-                        .put("user_id", row.getUUID("user_id").toString())
-                        .put("username", row.getString("username"))
-                        .put("is_active", row.getBoolean("is_active"))
-                        .put("message", "Authentication successful");
+                    logger.error("Failed to authenticate user: {}", cause.getMessage());
 
-                    promise.complete(result);
-                }
-                else
-                {
-                    promise.complete(new JsonObject()
-                        .put("authenticated", false)
-                        .put("message", "Invalid username or password"));
-                }
-            })
-            .onFailure(cause ->
-            {
-                logger.error("Failed to authenticate user", cause);
+                    promise.fail(cause);
+                });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in userAuthenticate service: {}", exception.getMessage());
 
-                promise.fail(cause);
-            });
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -377,39 +440,48 @@ public class UserServiceImpl implements UserService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-            SELECT user_id, username, is_active
-            FROM users
-            WHERE user_id = $1
-            """;
+        try
+        {
+            var sql = """
+                SELECT user_id, username, is_active
+                FROM users
+                WHERE user_id = $1
+                """;
 
-        pgPool.preparedQuery(sql)
-            .execute(Tuple.of(UUID.fromString(userId)))
-            .onSuccess(rows ->
-            {
-                if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                .execute(Tuple.of(UUID.fromString(userId)))
+                .onSuccess(rows ->
                 {
-                    promise.complete(new JsonObject().put("found", false));
+                    if (rows.size() == 0)
+                    {
+                        promise.complete(new JsonObject().put("found", false));
 
-                    return;
-                }
+                        return;
+                    }
 
-                var row = rows.iterator().next();
+                    var row = rows.iterator().next();
 
-                var result = new JsonObject()
-                    .put("found", true)
-                    .put("user_id", row.getUUID("user_id").toString())
-                    .put("username", row.getString("username"))
-                    .put("is_active", row.getBoolean("is_active"));
+                    var result = new JsonObject()
+                        .put("found", true)
+                        .put("user_id", row.getUUID("user_id").toString())
+                        .put("username", row.getString("username"))
+                        .put("is_active", row.getBoolean("is_active"));
 
-                promise.complete(result);
-            })
-            .onFailure(cause ->
-            {
-                logger.error("Failed to get user by ID", cause);
+                    promise.complete(result);
+                })
+                .onFailure(cause ->
+                {
+                    logger.error("Failed to get user by ID: {}", cause.getMessage());
 
-                promise.fail(cause);
-            });
+                    promise.fail(cause);
+                });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in userGetById service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }

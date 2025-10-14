@@ -59,31 +59,39 @@ public class UserHandler
      */
     public void getUsers(RoutingContext ctx)
     {
-        // ===== QUERY PARAMETER VALIDATION =====
-        var includeInactiveParam = ctx.request().getParam("includeInactive");
-
-        var includeInactive = false;
-
-        if (includeInactiveParam != null)
+        try
         {
-            if ("true".equalsIgnoreCase(includeInactiveParam) || "false".equalsIgnoreCase(includeInactiveParam))
-            {
-                includeInactive = "true".equalsIgnoreCase(includeInactiveParam);
-            }
-            else
-            {
-                ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid includeInactive parameter"),
-                    "includeInactive parameter must be 'true' or 'false'");
+            var includeInactiveParam = ctx.request().getParam("includeInactive");
 
-                return;
+            var includeInactive = false;
+
+            if (includeInactiveParam != null)
+            {
+                if ("true".equalsIgnoreCase(includeInactiveParam) || "false".equalsIgnoreCase(includeInactiveParam))
+                {
+                    includeInactive = "true".equalsIgnoreCase(includeInactiveParam);
+                }
+                else
+                {
+                    ExceptionUtil.handleHttp(ctx, new Exception("Invalid includeInactive parameter"),
+                        "includeInactive parameter must be 'true' or 'false'");
+
+                    return;
+                }
             }
+
+            userService.userList(includeInactive)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, new JsonObject().put("users", result)))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get users"));
         }
+        catch (Exception exception)
+        {
+            logger.error("Error in getUsers handler: {}", exception.getMessage());
 
-        userService.userList(includeInactive)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, new JsonObject().put("users", result)))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get users"));
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to get users");
+        }
     }
 
     /**
@@ -93,23 +101,32 @@ public class UserHandler
      */
     public void createUser(RoutingContext ctx)
     {
-        var body = ctx.body().asJsonObject();
-
-        if (!ValidationUtil.User.validateCreate(ctx, body))
+        try
         {
-            return; // Validation failed, response already sent
+            var body = ctx.body().asJsonObject();
+
+            if (!ValidationUtil.User.validateCreate(ctx, body))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            var userData = new JsonObject()
+                .put("username", body.getString("username"))
+                .put("password", body.getString("password"))
+                .put("is_active", body.getBoolean("is_active", true));
+
+            userService.userCreate(userData)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to create user"));
         }
+        catch (Exception exception)
+        {
+            logger.error("Error in createUser handler: {}", exception.getMessage());
 
-        var userData = new JsonObject()
-            .put("username", body.getString("username"))
-            .put("password", body.getString("password"))
-            .put("is_active", body.getBoolean("is_active", true));
-
-        userService.userCreate(userData)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to create user"));
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to create user");
+        }
     }
 
     /**
@@ -119,27 +136,36 @@ public class UserHandler
      */
     public void updateUser(RoutingContext ctx)
     {
-        var userId = ctx.pathParam("id");
-
-        var body = ctx.body().asJsonObject();
-
-        // 1. Validate path parameter
-        if (!ValidationUtil.validatePathParameterUUID(ctx, userId, "User ID"))
+        try
         {
-            return; // Validation failed, response already sent
-        }
+            var userId = ctx.pathParam("id");
 
-        // 2. Validate user update fields
-        if (!ValidationUtil.User.validateUpdate(ctx, body))
+            var body = ctx.body().asJsonObject();
+
+            // 1. Validate path parameter
+            if (!ValidationUtil.validatePathParameterUUID(ctx, userId, "User ID"))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            // 2. Validate user update fields
+            if (!ValidationUtil.User.validateUpdate(ctx, body))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            userService.userUpdate(userId, body)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to update user"));
+        }
+        catch (Exception exception)
         {
-            return; // Validation failed, response already sent
-        }
+            logger.error("Error in updateUser handler: {}", exception.getMessage());
 
-        userService.userUpdate(userId, body)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to update user"));
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to update user");
+        }
     }
 
     /**
@@ -149,19 +175,28 @@ public class UserHandler
      */
     public void deleteUser(RoutingContext ctx)
     {
-        var userId = ctx.pathParam("id");
-
-        // ===== PATH PARAMETER VALIDATION =====
-        if (!ValidationUtil.validatePathParameterUUID(ctx, userId, "User ID"))
+        try
         {
-            return; // Validation failed, response already sent
-        }
+            var userId = ctx.pathParam("id");
 
-        userService.userDelete(userId)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to delete user"));
+            // ===== PATH PARAMETER VALIDATION =====
+            if (!ValidationUtil.validatePathParameterUUID(ctx, userId, "User ID"))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            userService.userDelete(userId)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to delete user"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deleteUser handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to delete user");
+        }
     }
 
     /**
@@ -171,34 +206,44 @@ public class UserHandler
      */
     public void authenticateUser(RoutingContext ctx)
     {
-        var body = ctx.body().asJsonObject();
-
-        if (!ValidationUtil.User.validateAuthentication(ctx, body))
+        try
         {
-            return; // Validation failed, response already sent
-        }
+            var body = ctx.body().asJsonObject();
 
-        var username = body.getString("username");
-
-        var password = body.getString("password");
-
-        userService.userAuthenticate(username, password)
-            .onSuccess(authResult ->
+            if (!ValidationUtil.User.validateAuthentication(ctx, body))
             {
-                var authenticated = authResult.getBoolean("authenticated", false);
+                return; // Validation failed, response already sent
+            }
 
-                if (authenticated)
+            var username = body.getString("username");
+
+            var password = body.getString("password");
+
+            userService.userAuthenticate(username, password)
+                .onSuccess(authResult ->
                 {
-                    // Generate JWT token for successful authentication
-                    var userId = authResult.getString("user_id");
+                    var authenticated = authResult.getBoolean("authenticated", false);
 
-                    var authenticatedUsername = authResult.getString("username");
-
-                    var isActive = authResult.getBoolean("is_active", false);
-
-                    try
+                    if (authenticated)
                     {
+                        // Generate JWT token for successful authentication
+                        var userId = authResult.getString("user_id");
+
+                        var authenticatedUsername = authResult.getString("username");
+
+                        var isActive = authResult.getBoolean("is_active", false);
+
                         var jwtToken = jwtUtil.generateToken(userId, authenticatedUsername, isActive);
+
+                        if (jwtToken == null)
+                        {
+                            logger.error("Failed to generate JWT token for user: {}", authenticatedUsername);
+
+                            ExceptionUtil.handleHttp(ctx, new Exception("Failed to generate JWT token"),
+                                "Authentication successful but failed to generate token");
+
+                            return;
+                        }
 
                         // Add JWT token to response
                         var enhancedResult = authResult.copy()
@@ -208,23 +253,22 @@ public class UserHandler
                             .put("message", "Authentication successful - JWT token generated");
 
                         ResponseUtil.handleSuccess(ctx, enhancedResult);
-
                     }
-                    catch (Exception exception)
+                    else
                     {
-                        logger.error("Failed to generate JWT token for user: {}", authenticatedUsername, exception);
-
-                        ExceptionUtil.handleHttp(ctx, exception, "Authentication successful but failed to generate token");
+                        // Authentication failed - no token generation
+                        ResponseUtil.handleSuccess(ctx, authResult);
                     }
-                }
-                else
-                {
-                    // Authentication failed - no token generation
-                    ResponseUtil.handleSuccess(ctx, authResult);
-                }
-            })
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to authenticate user"));
+                })
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to authenticate user"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in authenticateUser handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to authenticate user");
+        }
     }
 }
 

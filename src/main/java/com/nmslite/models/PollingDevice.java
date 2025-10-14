@@ -45,8 +45,6 @@ public class PollingDevice
     // Per-device configuration (from devices table, NOT config file)
     public int timeoutSeconds;           // devices.timeout_seconds
 
-    public int retryCount;               // devices.retry_count
-
     public long pollingIntervalSeconds;  // devices.polling_interval_seconds
 
     // Global configuration (from config file, same for all devices)
@@ -63,8 +61,6 @@ public class PollingDevice
 
     public PollingResult pollingResult;  // Transient: result of current polling cycle
 
-    // ===== HELPER METHODS =====
-
     /**
      * Converts the PollingDevice to GoEngine JSON format for metrics collection.
 
@@ -78,8 +74,6 @@ public class PollingDevice
      *   "timeout_seconds": 60,
      *   "connection_timeout": 10
      * }
-
-     * Note: retry_count is handled by Java backend, not passed to GoEngine 
      *
      * @return JsonObject formatted for GoEngine consumption
      */
@@ -169,21 +163,5 @@ public class PollingDevice
 
                pollingResult == PollingResult.GOENGINE_FAILED;
     }
-
-    /**
-     * Returns a string representation of the PollingDevice for debugging and logging.
-     *
-     * @return Formatted string with key device information
-     */
-    @Override
-    public String toString()
-    {
-        return String.format(
-            "PollingDevice{id=%s, name=%s, address=%s, interval=%ds, next=%s, failures=%d}",
-            deviceId, deviceName, address, pollingIntervalSeconds,
-            nextScheduledAt, consecutiveFailures
-        );
-    }
-
 }
 

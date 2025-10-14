@@ -56,66 +56,75 @@ public class AvailabilityServiceImpl implements AvailabilityService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
-                       da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
-                       da.current_status, da.updated_at,
-                       d.device_name, d.ip_address::text as ip_address, d.device_type, d.is_monitoring_enabled
-                FROM device_availability da
-                JOIN devices d ON da.device_id = d.device_id
-                WHERE da.device_id = $1 AND d.is_deleted = false
-                """;
+        try
+        {
+            var sql = """
+                    SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
+                           da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
+                           da.current_status, da.updated_at,
+                           d.device_name, d.ip_address::text as ip_address, d.device_type, d.is_monitoring_enabled
+                    FROM device_availability da
+                    JOIN devices d ON da.device_id = d.device_id
+                    WHERE da.device_id = $1 AND d.is_deleted = false
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(rows ->
-                {
-                    if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(rows ->
                     {
-                        promise.complete(new JsonObject().put("found", false));
+                        if (rows.size() == 0)
+                        {
+                            promise.complete(new JsonObject().put("found", false));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var row = rows.iterator().next();
+                        var row = rows.iterator().next();
 
-                    // Removing CIDR notation
-                    var ipAddr = row.getString("ip_address");
+                        // Removing CIDR notation
+                        var ipAddr = row.getString("ip_address");
 
-                    if (ipAddr != null && ipAddr.contains("/"))
+                        if (ipAddr != null && ipAddr.contains("/"))
+                        {
+                            ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
+                        }
+
+                        var result = new JsonObject()
+                                .put("found", true)
+                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("device_name", row.getString("device_name"))
+                                .put("ip_address", ipAddr)
+                                .put("device_type", row.getString("device_type"))
+                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                .put("total_checks", row.getInteger("total_checks"))
+                                .put("successful_checks", row.getInteger("successful_checks"))
+                                .put("failed_checks", row.getInteger("failed_checks"))
+                                .put("availability_percent", row.getBigDecimal("availability_percent"))
+                                .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
+                                    row.getLocalDateTime("last_check_time").toString() : null)
+                                .put("last_success_time", row.getLocalDateTime("last_success_time") != null ?
+                                    row.getLocalDateTime("last_success_time").toString() : null)
+                                .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ?
+                                    row.getLocalDateTime("last_failure_time").toString() : null)
+                                .put("current_status", row.getString("current_status"))
+                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
+                                    row.getLocalDateTime("updated_at").toString() : null);
+
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
                     {
-                        ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
-                    }
+                        logger.error("Failed to get device availability: {}", cause.getMessage());
 
-                    var result = new JsonObject()
-                            .put("found", true)
-                            .put("device_id", row.getUUID("device_id").toString())
-                            .put("device_name", row.getString("device_name"))
-                            .put("ip_address", ipAddr)
-                            .put("device_type", row.getString("device_type"))
-                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                            .put("total_checks", row.getInteger("total_checks"))
-                            .put("successful_checks", row.getInteger("successful_checks"))
-                            .put("failed_checks", row.getInteger("failed_checks"))
-                            .put("availability_percent", row.getBigDecimal("availability_percent"))
-                            .put("last_check_time", row.getLocalDateTime("last_check_time") != null ?
-                                row.getLocalDateTime("last_check_time").toString() : null)
-                            .put("last_success_time", row.getLocalDateTime("last_success_time") != null ?
-                                row.getLocalDateTime("last_success_time").toString() : null)
-                            .put("last_failure_time", row.getLocalDateTime("last_failure_time") != null ?
-                                row.getLocalDateTime("last_failure_time").toString() : null)
-                            .put("current_status", row.getString("current_status"))
-                            .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                row.getLocalDateTime("updated_at").toString() : null);
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in availabilityGetByDevice service: {}", exception.getMessage());
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get device availability", cause);
-
-                    promise.fail(cause);
-                });
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -125,123 +134,130 @@ public class AvailabilityServiceImpl implements AvailabilityService
      *
      * @param deviceId Device ID
      * @param status Device status (up/down)
-     * @param responseTime Response time in milliseconds
      * @return Future containing JsonObject with status update result
      */
     @Override
-    public Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime)
+    public Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status)
     {
         var promise = Promise.<JsonObject>promise();
 
-        // Normalize status to lowercase
-        var normalizedStatus = status.toLowerCase();
-
-        if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down"))
+        try
         {
-            promise.fail(new IllegalArgumentException("Status must be 'up' or 'down'"));
+            // Normalize status to lowercase
+            var normalizedStatus = status.toLowerCase();
 
-            return promise.future();
-        }
+            if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down"))
+            {
+                promise.fail(new Exception("Status must be 'up' or 'down'"));
 
-        // First verify device exists and is active
-        var deviceCheckSql = """
-                SELECT device_name, ip_address::text as ip_address
-                FROM devices
-                WHERE device_id = $1 AND is_deleted = false
-                """;
+                return promise.future();
+            }
 
-        pgPool.preparedQuery(deviceCheckSql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(deviceRows ->
-                {
-                    if (deviceRows.size() == 0)
+            // First verify device exists and is active
+            var deviceCheckSql = """
+                    SELECT device_name, ip_address::text as ip_address
+                    FROM devices
+                    WHERE device_id = $1 AND is_deleted = false
+                    """;
+
+            pgPool.preparedQuery(deviceCheckSql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(deviceRows ->
                     {
-                        promise.fail(new IllegalArgumentException("Device not found or deleted"));
+                        if (deviceRows.size() == 0)
+                        {
+                            promise.fail(new Exception("Device not found or deleted"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var deviceRow = deviceRows.iterator().next();
+                        var deviceRow = deviceRows.iterator().next();
 
-                    var deviceName = deviceRow.getString("device_name");
+                        var deviceName = deviceRow.getString("device_name");
 
-                    var ipAddressRaw = deviceRow.getString("ip_address");
+                        var ipAddressRaw = deviceRow.getString("ip_address");
 
-                    // Removing CIDR notation
-                    final var ipAddress = (ipAddressRaw != null && ipAddressRaw.contains("/"))
-                            ? ipAddressRaw.split("/")[0]  // Remove CIDR notation
-                            : ipAddressRaw;
+                        // Removing CIDR notation
+                        final var ipAddress = (ipAddressRaw != null && ipAddressRaw.contains("/"))
+                                ? ipAddressRaw.split("/")[0]  // Remove CIDR notation
+                                : ipAddressRaw;
 
-                    var now = LocalDateTime.now();
+                        var now = LocalDateTime.now();
 
-                    var successfulIncrement = normalizedStatus.equals("up") ? 1 : 0;
+                        var successfulIncrement = normalizedStatus.equals("up") ? 1 : 0;
 
-                    var failedIncrement = normalizedStatus.equals("down") ? 1 : 0;
+                        var failedIncrement = normalizedStatus.equals("down") ? 1 : 0;
 
-                    // Update availability record
-                    var updateSql = """
-                            UPDATE device_availability SET
-                                total_checks = total_checks + 1,
-                                successful_checks = successful_checks + $1,
-                                failed_checks = failed_checks + $2,
-                                availability_percent = ROUND(
-                                    (successful_checks + $1) * 100.0 / (total_checks + 1), 2
-                                ),
-                                last_check_time = $3,
-                                last_success_time = CASE WHEN $1 = 1 THEN $3 ELSE last_success_time END,
-                                last_failure_time = CASE WHEN $2 = 1 THEN $3 ELSE last_failure_time END,
-                                current_status = CASE
-                                    WHEN current_status != $4 THEN $4
-                                    ELSE current_status
-                                END
-                            WHERE device_id = $5
-                            RETURNING device_id, total_checks, successful_checks, failed_checks, availability_percent,
-                                     last_check_time, current_status, updated_at
-                            """;
+                        // Update availability record
+                        var updateSql = """
+                                UPDATE device_availability SET
+                                    total_checks = total_checks + 1,
+                                    successful_checks = successful_checks + $1,
+                                    failed_checks = failed_checks + $2,
+                                    availability_percent = ROUND(
+                                        (successful_checks + $1) * 100.0 / (total_checks + 1), 2
+                                    ),
+                                    last_check_time = $3,
+                                    last_success_time = CASE WHEN $1 = 1 THEN $3 ELSE last_success_time END,
+                                    last_failure_time = CASE WHEN $2 = 1 THEN $3 ELSE last_failure_time END,
+                                    current_status = CASE
+                                        WHEN current_status != $4 THEN $4
+                                        ELSE current_status
+                                    END
+                                WHERE device_id = $5
+                                RETURNING device_id, total_checks, successful_checks, failed_checks, availability_percent,
+                                         last_check_time, current_status, updated_at
+                                """;
 
-                    pgPool.preparedQuery(updateSql)
-                            .execute(Tuple.of(successfulIncrement, failedIncrement, now, normalizedStatus, UUID.fromString(deviceId)))
-                            .onSuccess(rows ->
-                            {
-                                if (rows.size() == 0)
+                        pgPool.preparedQuery(updateSql)
+                                .execute(Tuple.of(successfulIncrement, failedIncrement, now, normalizedStatus, UUID.fromString(deviceId)))
+                                .onSuccess(rows ->
                                 {
-                                    promise.fail(new IllegalArgumentException("Device availability record not found"));
+                                    if (rows.size() == 0)
+                                    {
+                                        promise.fail(new Exception("Device availability record not found"));
 
-                                    return;
-                                }
+                                        return;
+                                    }
 
-                                var row = rows.iterator().next();
+                                    var row = rows.iterator().next();
 
-                                var result = new JsonObject()
-                                        .put("success", true)
-                                        .put("device_id", row.getUUID("device_id").toString())
-                                        .put("device_name", deviceName)
-                                        .put("ip_address", ipAddress)
-                                        .put("total_checks", row.getInteger("total_checks"))
-                                        .put("successful_checks", row.getInteger("successful_checks"))
-                                        .put("failed_checks", row.getInteger("failed_checks"))
-                                        .put("availability_percent", row.getBigDecimal("availability_percent"))
-                                        .put("last_check_time", row.getLocalDateTime("last_check_time").toString())
-                                        .put("current_status", row.getString("current_status"))
-                                        .put("updated_at", row.getLocalDateTime("updated_at").toString())
-                                        .put("response_time", responseTime)
-                                        .put("message", "Device status updated successfully");
+                                    var result = new JsonObject()
+                                            .put("success", true)
+                                            .put("device_id", row.getUUID("device_id").toString())
+                                            .put("device_name", deviceName)
+                                            .put("ip_address", ipAddress)
+                                            .put("total_checks", row.getInteger("total_checks"))
+                                            .put("successful_checks", row.getInteger("successful_checks"))
+                                            .put("failed_checks", row.getInteger("failed_checks"))
+                                            .put("availability_percent", row.getBigDecimal("availability_percent"))
+                                            .put("last_check_time", row.getLocalDateTime("last_check_time").toString())
+                                            .put("current_status", row.getString("current_status"))
+                                            .put("updated_at", row.getLocalDateTime("updated_at").toString())
+                                            .put("message", "Device status updated successfully");
 
-                                promise.complete(result);
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to update device status", cause);
+                                    promise.complete(result);
+                                })
+                                .onFailure(cause ->
+                                {
+                                    logger.error("Failed to update device status: {}", cause.getMessage());
 
-                                promise.fail(cause);
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to verify device", cause);
+                                    promise.fail(cause);
+                                });
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to verify device: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in availabilityUpdateDeviceStatus service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -257,33 +273,42 @@ public class AvailabilityServiceImpl implements AvailabilityService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                DELETE FROM device_availability
-                WHERE device_id = $1
-                """;
+        try
+        {
+            var sql = """
+                    DELETE FROM device_availability
+                    WHERE device_id = $1
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceId)))
-                .onSuccess(rows ->
-                {
-                    var deletedCount = rows.rowCount();
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(rows ->
+                    {
+                        var deletedCount = rows.rowCount();
 
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("device_id", deviceId)
-                            .put("deleted", deletedCount > 0)
-                            .put("message", deletedCount > 0 ?
-                                "Device availability status deleted successfully" :
-                                "No availability status found for device");
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("device_id", deviceId)
+                                .put("deleted", deletedCount > 0)
+                                .put("message", deletedCount > 0 ?
+                                    "Device availability status deleted successfully" :
+                                    "No availability status found for device");
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to delete device availability", cause);
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to delete device availability: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in availabilityDeleteByDevice service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }

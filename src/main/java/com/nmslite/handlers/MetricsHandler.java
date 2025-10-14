@@ -10,6 +10,10 @@ import com.nmslite.utils.ValidationUtil;
 
 import io.vertx.ext.web.RoutingContext;
 
+import org.slf4j.Logger;
+
+import org.slf4j.LoggerFactory;
+
 /**
  * MetricsHandler - HTTP request handler for metrics operations
 
@@ -18,6 +22,8 @@ import io.vertx.ext.web.RoutingContext;
  */
 public class MetricsHandler
 {
+
+    private static final Logger logger = LoggerFactory.getLogger(MetricsHandler.class);
 
     private final MetricsService metricsService;
 
@@ -38,18 +44,27 @@ public class MetricsHandler
      */
     public void getDeviceMetrics(RoutingContext context)
     {
-        var deviceId = context.pathParam("deviceId");
-
-        if (!ValidationUtil.validatePathParameterUUID(context, deviceId, "deviceId"))
+        try
         {
-            return; // Validation failed, response already sent
-        }
+            var deviceId = context.pathParam("deviceId");
 
-        metricsService.metricsGetAllByDevice(deviceId)
-                .onSuccess(metrics ->
-                        ResponseUtil.handleSuccess(context, metrics))
-                .onFailure(cause ->
-                        ExceptionUtil.handleHttp(context, cause, "Failed to retrieve metrics"));
+            if (!ValidationUtil.validatePathParameterUUID(context, deviceId, "deviceId"))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            metricsService.metricsGetAllByDevice(deviceId)
+                    .onSuccess(metrics ->
+                            ResponseUtil.handleSuccess(context, metrics))
+                    .onFailure(cause ->
+                            ExceptionUtil.handleHttp(context, cause, "Failed to retrieve metrics"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in getDeviceMetrics handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(context, exception, "Failed to retrieve metrics");
+        }
     }
 
 }

@@ -23,11 +23,6 @@ import java.util.UUID;
  */
 public class ValidationUtil
 {
-    
-    // ========================================
-    // COMMON VALIDATIONS (OUTER CLASS)
-    // ========================================
-
     /**
      * Validate port range (database CHECK constraint: port BETWEEN 1 AND 65535)
      *
@@ -39,8 +34,7 @@ public class ValidationUtil
     {
         if (port != null && (port < 1 || port > 65535))
         {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid port range"),
-                "Port must be between 1 and 65535");
+            ExceptionUtil.handleHttp(ctx, new Exception("Invalid port range"), "Port must be between 1 and 65535");
 
             return false;
         }
@@ -61,8 +55,7 @@ public class ValidationUtil
     {
         if (value != null && value.length() > maxLength)
         {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException(fieldName + " too long"),
-                fieldName + " must be " + maxLength + " characters or less");
+            ExceptionUtil.handleHttp(ctx, new Exception(fieldName + " too long"), fieldName + " must be " + maxLength + " characters or less");
 
             return false;
         }
@@ -86,8 +79,7 @@ public class ValidationUtil
 
             if (doubleValue < 0.0 || doubleValue > 100.0)
             {
-                ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid " + fieldName + " percentage"),
-                    fieldName + " must be between 0 and 100");
+                ExceptionUtil.handleHttp(ctx, new Exception("Invalid " + fieldName + " percentage"), fieldName + " must be between 0 and 100");
 
                 return false;
             }
@@ -110,7 +102,7 @@ public class ValidationUtil
         {
             if (!json.containsKey(field) || json.getValue(field) == null)
             {
-                ExceptionUtil.handleHttp(context, new IllegalArgumentException("Missing required field: " + field));
+                ExceptionUtil.handleHttp(context, new Exception("Missing required field: " + field));
 
                 return false;
             }
@@ -131,7 +123,7 @@ public class ValidationUtil
     {
         if (json == null || json.isEmpty())
         {
-            ExceptionUtil.handleHttp(context, new IllegalArgumentException("Request body is required"));
+            ExceptionUtil.handleHttp(context, new Exception("Request body is required"));
 
             return false;
         }
@@ -152,8 +144,7 @@ public class ValidationUtil
         {
             var allowedFieldsList = String.join(", ", allowedFields);
 
-            ExceptionUtil.handleHttp(context, new IllegalArgumentException(
-                "At least one field must be provided: " + allowedFieldsList));
+            ExceptionUtil.handleHttp(context, new Exception("At least one field must be provided: " + allowedFieldsList));
 
             return false;
         }
@@ -166,14 +157,14 @@ public class ValidationUtil
 
                 if (value == null)
                 {
-                    ExceptionUtil.handleHttp(context, new IllegalArgumentException(field + " cannot be null"));
+                    ExceptionUtil.handleHttp(context, new Exception(field + " cannot be null"));
 
                     return false;
                 }
 
                 if (value instanceof String && ((String) value).trim().isEmpty())
                 {
-                    ExceptionUtil.handleHttp(context, new IllegalArgumentException(field + " cannot be empty"));
+                    ExceptionUtil.handleHttp(context, new Exception(field + " cannot be empty"));
 
                     return false;
                 }
@@ -201,8 +192,7 @@ public class ValidationUtil
 
             if (value != null && (value < min || value > max))
             {
-                ExceptionUtil.handleHttp(context, new IllegalArgumentException(
-                    field + " must be between " + min + " and " + max));
+                ExceptionUtil.handleHttp(context, new Exception(field + " must be between " + min + " and " + max));
 
                 return false;
             }
@@ -223,8 +213,7 @@ public class ValidationUtil
     {
         if (uuidValue == null || uuidValue.trim().isEmpty())
         {
-            ExceptionUtil.handleHttp(context, new IllegalArgumentException(parameterName + " is required"),
-                parameterName + " path parameter is required");
+            ExceptionUtil.handleHttp(context, new Exception(parameterName + " is required"), parameterName + " path parameter is required");
 
             return false;
         }
@@ -235,10 +224,9 @@ public class ValidationUtil
 
             return true;
         }
-        catch (IllegalArgumentException exception)
+        catch (Exception exception)
         {
-            ExceptionUtil.handleHttp(context, new IllegalArgumentException("Invalid UUID format"),
-                parameterName + " must be a valid UUID");
+            ExceptionUtil.handleHttp(context, new Exception("Invalid UUID format"), parameterName + " must be a valid UUID");
 
             return false;
         }
@@ -263,7 +251,7 @@ public class ValidationUtil
 
             return true;
         }
-        catch (IllegalArgumentException exception)
+        catch (Exception exception)
         {
             return false;
         }
@@ -280,8 +268,7 @@ public class ValidationUtil
     {
         if (timeoutSeconds != null && (timeoutSeconds < 0 || timeoutSeconds > 600))
         {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid timeout range"),
-                "Timeout must be between 0 and 600 seconds");
+            ExceptionUtil.handleHttp(ctx, new Exception("Invalid timeout range"), "Timeout must be between 0 and 600 seconds");
 
             return false;
         }
@@ -290,24 +277,86 @@ public class ValidationUtil
     }
 
     /**
-     * Validate retry count range (0-5)
+     * Validate if a string is a valid single IP address.
      *
-     * @param ctx Routing context
-     * @param retryCount Retry count value to validate
-     * @return true if valid retry count range, false otherwise (response already sent)
+     * @param ip The IP address string to validate (must be non-null and trimmed)
+     * @return true if valid IP format, false otherwise
      */
-    public static boolean validateRetryCountRange(RoutingContext ctx, Integer retryCount)
+    public static boolean isValidSingleIP(String ip)
     {
-        if (retryCount != null && (retryCount < 0 || retryCount > 5))
+        if (ip == null || ip.trim().isEmpty())
         {
-            ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid retry count"),
-                "Retry count must be between 0 and 5");
-
             return false;
         }
 
-        return true;
+        // IPv4 pattern: each octet 0-255
+        return ip.matches("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$");
     }
+
+    /**
+     * Validate if a string is a valid IP range format.
+     *
+     * @param ipRange The IP range string to validate (e.g., "192.168.1.1-50")
+     * @return true if valid IP range format, false otherwise
+     */
+    public static boolean isValidIPRange(String ipRange)
+    {
+        if (ipRange == null || ipRange.trim().isEmpty())
+        {
+            return false;
+        }
+
+        // Check basic format: IP-octet
+        if (!ipRange.matches("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)-(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"))
+        {
+            return false;
+        }
+
+        try
+        {
+            // Parse and validate range
+            var parts = ipRange.split("-");
+
+            if (parts.length != 2)
+            {
+                return false;
+            }
+
+            var baseIP = parts[0];
+
+            var endOctet = Integer.parseInt(parts[1]);
+
+            // Validate base IP
+            if (!isValidSingleIP(baseIP))
+            {
+                return false;
+            }
+
+            // Extract last octet from base IP
+            var ipParts = baseIP.split("\\.");
+
+            var startOctet = Integer.parseInt(ipParts[3]);
+
+            // Validate range
+            if (startOctet > endOctet)
+            {
+                return false; // Start must be <= end
+            }
+
+            if (endOctet > 255)
+            {
+                return false; // Invalid octet value
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            return false;
+        }
+    }
+
+
 
     // ========================================
     // NESTED STATIC CLASSES FOR DOMAIN-SPECIFIC VALIDATIONS
@@ -363,16 +412,14 @@ public class ValidationUtil
             {
                 if (username.length() < 8)
                 {
-                    ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Username too short"),
-                        "Username must be at least 8 characters long");
+                    ExceptionUtil.handleHttp(ctx, new Exception("Username too short"), "Username must be at least 8 characters long");
 
                     return false;
                 }
 
                 if (username.length() > 100)
                 {
-                    ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Username too long"),
-                        "Username must be 100 characters or less");
+                    ExceptionUtil.handleHttp(ctx, new Exception("Username too long"), "Username must be 100 characters or less");
 
                     return false;
                 }
@@ -394,16 +441,14 @@ public class ValidationUtil
             {
                 if (password.length() < 8)
                 {
-                    ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Password too short"),
-                        "Password must be at least 8 characters long");
+                    ExceptionUtil.handleHttp(ctx, new Exception("Password too short"), "Password must be at least 8 characters long");
 
                     return false;
                 }
 
                 if (password.length() > 100)
                 {
-                    ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Password too long"),
-                        "Password must be 100 characters or less");
+                    ExceptionUtil.handleHttp(ctx, new Exception("Password too long"), "Password must be 100 characters or less");
 
                     return false;
                 }
@@ -568,15 +613,15 @@ public class ValidationUtil
 
             if (!(credentialProfileIdsObj instanceof JsonArray credentialProfileIds))
             {
-                ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Invalid credential_profile_ids format"),
-                    "credential_profile_ids must be an array of UUID strings");
+                ExceptionUtil.handleHttp(ctx, new Exception("Invalid credential_profile_ids format"),
+                        "credential_profile_ids must be an array of UUID strings");
 
                 return false;
             }
 
             if (credentialProfileIds.isEmpty())
             {
-                ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Empty credential_profile_ids array"),
+                ExceptionUtil.handleHttp(ctx, new Exception("Empty credential_profile_ids array"),
                     "credential_profile_ids array must contain at least one credential profile ID");
 
                 return false;
@@ -584,7 +629,7 @@ public class ValidationUtil
 
             if (credentialProfileIds.size() > 10)
             {
-                ExceptionUtil.handleHttp(ctx, new IllegalArgumentException("Too many credential profiles"),
+                ExceptionUtil.handleHttp(ctx, new Exception("Too many credential profiles"),
                     "credential_profile_ids array cannot contain more than 10 credential profiles");
 
                 return false;
@@ -603,18 +648,40 @@ public class ValidationUtil
          */
         private static boolean validateIPFormat(RoutingContext ctx, String ipAddress, Boolean isRange)
         {
-            try
+            if (ipAddress == null || ipAddress.trim().isEmpty())
             {
-                IPRangeUtil.parseIPRange(ipAddress, isRange != null && isRange);
-
-                return true;
-            }
-            catch (IllegalArgumentException exception)
-            {
-                ExceptionUtil.handleHttp(ctx, exception, "Invalid IP address format: " + exception.getMessage());
+                ExceptionUtil.handleHttp(ctx, new Exception("IP address cannot be null or empty"), "IP address is required");
 
                 return false;
             }
+
+            var trimmedIP = ipAddress.trim();
+
+            var isRangeFlag = isRange != null && isRange;
+
+            if (!isRangeFlag)
+            {
+                // Validate single IP address using outer class method
+                if (!ValidationUtil.isValidSingleIP(trimmedIP))
+                {
+                    ExceptionUtil.handleHttp(ctx, new Exception("Invalid IP address format"), "Invalid IP address format: " + trimmedIP);
+
+                    return false;
+                }
+            }
+            else
+            {
+                // Validate IP range using outer class method
+                if (!ValidationUtil.isValidIPRange(trimmedIP))
+                {
+                    ExceptionUtil.handleHttp(ctx, new Exception("Invalid IP range format"),
+                        "Invalid IP range format: " + trimmedIP + ". Expected format: '192.168.1.1-50'");
+
+                    return false;
+                }
+            }
+
+            return true;
         }
 
     }
@@ -635,7 +702,7 @@ public class ValidationUtil
         public static boolean validateUpdate(RoutingContext ctx, JsonObject requestBody)
         {
             if (!validateUpdateFields(ctx, requestBody, "device_name", "port",
-                    "polling_interval_seconds", "timeout_seconds", "retry_count",
+                    "polling_interval_seconds", "timeout_seconds",
                     "alert_threshold_cpu", "alert_threshold_memory", "alert_threshold_disk"))
             {
                 return false;
@@ -652,11 +719,6 @@ public class ValidationUtil
             }
 
             if (!validateTimeoutRange(ctx, requestBody.getInteger("timeout_seconds")))
-            {
-                return false;
-            }
-
-            if (!validateRetryCountRange(ctx, requestBody.getInteger("retry_count")))
             {
                 return false;
             }

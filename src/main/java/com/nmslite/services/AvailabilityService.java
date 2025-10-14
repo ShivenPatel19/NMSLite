@@ -1,12 +1,11 @@
 package com.nmslite.services;
 
+import com.nmslite.Bootstrap;
 import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
 import io.vertx.core.Future;
-
-import io.vertx.core.Vertx;
 
 import io.vertx.core.json.JsonObject;
 
@@ -34,12 +33,11 @@ public interface AvailabilityService
     /**
      * Create a proxy instance for the availability service
      *
-     * @param vertx Vert.x instance
      * @return AvailabilityService proxy instance
      */
-    static AvailabilityService createProxy(Vertx vertx)
+    static AvailabilityService createProxy()
     {
-        return new ServiceProxyBuilder(vertx)
+        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
             .setAddress(SERVICE_ADDRESS)
             .build(AvailabilityService.class);
     }
@@ -57,10 +55,9 @@ public interface AvailabilityService
      *
      * @param deviceId Device ID (must be active, non-deleted)
      * @param status New status ("UP" or "DOWN")
-     * @param responseTime Response time in milliseconds
      * @return Future containing JsonObject with status update result
      */
-    Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status, Long responseTime);
+    Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status);
 
     /**
      * Delete availability status for specific device (when device is deleted)

@@ -1,12 +1,11 @@
 package com.nmslite.services;
 
+import com.nmslite.Bootstrap;
 import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
 import io.vertx.core.Future;
-
-import io.vertx.core.Vertx;
 
 import io.vertx.core.json.JsonArray;
 
@@ -34,12 +33,11 @@ public interface UserService
     /**
      * Create a proxy instance for the user service
      *
-     * @param vertx Vert.x instance
      * @return UserService proxy instance
      */
-    static UserService createProxy(Vertx vertx)
+    static UserService createProxy()
     {
-        return new ServiceProxyBuilder(vertx)
+        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
             .setAddress(SERVICE_ADDRESS)
             .build(UserService.class);
     }

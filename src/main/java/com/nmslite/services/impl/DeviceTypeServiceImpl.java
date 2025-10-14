@@ -58,39 +58,48 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
     {
         var promise = Promise.<JsonArray>promise();
 
-        var sql = """
-                SELECT device_type_id, device_type_name, default_port, is_active, created_at
-                FROM device_types
-                """ + (includeInactive ? "" : "WHERE is_active = true ") + """
-                ORDER BY device_type_name
-                """;
+        try
+        {
+            var sql = """
+                    SELECT device_type_id, device_type_name, default_port, is_active, created_at
+                    FROM device_types
+                    """ + (includeInactive ? "" : "WHERE is_active = true ") + """
+                    ORDER BY device_type_name
+                    """;
 
-        pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
-                {
-                    var deviceTypes = new JsonArray();
-
-                    for (var row : rows)
+            pgPool.query(sql)
+                    .execute()
+                    .onSuccess(rows ->
                     {
-                        var deviceType = new JsonObject()
-                                .put("device_type_id", row.getUUID("device_type_id").toString())
-                                .put("device_type_name", row.getString("device_type_name"))
-                                .put("default_port", row.getInteger("default_port"))
-                                .put("is_active", row.getBoolean("is_active"))
-                                .put("created_at", row.getLocalDateTime("created_at").toString());
+                        var deviceTypes = new JsonArray();
 
-                        deviceTypes.add(deviceType);
-                    }
+                        for (var row : rows)
+                        {
+                            var deviceType = new JsonObject()
+                                    .put("device_type_id", row.getUUID("device_type_id").toString())
+                                    .put("device_type_name", row.getString("device_type_name"))
+                                    .put("default_port", row.getInteger("default_port"))
+                                    .put("is_active", row.getBoolean("is_active"))
+                                    .put("created_at", row.getLocalDateTime("created_at").toString());
 
-                    promise.complete(deviceTypes);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get device types", cause);
+                            deviceTypes.add(deviceType);
+                        }
 
-                    promise.fail(cause);
-                });
+                        promise.complete(deviceTypes);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to get device types: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceTypeList service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -106,41 +115,50 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var sql = """
-                SELECT device_type_id, device_type_name, default_port, is_active, created_at
-                FROM device_types
-                WHERE device_type_id = $1
-                """;
+        try
+        {
+            var sql = """
+                    SELECT device_type_id, device_type_name, default_port, is_active, created_at
+                    FROM device_types
+                    WHERE device_type_id = $1
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(deviceTypeId)))
-                .onSuccess(rows ->
-                {
-                    if (rows.size() == 0)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(deviceTypeId)))
+                    .onSuccess(rows ->
                     {
-                        promise.complete(new JsonObject().put("found", false));
+                        if (rows.size() == 0)
+                        {
+                            promise.complete(new JsonObject().put("found", false));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var row = rows.iterator().next();
+                        var row = rows.iterator().next();
 
-                    var result = new JsonObject()
-                            .put("found", true)
-                            .put("device_type_id", row.getUUID("device_type_id").toString())
-                            .put("device_type_name", row.getString("device_type_name"))
-                            .put("default_port", row.getInteger("default_port"))
-                            .put("is_active", row.getBoolean("is_active"))
-                            .put("created_at", row.getLocalDateTime("created_at").toString());
+                        var result = new JsonObject()
+                                .put("found", true)
+                                .put("device_type_id", row.getUUID("device_type_id").toString())
+                                .put("device_type_name", row.getString("device_type_name"))
+                                .put("default_port", row.getInteger("default_port"))
+                                .put("is_active", row.getBoolean("is_active"))
+                                .put("created_at", row.getLocalDateTime("created_at").toString());
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get device type by ID", cause);
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to get device type by ID: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceTypeGetById service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }

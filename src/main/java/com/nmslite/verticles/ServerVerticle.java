@@ -90,36 +90,54 @@ public class ServerVerticle extends AbstractVerticle
     @Override
     public void start(Promise<Void> startPromise)
     {
-        logger.info("Starting ServerVerticle");
+        try
+        {
+            logger.info("Starting ServerVerticle");
 
-        httpPort = config().getInteger("http.port", 8080);
+            httpPort = config().getInteger("http.port", 8080);
 
-        // Initialize all service proxies
-        initializeServiceProxies();
+            // Initialize all service proxies
+            initializeServiceProxies();
 
-        // Create handler instances
-        createHandlers();
+            // Create handler instances
+            createHandlers();
 
-        // Setup HTTP server with routing
-        httpServer = vertx.createHttpServer();
+            // Setup HTTP server with routing
+            httpServer = vertx.createHttpServer();
 
-        var router = createRouter();
+            var router = createRouter();
 
-        // Start HTTP server
-        httpServer.requestHandler(router)
-            .listen(httpPort)
-            .onSuccess(server ->
+            if (router == null)
             {
-                logger.info("HTTP Server started on port {}", httpPort);
+                logger.error("Failed to create router - router is null");
 
-                startPromise.complete();
-            })
-            .onFailure(cause ->
-            {
-                logger.error("Failed to start HTTP server", cause);
+                startPromise.fail("Router creation failed");
 
-                startPromise.fail(cause);
-            });
+                return;
+            }
+
+            // Start HTTP server
+            httpServer.requestHandler(router)
+                .listen(httpPort)
+                .onSuccess(server ->
+                {
+                    logger.info("HTTP Server started on port {}", httpPort);
+
+                    startPromise.complete();
+                })
+                .onFailure(cause ->
+                {
+                    logger.error("Failed to start HTTP server: {}", cause.getMessage());
+
+                    startPromise.fail(cause);
+                });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in start: {}", exception.getMessage());
+
+            startPromise.fail(exception);
+        }
     }
 
     /**
@@ -129,19 +147,26 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void initializeServiceProxies()
     {
-        this.userService = UserService.createProxy(vertx);
+        try
+        {
+            this.userService = UserService.createProxy();
 
-        this.deviceService = DeviceService.createProxy(vertx);
+            this.deviceService = DeviceService.createProxy();
 
-        this.deviceTypeService = DeviceTypeService.createProxy(vertx);
+            this.deviceTypeService = DeviceTypeService.createProxy();
 
-        this.credentialProfileService = CredentialProfileService.createProxy(vertx);
+            this.credentialProfileService = CredentialProfileService.createProxy();
 
-        this.discoveryProfileService = DiscoveryProfileService.createProxy(vertx);
+            this.discoveryProfileService = DiscoveryProfileService.createProxy();
 
-        this.metricsService = MetricsService.createProxy(vertx);
+            this.metricsService = MetricsService.createProxy();
 
-        this.availabilityService = AvailabilityService.createProxy(vertx);
+            this.availabilityService = AvailabilityService.createProxy();
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in initializeServiceProxies: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -150,24 +175,31 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void createHandlers()
     {
-        // Initialize JWT utilities
-        // JWT and Authentication
-        var jwtUtil = new JWTUtil(vertx);
+        try
+        {
+            // Initialize JWT utilities
+            // JWT and Authentication
+            var jwtUtil = new JWTUtil();
 
-        this.authMiddleware = new AuthenticationMiddleware(jwtUtil);
+            this.authMiddleware = new AuthenticationMiddleware(jwtUtil);
 
-        // Create handlers with JWT support
-        this.userHandler = new UserHandler(userService, jwtUtil);
+            // Create handlers with JWT support
+            this.userHandler = new UserHandler(userService, jwtUtil);
 
-        this.credentialHandler = new CredentialHandler(credentialProfileService);
+            this.credentialHandler = new CredentialHandler(credentialProfileService);
 
-        this.discoveryProfileHandler = new DiscoveryProfileHandler(vertx, discoveryProfileService, deviceTypeService, credentialProfileService);
+            this.discoveryProfileHandler = new DiscoveryProfileHandler(discoveryProfileService, deviceTypeService, credentialProfileService);
 
-        this.deviceHandler = new DeviceHandler(deviceService, deviceTypeService);
+            this.deviceHandler = new DeviceHandler(deviceService, deviceTypeService);
 
-        this.metricsHandler = new MetricsHandler(metricsService);
+            this.metricsHandler = new MetricsHandler(metricsService);
 
-        this.availabilityHandler = new AvailabilityHandler(availabilityService);
+            this.availabilityHandler = new AvailabilityHandler(availabilityService);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in createHandlers: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -177,42 +209,78 @@ public class ServerVerticle extends AbstractVerticle
      */
     private Router createRouter()
     {
-        var router = Router.router(vertx);
+        try
+        {
+            var router = Router.router(vertx);
 
-        // Middleware
-        router.route().handler(CorsHandler.create()
-                .addOrigin("*")
-                .allowedMethod(HttpMethod.GET)
-                .allowedMethod(HttpMethod.POST)
-                .allowedMethod(HttpMethod.PUT)
-                .allowedMethod(HttpMethod.DELETE));
+            // Middleware
+            router.route().handler(CorsHandler.create()
+                    .addOrigin("*")
+                    .allowedMethod(HttpMethod.GET)
+                    .allowedMethod(HttpMethod.POST)
+                    .allowedMethod(HttpMethod.PUT)
+                    .allowedMethod(HttpMethod.DELETE));
 
-        router.route().handler(BodyHandler.create());
+            router.route().handler(BodyHandler.create());
 
-        // Setup all API routes using handlers
-        setupUserRoutes(router);
+            // Setup all API routes using handlers
+            setupUserRoutes(router);
 
-        setupCredentialRoutes(router);
+            setupCredentialRoutes(router);
 
-        setupDiscoveryRoutes(router);
+            setupDiscoveryRoutes(router);
 
-        setupDeviceRoutes(router);
+            setupDeviceRoutes(router);
 
-        setupMetricsRoutes(router);
+            setupMetricsRoutes(router);
 
-        setupAvailabilityRoutes(router);
+            setupAvailabilityRoutes(router);
 
-        // Setup Swagger UI routes
-        setupSwaggerRoutes(router);
+            // Setup Swagger UI routes
+            setupSwaggerRoutes(router);
 
-        // 404 handler for unmatched routes
-        router.route("/*").handler(ctx ->
+            // Global failure handler - catches all unhandled exceptions
+            router.route().failureHandler(ctx ->
+            {
+                var failure = ctx.failure();
+
+                var statusCode = ctx.statusCode();
+
+                if (statusCode == -1)
+                {
+                    statusCode = 500;
+                }
+
+                logger.error("Request failed: {} - {}", ctx.request().path(),
+                    failure != null ? failure.getMessage() : "Unknown error");
+
+                var errorResponse = new JsonObject()
+                    .put("success", false)
+                    .put("error", failure != null ? failure.getMessage() : "Internal Server Error")
+                    .put("path", ctx.request().path())
+                    .put("timestamp", System.currentTimeMillis());
+
                 ctx.response()
-                    .setStatusCode(404)
+                    .setStatusCode(statusCode)
                     .putHeader("content-type", "application/json")
-                    .end(new JsonObject().put("error", "Not Found").encode()));
+                    .end(errorResponse.encode());
+            });
 
-        return router;
+            // 404 handler for unmatched routes
+            router.route("/*").handler(ctx ->
+                    ctx.response()
+                        .setStatusCode(404)
+                        .putHeader("content-type", "application/json")
+                        .end(new JsonObject().put("error", "Not Found").encode()));
+
+            return router;
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in createRouter: {}", exception.getMessage());
+
+            return null;
+        }
     }
 
     /**
@@ -222,17 +290,24 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void setupUserRoutes(Router router)
     {
-        // User Authentication APIs (No authentication required for login)
-        router.post("/api/auth/login").handler(userHandler::authenticateUser);
+        try
+        {
+            // User Authentication APIs (No authentication required for login)
+            router.post("/api/auth/login").handler(userHandler::authenticateUser);
 
-        // User Management APIs (Authentication required)
-        router.get("/api/users").handler(authMiddleware.requireAuthentication()).handler(userHandler::getUsers);
+            // User Management APIs (Authentication required)
+            router.get("/api/users").handler(authMiddleware.requireAuthentication()).handler(userHandler::getUsers);
 
-        router.post("/api/users").handler(authMiddleware.requireAuthentication()).handler(userHandler::createUser);
+            router.post("/api/users").handler(authMiddleware.requireAuthentication()).handler(userHandler::createUser);
 
-        router.put("/api/users/:id").handler(authMiddleware.requireAuthentication()).handler(userHandler::updateUser);
+            router.put("/api/users/:id").handler(authMiddleware.requireAuthentication()).handler(userHandler::updateUser);
 
-        router.delete("/api/users/:id").handler(authMiddleware.requireAuthentication()).handler(userHandler::deleteUser);
+            router.delete("/api/users/:id").handler(authMiddleware.requireAuthentication()).handler(userHandler::deleteUser);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in setupUserRoutes: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -242,14 +317,21 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void setupCredentialRoutes(Router router)
     {
-        // Credential Profile APIs (Authentication required)
-        router.get("/api/credentials").handler(authMiddleware.requireAuthentication()).handler(credentialHandler::getCredentials);
+        try
+        {
+            // Credential Profile APIs (Authentication required)
+            router.get("/api/credentials").handler(authMiddleware.requireAuthentication()).handler(credentialHandler::getCredentials);
 
-        router.post("/api/credentials").handler(authMiddleware.requireAuthentication()).handler(credentialHandler::createCredentials);
+            router.post("/api/credentials").handler(authMiddleware.requireAuthentication()).handler(credentialHandler::createCredentials);
 
-        router.put("/api/credentials/:id").handler(authMiddleware.requireAuthentication()).handler(credentialHandler::updateCredentials);
+            router.put("/api/credentials/:id").handler(authMiddleware.requireAuthentication()).handler(credentialHandler::updateCredentials);
 
-        router.delete("/api/credentials/:id").handler(authMiddleware.requireAuthentication()).handler(credentialHandler::deleteCredentials);
+            router.delete("/api/credentials/:id").handler(authMiddleware.requireAuthentication()).handler(credentialHandler::deleteCredentials);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in setupCredentialRoutes: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -259,15 +341,22 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void setupDiscoveryRoutes(Router router)
     {
-        // Discovery Profile Management APIs (Database CRUD) - Authentication required
-        router.get("/api/discovery-profiles").handler(authMiddleware.requireAuthentication()).handler(discoveryProfileHandler::getDiscoveryProfiles);
+        try
+        {
+            // Discovery Profile Management APIs (Database CRUD) - Authentication required
+            router.get("/api/discovery-profiles").handler(authMiddleware.requireAuthentication()).handler(discoveryProfileHandler::getDiscoveryProfiles);
 
-        router.post("/api/discovery-profiles").handler(authMiddleware.requireAuthentication()).handler(discoveryProfileHandler::createDiscoveryProfile);
+            router.post("/api/discovery-profiles").handler(authMiddleware.requireAuthentication()).handler(discoveryProfileHandler::createDiscoveryProfile);
 
-        router.delete("/api/discovery-profiles/:id").handler(authMiddleware.requireAuthentication()).handler(discoveryProfileHandler::deleteDiscoveryProfile);
+            router.delete("/api/discovery-profiles/:id").handler(authMiddleware.requireAuthentication()).handler(discoveryProfileHandler::deleteDiscoveryProfile);
 
-        // Discovery Operations APIs (GoEngine-based) - Authentication required
-        router.post("/api/discovery/test").handler(authMiddleware.requireAuthentication()).handler(discoveryProfileHandler::testDiscovery);
+            // Discovery Operations APIs (GoEngine-based) - Authentication required
+            router.post("/api/discovery/test").handler(authMiddleware.requireAuthentication()).handler(discoveryProfileHandler::testDiscovery);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in setupDiscoveryRoutes: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -277,27 +366,34 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void setupDeviceRoutes(Router router)
     {
-        // Device Management API (Authentication required)
-        router.get("/api/devices/discovered").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDiscoveredDevices);
+        try
+        {
+            // Device Management API (Authentication required)
+            router.get("/api/devices/discovered").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDiscoveredDevices);
 
-        // Provision devices (bulk operation - sets is_provisioned=true AND is_monitoring_enabled=true)
-        router.post("/api/devices/provision").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::provisionAndEnableMonitoring);
+            // Provision devices (bulk operation - sets is_provisioned=true AND is_monitoring_enabled=true)
+            router.post("/api/devices/provision").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::provisionAndEnableMonitoring);
 
-        // Get provisioned devices
-        router.get("/api/devices/provisioned").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getProvisionedDevices);
+            // Get provisioned devices
+            router.get("/api/devices/provisioned").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getProvisionedDevices);
 
-        router.put("/api/devices/:id/config").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::updateDeviceConfig);
+            router.put("/api/devices/:id/config").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::updateDeviceConfig);
 
-        router.post("/api/devices/:id/monitoring/enable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::enableMonitoring);
+            router.post("/api/devices/:id/monitoring/enable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::enableMonitoring);
 
-        router.post("/api/devices/:id/monitoring/disable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::disableMonitoring);
+            router.post("/api/devices/:id/monitoring/disable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::disableMonitoring);
 
-        router.delete("/api/devices/:id").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::softDeleteDevice);
+            router.delete("/api/devices/:id").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::softDeleteDevice);
 
-        router.post("/api/devices/:id/restore").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::restoreDevice);
+            router.post("/api/devices/:id/restore").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::restoreDevice);
 
-        // Device Types (Read-Only) - Authentication required
-        router.get("/api/device-types").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDeviceTypes);
+            // Device Types (Read-Only) - Authentication required
+            router.get("/api/device-types").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDeviceTypes);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in setupDeviceRoutes: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -307,8 +403,15 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void setupMetricsRoutes(Router router)
     {
-        // Metrics API (Authentication required)
-        router.get("/api/metrics/:deviceId").handler(authMiddleware.requireAuthentication()).handler(metricsHandler::getDeviceMetrics);
+        try
+        {
+            // Metrics API (Authentication required)
+            router.get("/api/metrics/:deviceId").handler(authMiddleware.requireAuthentication()).handler(metricsHandler::getDeviceMetrics);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in setupMetricsRoutes: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -318,8 +421,15 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void setupAvailabilityRoutes(Router router)
     {
-        // Availability API (Authentication required)
-        router.get("/api/availability/:deviceId").handler(authMiddleware.requireAuthentication()).handler(availabilityHandler::getDeviceAvailability);
+        try
+        {
+            // Availability API (Authentication required)
+            router.get("/api/availability/:deviceId").handler(authMiddleware.requireAuthentication()).handler(availabilityHandler::getDeviceAvailability);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in setupAvailabilityRoutes: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -330,72 +440,79 @@ public class ServerVerticle extends AbstractVerticle
      */
     private void setupSwaggerRoutes(Router router)
     {
-        // Serve Swagger UI at /swagger with embedded OpenAPI spec
-        router.get("/swagger").handler(context ->
+        try
         {
-            vertx.fileSystem().readFile("src/main/resources/openapi.yaml")
-                .onSuccess(specBuffer ->
-                {
-                    var specContent = specBuffer.toString()
-                        .replace("\\", "\\\\")
-                        .replace("`", "\\`")
-                        .replace("$", "\\$");
+            // Serve Swagger UI at /swagger with embedded OpenAPI spec
+            router.get("/swagger").handler(context ->
+            {
+                vertx.fileSystem().readFile("src/main/resources/openapi.yaml")
+                    .onSuccess(specBuffer ->
+                    {
+                        var specContent = specBuffer.toString()
+                            .replace("\\", "\\\\")
+                            .replace("`", "\\`")
+                            .replace("$", "\\$");
 
-                    var html = """
-                        <!DOCTYPE html>
-                        <html lang="en">
-                        <head>
-                            <meta charset="UTF-8">
-                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                            <title>NMSLite API Documentation</title>
-                            <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui.css">
-                            <style>
-                                .topbar { display: none; }
-                            </style>
-                        </head>
-                        <body>
-                            <div id="swagger-ui"></div>
-                            <script src="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui-bundle.js"></script>
-                            <script src="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui-standalone-preset.js"></script>
-                            <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-                            <script>
-                                window.onload = function() {
-                                    var spec = `%s`;
-                                    var specObj = jsyaml.load(spec);
-                                    window.ui = SwaggerUIBundle({
-                                        spec: specObj,
-                                        dom_id: '#swagger-ui',
-                                        deepLinking: true,
-                                        presets: [
-                                            SwaggerUIBundle.presets.apis,
-                                            SwaggerUIStandalonePreset
-                                        ],
-                                        plugins: [
-                                            SwaggerUIBundle.plugins.DownloadUrl
-                                        ],
-                                        layout: "StandaloneLayout",
-                                        persistAuthorization: true
-                                    });
-                                };
-                            </script>
-                        </body>
-                        </html>
-                        """.formatted(specContent);
+                        var html = """
+                            <!DOCTYPE html>
+                            <html lang="en">
+                            <head>
+                                <meta charset="UTF-8">
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                <title>NMSLite API Documentation</title>
+                                <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui.css">
+                                <style>
+                                    .topbar { display: none; }
+                                </style>
+                            </head>
+                            <body>
+                                <div id="swagger-ui"></div>
+                                <script src="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui-bundle.js"></script>
+                                <script src="https://unpkg.com/swagger-ui-dist@5.10.0/swagger-ui-standalone-preset.js"></script>
+                                <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+                                <script>
+                                    window.onload = function() {
+                                        var spec = `%s`;
+                                        var specObj = jsyaml.load(spec);
+                                        window.ui = SwaggerUIBundle({
+                                            spec: specObj,
+                                            dom_id: '#swagger-ui',
+                                            deepLinking: true,
+                                            presets: [
+                                                SwaggerUIBundle.presets.apis,
+                                                SwaggerUIStandalonePreset
+                                            ],
+                                            plugins: [
+                                                SwaggerUIBundle.plugins.DownloadUrl
+                                            ],
+                                            layout: "StandaloneLayout",
+                                            persistAuthorization: true
+                                        });
+                                    };
+                                </script>
+                            </body>
+                            </html>
+                            """.formatted(specContent);
 
-                    context.response()
-                        .putHeader("Content-Type", "text/html")
-                        .end(html);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("❌ Failed to read OpenAPI spec file", cause);
+                        context.response()
+                            .putHeader("Content-Type", "text/html")
+                            .end(html);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("❌ Failed to read OpenAPI spec file: {}", cause.getMessage());
 
-                    context.response()
-                        .setStatusCode(500)
-                        .putHeader("Content-Type", "text/html")
-                        .end("<h1>Error loading API documentation</h1>");
-                });
-        });
+                        context.response()
+                            .setStatusCode(500)
+                            .putHeader("Content-Type", "text/html")
+                            .end("<h1>Error loading API documentation</h1>");
+                    });
+            });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in setupSwaggerRoutes: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -406,21 +523,30 @@ public class ServerVerticle extends AbstractVerticle
     @Override
     public void stop(Promise<Void> stopPromise)
     {
-        logger.info("🛑 Stopping ServerVerticle");
-
-        if (httpServer != null)
+        try
         {
-            httpServer.close()
-                .onComplete(result ->
-                {
-                    logger.info("✅ HTTP Server stopped");
+            logger.info("🛑 Stopping ServerVerticle");
 
-                    stopPromise.complete();
-                });
+            if (httpServer != null)
+            {
+                httpServer.close()
+                    .onComplete(result ->
+                    {
+                        logger.info("✅ HTTP Server stopped");
+
+                        stopPromise.complete();
+                    });
+            }
+            else
+            {
+                stopPromise.complete();
+            }
         }
-        else
+        catch (Exception exception)
         {
-            stopPromise.complete();
+            logger.error("Error in stop: {}", exception.getMessage());
+
+            stopPromise.fail(exception);
         }
     }
 

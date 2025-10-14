@@ -13,6 +13,10 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.ext.web.RoutingContext;
 
+import org.slf4j.Logger;
+
+import org.slf4j.LoggerFactory;
+
 /**
  * CredentialHandler - Handles all credential profile HTTP requests
 
@@ -25,6 +29,8 @@ import io.vertx.ext.web.RoutingContext;
  */
 public class CredentialHandler
 {
+
+    private static final Logger logger = LoggerFactory.getLogger(CredentialHandler.class);
 
     private final CredentialProfileService credentialProfileService;
 
@@ -45,11 +51,20 @@ public class CredentialHandler
      */
     public void getCredentials(RoutingContext ctx)
     {
-        credentialProfileService.credentialList()
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, new JsonObject().put("credentials", result)))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get credentials"));
+        try
+        {
+            credentialProfileService.credentialList()
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, new JsonObject().put("credentials", result)))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get credentials"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in getCredentials handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to get credentials");
+        }
     }
 
     /**
@@ -59,18 +74,27 @@ public class CredentialHandler
      */
     public void createCredentials(RoutingContext ctx)
     {
-        var requestBody = ctx.body().asJsonObject();
-
-        if (!ValidationUtil.Credential.validateCreate(ctx, requestBody))
+        try
         {
-            return; // Validation failed, response already sent
-        }
+            var requestBody = ctx.body().asJsonObject();
 
-        credentialProfileService.credentialCreate(requestBody)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to create credentials"));
+            if (!ValidationUtil.Credential.validateCreate(ctx, requestBody))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            credentialProfileService.credentialCreate(requestBody)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to create credentials"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in createCredentials handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to create credentials");
+        }
     }
 
     /**
@@ -80,27 +104,36 @@ public class CredentialHandler
      */
     public void updateCredentials(RoutingContext ctx)
     {
-        var credentialId = ctx.pathParam("id");
-
-        var requestBody = ctx.body().asJsonObject();
-
-        // 1. Validate path parameter
-        if (!ValidationUtil.validatePathParameterUUID(ctx, credentialId, "Credential ID"))
+        try
         {
-            return; // Validation failed, response already sent
-        }
+            var credentialId = ctx.pathParam("id");
 
-        // 2. Validate credential update fields
-        if (!ValidationUtil.Credential.validateUpdate(ctx, requestBody))
+            var requestBody = ctx.body().asJsonObject();
+
+            // 1. Validate path parameter
+            if (!ValidationUtil.validatePathParameterUUID(ctx, credentialId, "Credential ID"))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            // 2. Validate credential update fields
+            if (!ValidationUtil.Credential.validateUpdate(ctx, requestBody))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            credentialProfileService.credentialUpdate(credentialId, requestBody)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to update credentials"));
+        }
+        catch (Exception exception)
         {
-            return; // Validation failed, response already sent
-        }
+            logger.error("Error in updateCredentials handler: {}", exception.getMessage());
 
-        credentialProfileService.credentialUpdate(credentialId, requestBody)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to update credentials"));
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to update credentials");
+        }
     }
 
     /**
@@ -110,18 +143,27 @@ public class CredentialHandler
      */
     public void deleteCredentials(RoutingContext ctx)
     {
-        var credentialId = ctx.pathParam("id");
-
-        // ===== PATH PARAMETER VALIDATION =====
-        if (!ValidationUtil.validatePathParameterUUID(ctx, credentialId, "Credential ID"))
+        try
         {
-            return; // Validation failed, response already sent
-        }
+            var credentialId = ctx.pathParam("id");
 
-        credentialProfileService.credentialDelete(credentialId)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to delete credentials"));
+            // ===== PATH PARAMETER VALIDATION =====
+            if (!ValidationUtil.validatePathParameterUUID(ctx, credentialId, "Credential ID"))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            credentialProfileService.credentialDelete(credentialId)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to delete credentials"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deleteCredentials handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to delete credentials");
+        }
     }
 }

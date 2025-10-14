@@ -56,60 +56,69 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     {
         var promise = Promise.<JsonArray>promise();
 
-        // Get discovery profiles with device type info
-        var sql = """
-                SELECT dp.profile_id, dp.discovery_name, dp.ip_address, dp.is_range, dp.credential_profile_ids,
-                       dp.port, dp.protocol, dp.created_at, dp.updated_at,
-                       dt.device_type_name, dt.default_port
-                FROM discovery_profiles dp
-                JOIN device_types dt ON dp.device_type_id = dt.device_type_id
-                ORDER BY dp.discovery_name
-                """;
+        try
+        {
+            // Get discovery profiles with device type info
+            var sql = """
+                    SELECT dp.profile_id, dp.discovery_name, dp.ip_address, dp.is_range, dp.credential_profile_ids,
+                           dp.port, dp.protocol, dp.created_at, dp.updated_at,
+                           dt.device_type_name, dt.default_port
+                    FROM discovery_profiles dp
+                    JOIN device_types dt ON dp.device_type_id = dt.device_type_id
+                    ORDER BY dp.discovery_name
+                    """;
 
-        pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
-                {
-                    var profiles = new JsonArray();
-
-                    for (var row : rows)
+            pgPool.query(sql)
+                    .execute()
+                    .onSuccess(rows ->
                     {
-                        var credentialIds = (UUID[]) row.getValue("credential_profile_ids");
+                        var profiles = new JsonArray();
 
-                        // Convert UUID array to JsonArray
-                        var credentialIdsArray = new JsonArray();
-
-                        for (var credId : credentialIds)
+                        for (var row : rows)
                         {
-                            credentialIdsArray.add(credId.toString());
+                            var credentialIds = (UUID[]) row.getValue("credential_profile_ids");
+
+                            // Convert UUID array to JsonArray
+                            var credentialIdsArray = new JsonArray();
+
+                            for (var credId : credentialIds)
+                            {
+                                credentialIdsArray.add(credId.toString());
+                            }
+
+                            var profile = new JsonObject()
+                                    .put("profile_id", row.getUUID("profile_id").toString())
+                                    .put("discovery_name", row.getString("discovery_name"))
+                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("is_range", row.getBoolean("is_range"))
+                                    .put("credential_profile_ids", credentialIdsArray)
+                                    .put("credential_count", credentialIds.length)
+                                    .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
+                                    .put("created_at", row.getLocalDateTime("created_at").toString())
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ?
+                                        row.getLocalDateTime("updated_at").toString() : null)
+                                    .put("device_type_name", row.getString("device_type_name"))
+                                    .put("default_port", row.getInteger("default_port"));
+
+                            profiles.add(profile);
                         }
 
-                        var profile = new JsonObject()
-                                .put("profile_id", row.getUUID("profile_id").toString())
-                                .put("discovery_name", row.getString("discovery_name"))
-                                .put("ip_address", row.getString("ip_address"))
-                                .put("is_range", row.getBoolean("is_range"))
-                                .put("credential_profile_ids", credentialIdsArray)
-                                .put("credential_count", credentialIds.length)
-                                .put("port", row.getInteger("port"))
-                                .put("protocol", row.getString("protocol"))
-                                .put("created_at", row.getLocalDateTime("created_at").toString())
-                                .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                    row.getLocalDateTime("updated_at").toString() : null)
-                                .put("device_type_name", row.getString("device_type_name"))
-                                .put("default_port", row.getInteger("default_port"));
+                        promise.complete(profiles);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to get discovery profiles: {}", cause.getMessage());
 
-                        profiles.add(profile);
-                    }
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in discoveryList service: {}", exception.getMessage());
 
-                    promise.complete(profiles);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get discovery profiles", cause);
-
-                    promise.fail(cause);
-                });
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -125,83 +134,92 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     {
         var promise = Promise.<JsonObject>promise();
 
-        var discoveryName = profileData.getString("discovery_name");
-
-        var ipAddress = profileData.getString("ip_address");
-
-        var isRange = profileData.getBoolean("is_range");
-
-        var deviceTypeId = profileData.getString("device_type_id");
-
-        var credentialProfileIds = profileData.getJsonArray("credential_profile_ids");
-
-        var port = profileData.getInteger("port");
-
-        var protocol = profileData.getString("protocol");
-
-        // Convert JsonArray to UUID array for PostgresSQL
-        var credentialUUIDs = new UUID[credentialProfileIds.size()];
-
-        for (var i = 0; i < credentialProfileIds.size(); i++)
+        try
         {
-            credentialUUIDs[i] = UUID.fromString(credentialProfileIds.getString(i));
-        }
+            var discoveryName = profileData.getString("discovery_name");
 
-        var sql = """
-                INSERT INTO discovery_profiles (discovery_name, ip_address, is_range, device_type_id, credential_profile_ids,
-                                               port, protocol)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING profile_id, discovery_name, ip_address, is_range, port, protocol, created_at
-                """;
+            var ipAddress = profileData.getString("ip_address");
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(discoveryName, ipAddress, isRange, UUID.fromString(deviceTypeId),
-                                credentialUUIDs, port, protocol))
-                .onSuccess(rows ->
-                {
-                    var row = rows.iterator().next();
+            var isRange = profileData.getBoolean("is_range");
 
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("profile_id", row.getUUID("profile_id").toString())
-                            .put("discovery_name", row.getString("discovery_name"))
-                            .put("ip_address", row.getString("ip_address"))
-                            .put("is_range", row.getBoolean("is_range"))
-                            .put("port", row.getInteger("port"))
-                            .put("protocol", row.getString("protocol"))
-                            .put("created_at", row.getLocalDateTime("created_at").toString())
-                            .put("message", "Discovery profile created successfully");
+            var deviceTypeId = profileData.getString("device_type_id");
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to create discovery profile", cause);
+            var credentialProfileIds = profileData.getJsonArray("credential_profile_ids");
 
-                    if (cause.getMessage().contains("duplicate key"))
+            var port = profileData.getInteger("port");
+
+            var protocol = profileData.getString("protocol");
+
+            // Convert JsonArray to UUID array for PostgresSQL
+            var credentialUUIDs = new UUID[credentialProfileIds.size()];
+
+            for (var i = 0; i < credentialProfileIds.size(); i++)
+            {
+                credentialUUIDs[i] = UUID.fromString(credentialProfileIds.getString(i));
+            }
+
+            var sql = """
+                    INSERT INTO discovery_profiles (discovery_name, ip_address, is_range, device_type_id, credential_profile_ids,
+                                                   port, protocol)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    RETURNING profile_id, discovery_name, ip_address, is_range, port, protocol, created_at
+                    """;
+
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(discoveryName, ipAddress, isRange, UUID.fromString(deviceTypeId),
+                                    credentialUUIDs, port, protocol))
+                    .onSuccess(rows ->
                     {
-                        if (cause.getMessage().contains("discovery_name"))
+                        var row = rows.iterator().next();
+
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("profile_id", row.getUUID("profile_id").toString())
+                                .put("discovery_name", row.getString("discovery_name"))
+                                .put("ip_address", row.getString("ip_address"))
+                                .put("is_range", row.getBoolean("is_range"))
+                                .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
+                                .put("created_at", row.getLocalDateTime("created_at").toString())
+                                .put("message", "Discovery profile created successfully");
+
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to create discovery profile: {}", cause.getMessage());
+
+                        if (cause.getMessage().contains("duplicate key"))
                         {
-                            promise.fail(new IllegalArgumentException("Discovery name already exists"));
+                            if (cause.getMessage().contains("discovery_name"))
+                            {
+                                promise.fail(new Exception("Discovery name already exists"));
+                            }
+                            else if (cause.getMessage().contains("ip_address"))
+                            {
+                                promise.fail(new Exception("IP address already exists"));
+                            }
+                            else
+                            {
+                                promise.fail(new Exception("Duplicate key constraint violation"));
+                            }
                         }
-                        else if (cause.getMessage().contains("ip_address"))
+                        else if (cause.getMessage().contains("foreign key"))
                         {
-                            promise.fail(new IllegalArgumentException("IP address already exists"));
+                            promise.fail(new Exception("Invalid device type ID or one or more credential profile IDs"));
                         }
                         else
                         {
-                            promise.fail(new IllegalArgumentException("Duplicate key constraint violation"));
+                            promise.fail(cause);
                         }
-                    }
-                    else if (cause.getMessage().contains("foreign key"))
-                    {
-                        promise.fail(new IllegalArgumentException("Invalid device type ID or one or more credential profile IDs"));
-                    }
-                    else
-                    {
-                        promise.fail(cause);
-                    }
-                });
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in discoveryCreate service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -217,36 +235,45 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     {
         var promise = Promise.<JsonObject>promise();
 
-        // Hard delete the discovery profile
-        var sql = """
-                DELETE FROM discovery_profiles
-                WHERE profile_id = $1
-                """;
+        try
+        {
+            // Hard delete the discovery profile
+            var sql = """
+                    DELETE FROM discovery_profiles
+                    WHERE profile_id = $1
+                    """;
 
-        pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(profileId)))
-                .onSuccess(rows ->
-                {
-                    if (rows.rowCount() == 0)
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(profileId)))
+                    .onSuccess(rows ->
                     {
-                        promise.fail(new IllegalArgumentException("Discovery profile not found"));
+                        if (rows.rowCount() == 0)
+                        {
+                            promise.fail(new Exception("Discovery profile not found"));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var result = new JsonObject()
-                            .put("success", true)
-                            .put("profile_id", profileId)
-                            .put("message", "Discovery profile deleted successfully");
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("profile_id", profileId)
+                                .put("message", "Discovery profile deleted successfully");
 
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to delete discovery profile", cause);
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to delete discovery profile: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in discoveryDelete service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }
@@ -262,96 +289,105 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     {
         var promise = Promise.<JsonObject>promise();
 
-        // First get the discovery profile basic info
-        var profileSql = """
-                SELECT dp.profile_id, dp.discovery_name, dp.ip_address, dp.is_range, dp.device_type_id, dp.credential_profile_ids,
-                       dp.port, dp.protocol, dp.created_at, dp.updated_at,
-                       dt.device_type_name, dt.default_port
-                FROM discovery_profiles dp
-                JOIN device_types dt ON dp.device_type_id = dt.device_type_id
-                WHERE dp.profile_id = $1
-                """;
+        try
+        {
+            // First get the discovery profile basic info
+            var profileSql = """
+                    SELECT dp.profile_id, dp.discovery_name, dp.ip_address, dp.is_range, dp.device_type_id, dp.credential_profile_ids,
+                           dp.port, dp.protocol, dp.created_at, dp.updated_at,
+                           dt.device_type_name, dt.default_port
+                    FROM discovery_profiles dp
+                    JOIN device_types dt ON dp.device_type_id = dt.device_type_id
+                    WHERE dp.profile_id = $1
+                    """;
 
-        pgPool.preparedQuery(profileSql)
-                .execute(Tuple.of(UUID.fromString(profileId)))
-                .onSuccess(profileRows ->
-                {
-                    if (profileRows.size() == 0)
+            pgPool.preparedQuery(profileSql)
+                    .execute(Tuple.of(UUID.fromString(profileId)))
+                    .onSuccess(profileRows ->
                     {
-                        promise.complete(new JsonObject().put("found", false));
+                        if (profileRows.size() == 0)
+                        {
+                            promise.complete(new JsonObject().put("found", false));
 
-                        return;
-                    }
+                            return;
+                        }
 
-                    var profileRow = profileRows.iterator().next();
+                        var profileRow = profileRows.iterator().next();
 
-                    var credentialIds = (UUID[]) profileRow.getValue("credential_profile_ids");
+                        var credentialIds = (UUID[]) profileRow.getValue("credential_profile_ids");
 
-                    // Convert UUID array to JsonArray for response
-                    var credentialIdsArray = new JsonArray();
+                        // Convert UUID array to JsonArray for response
+                        var credentialIdsArray = new JsonArray();
 
-                    for (var credId : credentialIds)
-                    {
-                        credentialIdsArray.add(credId.toString());
-                    }
+                        for (var credId : credentialIds)
+                        {
+                            credentialIdsArray.add(credId.toString());
+                        }
 
-                    // Get credential profiles details (including encrypted password for discovery use)
-                    var credentialSql = """
-                            SELECT credential_profile_id, profile_name, username, password_encrypted
-                            FROM credential_profiles
-                            WHERE credential_profile_id = ANY($1)
-                            ORDER BY profile_name
-                            """;
+                        // Get credential profiles details (including encrypted password for discovery use)
+                        var credentialSql = """
+                                SELECT credential_profile_id, profile_name, username, password_encrypted
+                                FROM credential_profiles
+                                WHERE credential_profile_id = ANY($1)
+                                ORDER BY profile_name
+                                """;
 
-                    pgPool.preparedQuery(credentialSql)
-                            .execute(Tuple.of(credentialIds))
-                            .onSuccess(credentialRows ->
-                            {
-                                var credentialProfiles = new JsonArray();
-
-                                for (var credRow : credentialRows)
+                        pgPool.preparedQuery(credentialSql)
+                                .execute(Tuple.of(credentialIds))
+                                .onSuccess(credentialRows ->
                                 {
-                                    var credProfile = new JsonObject()
-                                            .put("credential_profile_id", credRow.getUUID("credential_profile_id").toString())
-                                            .put("profile_name", credRow.getString("profile_name"))
-                                            .put("username", credRow.getString("username"))
-                                            .put("password_encrypted", credRow.getString("password_encrypted"));
+                                    var credentialProfiles = new JsonArray();
 
-                                    credentialProfiles.add(credProfile);
-                                }
+                                    for (var credRow : credentialRows)
+                                    {
+                                        var credProfile = new JsonObject()
+                                                .put("credential_profile_id", credRow.getUUID("credential_profile_id").toString())
+                                                .put("profile_name", credRow.getString("profile_name"))
+                                                .put("username", credRow.getString("username"))
+                                                .put("password_encrypted", credRow.getString("password_encrypted"));
 
-                                var result = new JsonObject()
-                                        .put("found", true)
-                                        .put("profile_id", profileRow.getUUID("profile_id").toString())
-                                        .put("discovery_name", profileRow.getString("discovery_name"))
-                                        .put("ip_address", profileRow.getString("ip_address"))
-                                        .put("is_range", profileRow.getBoolean("is_range"))
-                                        .put("device_type_id", profileRow.getUUID("device_type_id").toString())
-                                        .put("credential_profile_ids", credentialIdsArray)
-                                        .put("port", profileRow.getInteger("port"))
-                                        .put("protocol", profileRow.getString("protocol"))
-                                        .put("created_at", profileRow.getLocalDateTime("created_at").toString())
-                                        .put("updated_at", profileRow.getLocalDateTime("updated_at") != null ?
-                                            profileRow.getLocalDateTime("updated_at").toString() : null)
-                                        .put("device_type_name", profileRow.getString("device_type_name"))
-                                        .put("default_port", profileRow.getInteger("default_port"))
-                                        .put("credential_profiles", credentialProfiles);
+                                        credentialProfiles.add(credProfile);
+                                    }
 
-                                promise.complete(result);
-                            })
-                            .onFailure(cause ->
-                            {
-                                logger.error("Failed to get credential profiles for discovery profile", cause);
+                                    var result = new JsonObject()
+                                            .put("found", true)
+                                            .put("profile_id", profileRow.getUUID("profile_id").toString())
+                                            .put("discovery_name", profileRow.getString("discovery_name"))
+                                            .put("ip_address", profileRow.getString("ip_address"))
+                                            .put("is_range", profileRow.getBoolean("is_range"))
+                                            .put("device_type_id", profileRow.getUUID("device_type_id").toString())
+                                            .put("credential_profile_ids", credentialIdsArray)
+                                            .put("port", profileRow.getInteger("port"))
+                                            .put("protocol", profileRow.getString("protocol"))
+                                            .put("created_at", profileRow.getLocalDateTime("created_at").toString())
+                                            .put("updated_at", profileRow.getLocalDateTime("updated_at") != null ?
+                                                profileRow.getLocalDateTime("updated_at").toString() : null)
+                                            .put("device_type_name", profileRow.getString("device_type_name"))
+                                            .put("default_port", profileRow.getInteger("default_port"))
+                                            .put("credential_profiles", credentialProfiles);
 
-                                promise.fail(cause);
-                            });
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get discovery profile by ID", cause);
+                                    promise.complete(result);
+                                })
+                                .onFailure(cause ->
+                                {
+                                    logger.error("Failed to get credential profiles for discovery profile: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
+                                    promise.fail(cause);
+                                });
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to get discovery profile by ID: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in discoveryGetById service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
 
         return promise.future();
     }

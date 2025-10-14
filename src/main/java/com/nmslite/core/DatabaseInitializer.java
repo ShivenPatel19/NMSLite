@@ -1,5 +1,7 @@
 package com.nmslite.core;
 
+import com.nmslite.Bootstrap;
+
 import com.nmslite.services.*;
 
 import com.nmslite.services.impl.*;
@@ -28,27 +30,24 @@ import org.slf4j.LoggerFactory;
 
 /**
  * DatabaseInitializer - One-time Database Setup and Service Registration
-
+ * <p>
  * This class replaces DatabaseVerticle by performing all database initialization
  * tasks during application startup, before any verticles are deployed.
-
+ * <p>
  * Tasks performed:
  * - Creates PostgreSQL connection pool
  * - Instantiates all service implementations
  * - Registers all ProxyGen services on event bus
-
+ * <p>
  * Benefits:
  * - No thread consumed by idle verticle
  * - Database services ready before other verticles start
  * - Maintains ProxyGen architecture
  * - Clean separation of initialization logic
  */
-public class DatabaseInitializer
-{
+public class DatabaseInitializer {
 
     private static final Logger logger = LoggerFactory.getLogger(DatabaseInitializer.class);
-
-    private final Vertx vertx;
 
     private final JsonObject databaseConfig;
 
@@ -72,12 +71,10 @@ public class DatabaseInitializer
     /**
      * Creates a new DatabaseInitializer instance.
      *
-     * @param vertx Vert.x instance
      * @param databaseConfig Database configuration from application.conf
      */
-    public DatabaseInitializer(Vertx vertx, JsonObject databaseConfig)
+    public DatabaseInitializer(JsonObject databaseConfig)
     {
-        this.vertx = vertx;
         this.databaseConfig = databaseConfig;
     }
 
@@ -87,39 +84,36 @@ public class DatabaseInitializer
      *
      * @return Future that completes when all initialization is done
      */
-    public Future<Void> initialize()
-    {
-        logger.info("Initializing database services");
+    public Future<Void> initialize() {
+        try
+        {
+            logger.info("Initializing database services");
 
-        // Setup PostgreSQL connection
-        return setupDatabaseConnection()
-            .compose(pool ->
-            {
-                this.pgPool = pool;
+            // Setup PostgreSQL connection
+            return setupDatabaseConnection()
+                    .compose(pool ->
+                    {
+                        this.pgPool = pool;
 
-                try
-                {
-                    // Create all service implementations
-                    setupAllServices();
+                        // Create all service implementations
+                        setupAllServices();
 
-                    // Register all services with ProxyGen
-                    registerAllServiceProxies();
+                        // Register all services with ProxyGen
+                        registerAllServiceProxies();
 
-                    logger.info("Database initialization completed - all 7 services registered");
+                        logger.info("Database initialization completed - all 7 services registered");
 
-                    return Future.<Void>succeededFuture();
-                }
-                catch (Exception exception)
-                {
-                    logger.error("Failed to setup services", exception);
+                        return Future.<Void>succeededFuture();
+                    })
+                    .onFailure(cause ->
+                            logger.error("Failed to initialize database services: {}", cause.getMessage()));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in initialize: {}", exception.getMessage());
 
-                    // Close the pool since we opened it but failed to set up services
-                    return cleanup()
-                        .compose(v -> Future.failedFuture(exception));
-                }
-            })
-            .onFailure(cause ->
-                logger.error("Failed to initialize database services", cause));
+            return Future.failedFuture(exception);
+        }
     }
 
     /**
@@ -129,50 +123,58 @@ public class DatabaseInitializer
      *
      * @return Future resolving to an initialized Pool when the test connection succeeds
      */
-    private Future<Pool> setupDatabaseConnection()
-    {
+    private Future<Pool> setupDatabaseConnection() {
         var promise = Promise.<Pool>promise();
 
-        try
-        {
+        try {
             // Get database configuration
+            var port = databaseConfig.getInteger("port", 5432);
+
+            var host = databaseConfig.getString("host", "localhost");
+
+            var database = databaseConfig.getString("database", "nmslite");
+
+            var user = databaseConfig.getString("user", "nmslite");
+
+            var password = databaseConfig.getString("password", "nmslite");
+
+            var maxSize = databaseConfig.getInteger("maxSize", 5);
+
             var connectOptions = new PgConnectOptions()
-                .setPort(databaseConfig.getInteger("port", 5432))
-                .setHost(databaseConfig.getString("host", "localhost"))
-                .setDatabase(databaseConfig.getString("database", "nmslite"))
-                .setUser(databaseConfig.getString("user", "nmslite"))
-                .setPassword(databaseConfig.getString("password", "nmslite"));
+                    .setPort(port)
+                    .setHost(host)
+                    .setDatabase(database)
+                    .setUser(user)
+                    .setPassword(password);
 
             var poolOptions = new PoolOptions()
-                .setMaxSize(databaseConfig.getInteger("maxSize", 20));
+                    .setMaxSize(maxSize);
 
             // Create PostgreSQL connection pool
             var pool = PgBuilder.pool()
-                .with(poolOptions)
-                .connectingTo(connectOptions)
-                .using(vertx)
-                .build();
+                    .with(poolOptions)
+                    .connectingTo(connectOptions)
+                    .using(Bootstrap.getVertxInstance())
+                    .build();
 
             // Test database connection
             pool.getConnection()
-                .onSuccess(connection ->
-                {
-                    logger.info("Database connection established");
+                    .onSuccess(connection ->
+                    {
+                        logger.info("Database connection established");
 
-                    connection.close();
+                        connection.close();
 
-                    promise.complete(pool);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Database connection failed", cause);
+                        promise.complete(pool);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Database connection failed: {}", cause.getMessage());
 
-                    promise.fail(cause);
-                });
-        }
-        catch (Exception exception)
-        {
-            logger.error("Failed to setup database connection", exception);
+                        promise.fail(cause);
+                    });
+        } catch (Exception exception) {
+            logger.error("Failed to setup database connection: {}", exception.getMessage());
 
             promise.fail(exception);
         }
@@ -186,73 +188,84 @@ public class DatabaseInitializer
      * DiscoveryProfile, Device, Metrics, Availability).
      * Note: Only DeviceService needs Vertx instance for event bus publishing.
      */
-    private void setupAllServices()
-    {
-        this.userService = new UserServiceImpl(pgPool);
+    private void setupAllServices() {
+        try
+        {
+            this.userService = new UserServiceImpl(pgPool);
 
-        this.deviceTypeService = new DeviceTypeServiceImpl(pgPool);
+            this.deviceTypeService = new DeviceTypeServiceImpl(pgPool);
 
-        this.credentialService = new CredentialProfileServiceImpl(pgPool);
+            this.credentialService = new CredentialProfileServiceImpl(pgPool);
 
-        this.discoveryService = new DiscoveryProfileServiceImpl(pgPool);
+            this.discoveryService = new DiscoveryProfileServiceImpl(pgPool);
 
-        this.deviceService = new DeviceServiceImpl(vertx, pgPool);
+            this.deviceService = new DeviceServiceImpl(pgPool);
 
-        this.metricsService = new MetricsServiceImpl(pgPool);
+            this.metricsService = new MetricsServiceImpl(pgPool);
 
-        this.availabilityService = new AvailabilityServiceImpl(pgPool);
+            this.availabilityService = new AvailabilityServiceImpl(pgPool);
 
-        logger.debug("All 7 service implementations created");
+            logger.debug("All 7 service implementations created");
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in setupAllServices: {}", exception.getMessage());
+        }
     }
 
     /**
      * Registers all service implementations with Vert.x ProxyGen on the event bus.
      * Binds each service to its SERVICE_ADDRESS via ServiceBinder so clients can use
-     * generated proxies (e.g., UserService.createProxy(vertx)).
+     * generated proxies (e.g., UserService.createProxy()).
      *
-     * @throws RuntimeException if service registration fails
      */
-    private void registerAllServiceProxies()
-    {
-        // Create service binder
-        var serviceBinder = new ServiceBinder(vertx);
+    private void registerAllServiceProxies() {
+        try
+        {
+            // Create service binder
+            var serviceBinder = new ServiceBinder(Bootstrap.getVertxInstance());
 
-        // Register UserService
-        serviceBinder
-            .setAddress(UserService.SERVICE_ADDRESS)
-            .register(UserService.class, userService);
+            // Register UserService
+            serviceBinder
+                    .setAddress(UserService.SERVICE_ADDRESS)
+                    .register(UserService.class, userService);
 
-        // Register DeviceTypeService
-        serviceBinder
-            .setAddress(DeviceTypeService.SERVICE_ADDRESS)
-            .register(DeviceTypeService.class, deviceTypeService);
+            // Register DeviceTypeService
+            serviceBinder
+                    .setAddress(DeviceTypeService.SERVICE_ADDRESS)
+                    .register(DeviceTypeService.class, deviceTypeService);
 
-        // Register CredentialService
-        serviceBinder
-            .setAddress(CredentialProfileService.SERVICE_ADDRESS)
-            .register(CredentialProfileService.class, credentialService);
+            // Register CredentialService
+            serviceBinder
+                    .setAddress(CredentialProfileService.SERVICE_ADDRESS)
+                    .register(CredentialProfileService.class, credentialService);
 
-        // Register DiscoveryService
-        serviceBinder
-            .setAddress(DiscoveryProfileService.SERVICE_ADDRESS)
-            .register(DiscoveryProfileService.class, discoveryService);
+            // Register DiscoveryService
+            serviceBinder
+                    .setAddress(DiscoveryProfileService.SERVICE_ADDRESS)
+                    .register(DiscoveryProfileService.class, discoveryService);
 
-        // Register DeviceService
-        serviceBinder
-            .setAddress(DeviceService.SERVICE_ADDRESS)
-            .register(DeviceService.class, deviceService);
+            // Register DeviceService
+            serviceBinder
+                    .setAddress(DeviceService.SERVICE_ADDRESS)
+                    .register(DeviceService.class, deviceService);
 
-        // Register MetricsService
-        serviceBinder
-            .setAddress(MetricsService.SERVICE_ADDRESS)
-            .register(MetricsService.class, metricsService);
+            // Register MetricsService
+            serviceBinder
+                    .setAddress(MetricsService.SERVICE_ADDRESS)
+                    .register(MetricsService.class, metricsService);
 
-        // Register AvailabilityService
-        serviceBinder
-            .setAddress(AvailabilityService.SERVICE_ADDRESS)
-            .register(AvailabilityService.class, availabilityService);
+            // Register AvailabilityService
+            serviceBinder
+                    .setAddress(AvailabilityService.SERVICE_ADDRESS)
+                    .register(AvailabilityService.class, availabilityService);
 
-        logger.debug("All 7 services registered with ProxyGen");
+            logger.debug("All 7 services registered with ProxyGen");
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in registerAllServiceProxies: {}", exception.getMessage());
+        }
     }
 
     /**
@@ -261,32 +274,40 @@ public class DatabaseInitializer
      *
      * @return Future that completes when cleanup is done
      */
-    public Future<Void> cleanup()
-    {
-        logger.info("Cleaning up database resources");
-
+    public Future<Void> cleanup() {
         var promise = Promise.<Void>promise();
 
-        // Close database pool
-        if (pgPool != null)
+        try
         {
-            pgPool.close()
-                .onSuccess(v ->
-                {
-                    logger.debug("Database connection pool closed");
+            logger.info("Cleaning up database resources");
 
-                    promise.complete();
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to close database pool", cause);
+            // Close database pool
+            if (pgPool != null)
+            {
+                pgPool.close()
+                        .onSuccess(v ->
+                        {
+                            logger.debug("Database connection pool closed");
 
-                    promise.fail(cause);
-                });
+                            promise.complete();
+                        })
+                        .onFailure(cause ->
+                        {
+                            logger.error("Failed to close database pool: {}", cause.getMessage());
+
+                            promise.fail(cause);
+                        });
+            }
+            else
+            {
+                promise.complete();
+            }
         }
-        else
+        catch (Exception exception)
         {
-            promise.complete();
+            logger.error("Error in cleanup: {}", exception.getMessage());
+
+            promise.fail(exception);
         }
 
         return promise.future();

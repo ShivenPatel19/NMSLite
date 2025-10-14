@@ -113,53 +113,62 @@ public abstract class QueueBatchProcessor<T>
      */
     public void processNext(Promise<JsonArray> promise)
     {
-        if (remainingItems.isEmpty())
+        try
         {
-            logger.info("Batch processing completed: {} results from {} items", allResults.size(), totalItems);
-
-            promise.complete(allResults);
-
-            return;
-        }
-
-        var currentBatch = pollBatchFromQueue();
-
-        if (currentBatch.isEmpty())
-        {
-            promise.complete(allResults);
-
-            return;
-        }
-
-        processedBatches++;
-
-        logger.debug("Processing batch {}: {} items, {} remaining", processedBatches, currentBatch.size(), remainingItems.size());
-
-        processBatch(currentBatch)
-            .onSuccess(batchResults ->
+            if (remainingItems.isEmpty())
             {
-                if (batchResults != null)
+                logger.info("Batch processing completed: {} results from {} items", allResults.size(), totalItems);
+
+                promise.complete(allResults);
+
+                return;
+            }
+
+            var currentBatch = pollBatchFromQueue();
+
+            if (currentBatch.isEmpty())
+            {
+                promise.complete(allResults);
+
+                return;
+            }
+
+            processedBatches++;
+
+            logger.debug("Processing batch {}: {} items, {} remaining", processedBatches, currentBatch.size(), remainingItems.size());
+
+            processBatch(currentBatch)
+                .onSuccess(batchResults ->
                 {
-                    for (var result : batchResults)
+                    if (batchResults != null)
                     {
-                        allResults.add(result);
+                        for (var result : batchResults)
+                        {
+                            allResults.add(result);
+                        }
                     }
-                }
 
-                currentBatch.clear();
+                    currentBatch.clear();
 
-                processNext(promise);
-            })
-            .onFailure(cause ->
-            {
-                logger.error("Batch {} failed: {}", processedBatches, cause.getMessage());
+                    processNext(promise);
+                })
+                .onFailure(cause ->
+                {
+                    logger.error("Batch {} failed: {}", processedBatches, cause.getMessage());
 
-                handleBatchFailure(currentBatch, cause);
+                    handleBatchFailure(currentBatch, cause);
 
-                currentBatch.clear();
+                    currentBatch.clear();
 
-                processNext(promise);
-            });
+                    processNext(promise);
+                });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in processNext: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
     }
 
     /**
@@ -173,19 +182,28 @@ public abstract class QueueBatchProcessor<T>
      */
     private List<T> pollBatchFromQueue()
     {
-        var batch = new ArrayList<T>();
-
-        for (var i = 0; i < batchSize && !remainingItems.isEmpty(); i++)
+        try
         {
-            var item = remainingItems.poll();
+            var batch = new ArrayList<T>();
 
-            if (item != null)
+            for (var i = 0; i < batchSize && !remainingItems.isEmpty(); i++)
             {
-                batch.add(item);
-            }
-        }
+                var item = remainingItems.poll();
 
-        return batch;
+                if (item != null)
+                {
+                    batch.add(item);
+                }
+            }
+
+            return batch;
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in pollBatchFromQueue: {}", exception.getMessage());
+
+            return new ArrayList<>();
+        }
     }
 
     /**

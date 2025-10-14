@@ -1,5 +1,7 @@
 package com.nmslite.middleware;
 
+import com.nmslite.utils.ExceptionUtil;
+
 import com.nmslite.utils.JWTUtil;
 
 import io.vertx.core.Handler;
@@ -99,9 +101,9 @@ public class AuthenticationMiddleware
             }
             catch (Exception exception)
             {
-                logger.error("Authentication middleware error for {}: {}", ctx.request().path(), exception.getMessage());
+                logger.error("Error in requireAuthentication: {}", exception.getMessage());
 
-                handleUnauthorized(ctx, "Authentication failed");
+                ExceptionUtil.handleHttp(ctx, exception, "Authentication failed");
             }
         };
     }
@@ -114,17 +116,24 @@ public class AuthenticationMiddleware
      */
     private void handleUnauthorized(RoutingContext ctx, String message)
     {
-        var errorResponse = new JsonObject()
-            .put("success", false)
-            .put("error", "Unauthorized")
-            .put("message", message)
-            .put("status_code", 401)
-            .put("timestamp", System.currentTimeMillis());
+        try
+        {
+            var errorResponse = new JsonObject()
+                .put("success", false)
+                .put("error", "Unauthorized")
+                .put("message", message)
+                .put("status_code", 401)
+                .put("timestamp", System.currentTimeMillis());
 
-        ctx.response()
-            .setStatusCode(401)
-            .putHeader("Content-Type", "application/json")
-            .end(errorResponse.encode());
+            ctx.response()
+                .setStatusCode(401)
+                .putHeader("Content-Type", "application/json")
+                .end(errorResponse.encode());
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in handleUnauthorized: {}", exception.getMessage());
+        }
     }
 
 }

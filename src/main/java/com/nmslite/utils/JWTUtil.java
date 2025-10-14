@@ -1,5 +1,7 @@
 package com.nmslite.utils;
 
+import com.nmslite.Bootstrap;
+
 import io.vertx.core.Vertx;
 
 import io.vertx.core.json.JsonObject;
@@ -19,8 +21,6 @@ import org.slf4j.LoggerFactory;
 import com.auth0.jwt.JWT;
 
 import com.auth0.jwt.algorithms.Algorithm;
-
-import com.auth0.jwt.exceptions.JWTVerificationException;
 
 /**
  * JWT Utility class for token generation and validation
@@ -42,18 +42,16 @@ public class JWTUtil
 
     /**
      * Constructor for JWTUtil
-     *
-     * @param vertx Vert.x instance
      */
-    public JWTUtil(Vertx vertx)
+    public JWTUtil()
     {
         // Configure JWT authentication
         var config = new JWTAuthOptions()
-            .addPubSecKey(new PubSecKeyOptions()
+                .addPubSecKey(new PubSecKeyOptions()
                 .setAlgorithm(JWT_ALGORITHM)
                 .setBuffer(JWT_SECRET));
 
-        this.jwtAuth = JWTAuth.create(vertx, config);
+        this.jwtAuth = JWTAuth.create(Bootstrap.getVertxInstance(), config);
 
         logger.debug("JWT authentication configured with {} algorithm", JWT_ALGORITHM);
     }
@@ -91,9 +89,9 @@ public class JWTUtil
         }
         catch (Exception exception)
         {
-            logger.error("Failed to generate JWT token for user: {}", username, exception);
+            logger.error("Failed to generate JWT token for user: {}: {}", username, exception.getMessage());
 
-            throw new RuntimeException("Failed to generate JWT token", exception);
+            return null;
         }
     }
     
@@ -126,17 +124,16 @@ public class JWTUtil
                 var decodedJWT = verifier.verify(token);
 
                 // Extract user information from token
-                var userInfo = new JsonObject()
+
+                return new JsonObject()
                     .put("user_id", decodedJWT.getClaim("user_id").asString())
                     .put("username", decodedJWT.getClaim("username").asString())
                     .put("is_active", decodedJWT.getClaim("is_active").asBoolean())
                     .put("iat", decodedJWT.getClaim("iat").asLong())
                     .put("exp", decodedJWT.getExpiresAt().getTime() / 1000);
 
-                return userInfo;
-
             }
-            catch (JWTVerificationException exception)
+            catch (Exception exception)
             {
                 logger.debug("JWT verification failed: {}", exception.getMessage());
 

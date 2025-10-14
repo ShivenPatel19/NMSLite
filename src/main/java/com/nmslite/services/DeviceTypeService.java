@@ -1,12 +1,11 @@
 package com.nmslite.services;
 
+import com.nmslite.Bootstrap;
 import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
 import io.vertx.core.Future;
-
-import io.vertx.core.Vertx;
 
 import io.vertx.core.json.JsonArray;
 
@@ -36,12 +35,11 @@ public interface DeviceTypeService
     /**
      * Create a proxy instance for the device type service
      *
-     * @param vertx Vert.x instance
      * @return DeviceTypeService proxy instance
      */
-    static DeviceTypeService createProxy(Vertx vertx)
+    static DeviceTypeService createProxy()
     {
-        return new ServiceProxyBuilder(vertx)
+        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
             .setAddress(SERVICE_ADDRESS)
             .build(DeviceTypeService.class);
     }

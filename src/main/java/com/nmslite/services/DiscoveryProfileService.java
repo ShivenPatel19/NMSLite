@@ -1,12 +1,11 @@
 package com.nmslite.services;
 
+import com.nmslite.Bootstrap;
 import io.vertx.codegen.annotations.ProxyGen;
 
 import io.vertx.codegen.annotations.VertxGen;
 
 import io.vertx.core.Future;
-
-import io.vertx.core.Vertx;
 
 import io.vertx.core.json.JsonArray;
 
@@ -35,12 +34,11 @@ public interface DiscoveryProfileService
     /**
      * Create a proxy instance for the discovery service
      *
-     * @param vertx Vert.x instance
      * @return DiscoveryProfileService proxy instance
      */
-    static DiscoveryProfileService createProxy(Vertx vertx)
+    static DiscoveryProfileService createProxy()
     {
-        return new ServiceProxyBuilder(vertx)
+        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
             .setAddress(SERVICE_ADDRESS)
             .build(DiscoveryProfileService.class);
     }

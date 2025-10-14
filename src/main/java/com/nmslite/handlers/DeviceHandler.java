@@ -16,6 +16,10 @@ import io.vertx.ext.web.RoutingContext;
 
 import java.util.UUID;
 
+import org.slf4j.Logger;
+
+import org.slf4j.LoggerFactory;
+
 /**
  * DeviceHandler - Handles all device-related HTTP requests
 
@@ -29,6 +33,8 @@ import java.util.UUID;
  */
 public class DeviceHandler
 {
+
+    private static final Logger logger = LoggerFactory.getLogger(DeviceHandler.class);
 
     private final DeviceService deviceService;
 
@@ -54,11 +60,20 @@ public class DeviceHandler
      */
     public void getDiscoveredDevices(RoutingContext ctx)
     {
-        deviceService.deviceListByProvisioned(false)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get unprovisioned devices"));
+        try
+        {
+            deviceService.deviceListByProvisioned(false)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get unprovisioned devices"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in getDiscoveredDevices handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to get unprovisioned devices");
+        }
     }
 
     /**
@@ -68,11 +83,20 @@ public class DeviceHandler
      */
     public void getProvisionedDevices(RoutingContext ctx)
     {
-        deviceService.deviceListByProvisioned(true)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get provisioned devices"));
+        try
+        {
+            deviceService.deviceListByProvisioned(true)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get provisioned devices"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in getProvisionedDevices handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to get provisioned devices");
+        }
     }
 
     /**
@@ -82,19 +106,28 @@ public class DeviceHandler
      */
     public void softDeleteDevice(RoutingContext ctx)
     {
-        var deviceId = ctx.pathParam("id");
-
-        // ===== PATH PARAMETER VALIDATION =====
-        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        try
         {
-            return;
-        }
+            var deviceId = ctx.pathParam("id");
 
-        deviceService.deviceDelete(deviceId)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to delete device"));
+            // ===== PATH PARAMETER VALIDATION =====
+            if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+            {
+                return;
+            }
+
+            deviceService.deviceDelete(deviceId)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to delete device"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in softDeleteDevice handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to delete device");
+        }
     }
 
     /**
@@ -104,19 +137,28 @@ public class DeviceHandler
      */
     public void restoreDevice(RoutingContext ctx)
     {
-        var deviceId = ctx.pathParam("id");
-
-        // ===== PATH PARAMETER VALIDATION =====
-        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        try
         {
-            return;
-        }
+            var deviceId = ctx.pathParam("id");
 
-        deviceService.deviceRestore(deviceId)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to restore device"));
+            // ===== PATH PARAMETER VALIDATION =====
+            if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+            {
+                return;
+            }
+
+            deviceService.deviceRestore(deviceId)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to restore device"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in restoreDevice handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to restore device");
+        }
     }
 
     /**
@@ -126,19 +168,28 @@ public class DeviceHandler
      */
     public void enableMonitoring(RoutingContext ctx)
     {
-        var deviceId = ctx.pathParam("id");
-
-        // Validate device ID
-        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        try
         {
-            return;
-        }
+            var deviceId = ctx.pathParam("id");
 
-        deviceService.deviceEnableMonitoring(deviceId)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to enable monitoring for device"));
+            // Validate device ID
+            if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+            {
+                return;
+            }
+
+            deviceService.deviceEnableMonitoring(deviceId)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to enable monitoring for device"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in enableMonitoring handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to enable monitoring for device");
+        }
     }
 
     /**
@@ -148,18 +199,27 @@ public class DeviceHandler
      */
     public void disableMonitoring(RoutingContext ctx)
     {
-        var deviceId = ctx.pathParam("id");
-
-        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        try
         {
-            return;
-        }
+            var deviceId = ctx.pathParam("id");
 
-        deviceService.deviceDisableMonitoring(deviceId)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to disable monitoring for device"));
+            if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+            {
+                return;
+            }
+
+            deviceService.deviceDisableMonitoring(deviceId)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to disable monitoring for device"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in disableMonitoring handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to disable monitoring for device");
+        }
     }
 
     /**
@@ -169,50 +229,59 @@ public class DeviceHandler
      */
     public void provisionAndEnableMonitoring(RoutingContext ctx)
     {
-        var body = ctx.body().asJsonObject();
-
-        if (body == null || !body.containsKey("device_ids"))
+        try
         {
-            ExceptionUtil.handleHttp(ctx,
-                new IllegalArgumentException("Request body must contain 'device_ids' array"),
-                "Invalid request body");
+            var body = ctx.body().asJsonObject();
 
-            return;
-        }
-
-        var deviceIds = body.getJsonArray("device_ids");
-
-        if (deviceIds == null || deviceIds.isEmpty())
-        {
-            ExceptionUtil.handleHttp(ctx,
-                new IllegalArgumentException("device_ids array cannot be empty"),
-                "Invalid request body");
-
-            return;
-        }
-
-        // Validate all device IDs are valid UUIDs
-        for (var i = 0; i < deviceIds.size(); i++)
-        {
-            var deviceId = deviceIds.getString(i);
-
-            if (!ValidationUtil.isValidUUID(deviceId))
+            if (body == null || !body.containsKey("device_ids"))
             {
                 ExceptionUtil.handleHttp(ctx,
-                    new IllegalArgumentException("Invalid device ID at index " + i),
-                    "Invalid device ID format");
+                    new Exception("Request body must contain 'device_ids' array"),
+                    "Invalid request body");
 
                 return;
             }
-        }
 
-        deviceService.deviceProvisionAndEnableMonitoring(deviceIds)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, new JsonObject()
-                        .put("results", result)
-                        .put("total", deviceIds.size())))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to provision devices"));
+            var deviceIds = body.getJsonArray("device_ids");
+
+            if (deviceIds == null || deviceIds.isEmpty())
+            {
+                ExceptionUtil.handleHttp(ctx,
+                    new Exception("device_ids array cannot be empty"),
+                    "Invalid request body");
+
+                return;
+            }
+
+            // Validate all device IDs are valid UUIDs
+            for (var i = 0; i < deviceIds.size(); i++)
+            {
+                var deviceId = deviceIds.getString(i);
+
+                if (!ValidationUtil.isValidUUID(deviceId))
+                {
+                    ExceptionUtil.handleHttp(ctx,
+                        new Exception("Invalid device ID at index " + i),
+                        "Invalid device ID format");
+
+                    return;
+                }
+            }
+
+            deviceService.deviceProvisionAndEnableMonitoring(deviceIds)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, new JsonObject()
+                            .put("results", result)
+                            .put("total", deviceIds.size())))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to provision devices"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in provisionAndEnableMonitoring handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to provision devices");
+        }
     }
 
     /**
@@ -222,29 +291,38 @@ public class DeviceHandler
      */
     public void updateDeviceConfig(RoutingContext ctx)
     {
-        var deviceId = ctx.pathParam("id");
-
-        var body = ctx.body().asJsonObject();
-
-        // ===== VALIDATION =====
-        // 1) Validate path parameter
-        if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+        try
         {
-            return;
-        }
+            var deviceId = ctx.pathParam("id");
 
-        // 2) Validate request body and fields
-        if (!ValidationUtil.Device.validateUpdate(ctx, body))
+            var body = ctx.body().asJsonObject();
+
+            // ===== VALIDATION =====
+            // 1) Validate path parameter
+            if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
+            {
+                return;
+            }
+
+            // 2) Validate request body and fields
+            if (!ValidationUtil.Device.validateUpdate(ctx, body))
+            {
+                return;
+            }
+
+            // 3) Invoke service
+            deviceService.deviceUpdateConfig(deviceId, body)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, result))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to update device configuration"));
+        }
+        catch (Exception exception)
         {
-            return;
-        }
+            logger.error("Error in updateDeviceConfig handler: {}", exception.getMessage());
 
-        // 3) Invoke service
-        deviceService.deviceUpdateConfig(deviceId, body)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, result))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to update device configuration"));
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to update device configuration");
+        }
     }
 
     /**
@@ -254,12 +332,21 @@ public class DeviceHandler
      */
     public void getDeviceTypes(RoutingContext ctx)
     {
-        // Show only active device types by default (as requested)
-        deviceTypeService.deviceTypeList(false)
-            .onSuccess(result ->
-                    ResponseUtil.handleSuccess(ctx, new JsonObject().put("device_types", result)))
-            .onFailure(cause ->
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to get device types"));
+        try
+        {
+            // Show only active device types by default (as requested)
+            deviceTypeService.deviceTypeList(false)
+                .onSuccess(result ->
+                        ResponseUtil.handleSuccess(ctx, new JsonObject().put("device_types", result)))
+                .onFailure(cause ->
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get device types"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in getDeviceTypes handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to get device types");
+        }
     }
 
 }

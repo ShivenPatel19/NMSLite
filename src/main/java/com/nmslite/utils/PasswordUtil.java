@@ -8,20 +8,24 @@ import java.nio.charset.StandardCharsets;
 
 import java.security.MessageDigest;
 
-import java.security.NoSuchAlgorithmException;
-
 import java.util.Base64;
+
+import org.slf4j.Logger;
+
+import org.slf4j.LoggerFactory;
 
 /**
  * Password Utility for NMSLite
  * Provides password hashing and encryption functionality
- *
+
  * Uses:
  * - SHA-256 for one-way password hashing (user authentication)
  * - AES symmetric encryption for two-way password encryption (credential storage)
  */
 public class PasswordUtil
 {
+
+    private static final Logger logger = LoggerFactory.getLogger(PasswordUtil.class);
 
     private static final String HASH_ALGORITHM = "SHA-256";
 
@@ -46,9 +50,11 @@ public class PasswordUtil
 
             return Base64.getEncoder().encodeToString(hash);
         }
-        catch (NoSuchAlgorithmException exception)
+        catch (Exception exception)
         {
-            throw new RuntimeException("Failed to hash password", exception);
+            logger.error("Failed to hash password: {}", exception.getMessage());
+
+            return null;
         }
     }
 
@@ -93,7 +99,9 @@ public class PasswordUtil
         }
         catch (Exception exception)
         {
-            throw new RuntimeException("Failed to encrypt password", exception);
+            logger.error("Failed to encrypt password: {}", exception.getMessage());
+
+            return null;
         }
     }
 
@@ -124,7 +132,9 @@ public class PasswordUtil
         }
         catch (Exception exception)
         {
-            throw new RuntimeException("Failed to decrypt password", exception);
+            logger.error("Failed to decrypt password: {}", exception.getMessage());
+
+            return null;
         }
     }
 

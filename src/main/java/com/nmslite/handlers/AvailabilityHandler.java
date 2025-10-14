@@ -10,6 +10,10 @@ import com.nmslite.utils.ValidationUtil;
 
 import io.vertx.ext.web.RoutingContext;
 
+import org.slf4j.Logger;
+
+import org.slf4j.LoggerFactory;
+
 /**
  * AvailabilityHandler - HTTP request handler for availability operations
 
@@ -18,6 +22,9 @@ import io.vertx.ext.web.RoutingContext;
  */
 public class AvailabilityHandler
 {
+
+    private static final Logger logger = LoggerFactory.getLogger(AvailabilityHandler.class);
+
     private final AvailabilityService availabilityService;
 
     /**
@@ -37,18 +44,27 @@ public class AvailabilityHandler
      */
     public void getDeviceAvailability(RoutingContext context)
     {
-        var deviceId = context.pathParam("deviceId");
-
-        if (!ValidationUtil.validatePathParameterUUID(context, deviceId, "deviceId"))
+        try
         {
-            return; // Validation failed, response already sent
-        }
+            var deviceId = context.pathParam("deviceId");
 
-        availabilityService.availabilityGetByDevice(deviceId)
-                .onSuccess(availability ->
-                        ResponseUtil.handleSuccess(context, availability))
-                .onFailure(cause ->
-                        ExceptionUtil.handleHttp(context, cause, "Failed to retrieve availability status"));
+            if (!ValidationUtil.validatePathParameterUUID(context, deviceId, "deviceId"))
+            {
+                return; // Validation failed, response already sent
+            }
+
+            availabilityService.availabilityGetByDevice(deviceId)
+                    .onSuccess(availability ->
+                            ResponseUtil.handleSuccess(context, availability))
+                    .onFailure(cause ->
+                            ExceptionUtil.handleHttp(context, cause, "Failed to retrieve availability status"));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in getDeviceAvailability handler: {}", exception.getMessage());
+
+            ExceptionUtil.handleHttp(context, exception, "Failed to retrieve availability status");
+        }
     }
 
 }

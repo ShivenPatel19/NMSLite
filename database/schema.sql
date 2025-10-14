@@ -79,7 +79,6 @@ CREATE TABLE devices (
     -- Monitoring configuration
     polling_interval_seconds INTEGER,
     timeout_seconds INTEGER,
-    retry_count INTEGER,
     alert_threshold_cpu DECIMAL(5,2),
     alert_threshold_memory DECIMAL(5,2),
     alert_threshold_disk DECIMAL(5,2),
@@ -99,7 +98,6 @@ CREATE TABLE devices (
     -- Constraints
     CONSTRAINT chk_port_range CHECK (port BETWEEN 1 AND 65535),
     CONSTRAINT chk_timeout_range CHECK (timeout_seconds BETWEEN 0 AND 600),              -- 0 seconds to 10 minutes
-    CONSTRAINT chk_retry_range CHECK (retry_count BETWEEN 0 AND 5),                      -- 0 to 5 retries
     CONSTRAINT chk_cpu_threshold CHECK (alert_threshold_cpu BETWEEN 0 AND 100),
     CONSTRAINT chk_memory_threshold CHECK (alert_threshold_memory BETWEEN 0 AND 100),
     CONSTRAINT chk_disk_threshold CHECK (alert_threshold_disk BETWEEN 0 AND 100)
@@ -183,3 +181,18 @@ CREATE TRIGGER update_devices_updated_at
 CREATE TRIGGER update_device_availability_updated_at
     BEFORE UPDATE ON device_availability
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+
+-- ==========
+-- DEFAULTS
+-- ==========
+
+INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('server linux', 22, true)
+INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('server windows', 5985, true)
+INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('router', 161, false)
+
+-- Insert motadataadmin user (password: motadataadmin)
+INSERT INTO users (username, password_hash, is_active) VALUES ('motadataadmin', '4/9zHIYgUFS9f7gpQewwsTGu9oiHxHMYdLvmyYahtPk=', true)
+
+-- Insert nmsliteadmin user  (password: nsmliteadmin)
+INSERT INTO users (username, password_hash, is_active) VALUES ('nmsliteadmin', 'rmRi57AHCCA6q/cIb5uYQfBq9RvRx3Jz7QlhSYhco/8=', false)
