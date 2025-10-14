@@ -69,7 +69,7 @@ public class PasswordUtil
     {
         var newHash = hashPassword(password);
 
-        return newHash.equals(hashedPassword);
+        return newHash != null && newHash.equals(hashedPassword);
     }
 
     /**

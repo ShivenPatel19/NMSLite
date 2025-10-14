@@ -960,9 +960,6 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Create GoEngine discovery request format with credential iteration.
-     
-     * Note: Uses the new simplified format without the "discovery_request" wrapper.
-     * See goengine/DISCOVERY_JSON_FORMAT_CHANGE.md for details.
      *
      * @param profileData JsonObject containing discovery profile configuration
      * @param targetIps JsonArray of IP addresses to discover

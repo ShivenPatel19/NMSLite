@@ -14,8 +14,6 @@ import io.vertx.core.json.JsonObject;
 
 import io.vertx.ext.web.RoutingContext;
 
-import java.util.UUID;
-
 import org.slf4j.Logger;
 
 import org.slf4j.LoggerFactory;

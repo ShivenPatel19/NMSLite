@@ -22,8 +22,6 @@ import io.vertx.core.Future;
 
 import io.vertx.core.Handler;
 
-import io.vertx.core.Vertx;
-
 import io.vertx.core.json.JsonObject;
 
 import io.vertx.ext.web.RoutingContext;
@@ -115,8 +113,6 @@ public class DiscoveryProfileHandler
             }
 
             var ipAddress = requestBody.getString("ip_address");
-
-            var isRange = requestBody.getBoolean("is_range", false);
 
             var deviceTypeId = requestBody.getString("device_type_id");
 

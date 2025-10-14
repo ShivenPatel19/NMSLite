@@ -2,8 +2,6 @@ package com.nmslite.utils;
 
 import com.nmslite.Bootstrap;
 
-import io.vertx.core.Vertx;
-
 import io.vertx.core.json.JsonObject;
 
 import io.vertx.ext.auth.JWTOptions;

@@ -221,9 +221,16 @@ public class PollingMetricsVerticle extends AbstractVerticle
                             {
                                 var pd = createPollingDeviceFromJson(deviceData);
 
-                                deviceCache.put(pd.deviceId, pd);
+                                if (pd != null)
+                                {
+                                    deviceCache.put(pd.deviceId, pd);
 
-                                count++;
+                                    count++;
+                                }
+                                else
+                                {
+                                    logger.error("Failed to create PollingDevice from JSON for device {}", deviceData.getString("device_name"));
+                                }
                             }
                             catch (Exception exception)
                             {
@@ -428,9 +435,16 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         {
                             var pd = createPollingDeviceFromJson(deviceData);
 
-                            deviceCache.put(pd.deviceId, pd);
+                            if (pd != null)
+                            {
+                                deviceCache.put(pd.deviceId, pd);
 
-                            logger.info("Device cache updated: {} added (total cached: {})", pd.deviceName, deviceCache.size());
+                                logger.info("Device cache updated: {} added (total cached: {})", pd.deviceName, deviceCache.size());
+                            }
+                            else
+                            {
+                                logger.error("Failed to create PollingDevice from JSON for device {}", deviceId);
+                            }
                         }
                         catch (Exception exception)
                         {
@@ -494,9 +508,16 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         {
                             var pd = createPollingDeviceFromJson(deviceData);
 
-                            deviceCache.put(pd.deviceId, pd);  // simply overwrite existing entry
+                            if (pd != null)
+                            {
+                                deviceCache.put(pd.deviceId, pd);  // simply overwrite existing entry
 
-                            logger.info("Device cache updated: {} config refreshed (total cached: {})", pd.deviceName, deviceCache.size());
+                                logger.info("Device cache updated: {} config refreshed (total cached: {})", pd.deviceName, deviceCache.size());
+                            }
+                            else
+                            {
+                                logger.error("Failed to create PollingDevice from JSON for device {}", deviceId);
+                            }
                         }
                         catch (Exception exception)
                         {

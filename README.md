@@ -5,7 +5,7 @@
 **Java Version:** 21
 **Database:** PostgreSQL 12+
 
-A lightweight, event-driven network monitoring system built with Vert.x and PostgreSQL, featuring JWT authentication, ProxyGen service architecture, and real-time device monitoring.
+A lightweight, event-driven network monitoring system built with Vert.x and PostgreSQL, featuring JWT authentication, ProxyGen service architecture, GoEngine integration for SSH/WinRM metrics collection, and automated device discovery with continuous monitoring.
 
 ---
 
@@ -61,12 +61,36 @@ All database operations are abstracted through Vert.x ProxyGen services for type
 ### Communication Pattern
 
 ```
-HTTP Request → ServerVerticle → Service Proxy (Event Bus) → Service Implementation → PostgresSQL
+HTTP Request → ServerVerticle → Service Proxy (Event Bus) → Service Implementation → PostgreSQL
                                       ↓
                           (Registered at startup by DatabaseInitializer)
 ```
 
-All services use `createProxy(vertx)` pattern for seamless event bus communication without manual message handling.
+All services use `createProxy()` pattern for seamless event bus communication without manual message handling.
+
+### Application Startup Flow
+
+```
+1. Bootstrap.main()
+   ↓
+2. Load application.conf (HOCON format)
+   ↓
+3. Configure logging (Logback)
+   ↓
+4. Setup worker executor (pool size: 10)
+   ↓
+5. DatabaseInitializer.initialize()
+   - Create PostgreSQL connection pool
+   - Instantiate all 7 service implementations
+   - Register ProxyGen services on event bus
+   ↓
+6. Deploy verticles sequentially:
+   - ServerVerticle (HTTP API)
+   - PollingMetricsVerticle (monitoring)
+   - DiscoveryVerticle (device discovery)
+   ↓
+7. Application ready (HTTP server on port 8080)
+```
 
 ## 💡 Code Approach & Design Patterns
 
@@ -90,13 +114,13 @@ vertx.eventBus().request("db.users.get", userId, reply -> {
 **ProxyGen Approach (Used in NMSLite):**
 ```java
 // ✅ Type-safe service proxy - clean and maintainable
-UserService userService = UserService.createProxy(vertx);
-userService.getUserById(userId)
+UserService userService = UserService.createProxy();
+userService.userGetById(userId)
     .onSuccess(user -> {
-        // Handle user
+        ResponseUtil.handleSuccess(ctx, user);
     })
     .onFailure(error -> {
-        // Handle error
+        ExceptionUtil.handleHttp(ctx, error, "Failed to get user");
     });
 ```
 
@@ -131,18 +155,18 @@ getDiscoveryProfile(profileId)
 NMSLite implements **hierarchical timeout strategy** for reliability:
 
 **Discovery Timeouts (3 Levels):**
-1. **Vert.x Batch**: 120s - Overall batch operation timeout
-2. **GoEngine Device**: 30s - Per-device discovery timeout
-3. **GoEngine Credential**: 10s - Per-credential attempt timeout
+1. **Vert.x Batch**: 300s (5 min) - Overall batch operation timeout (`discovery.blocking.timeout.goengine`)
+2. **GoEngine Device**: 60s - Per-device discovery timeout (`discovery.goengine.timeout.seconds`)
+3. **GoEngine Credential**: 20s - Per-credential attempt timeout (`discovery.goengine.connection.timeout.seconds`)
 
 **Polling/Metrics Timeouts (3 Levels):**
-1. **Vert.x Batch**: 330s - Overall batch operation timeout
-2. **GoEngine Device**: 60s - Per-device metrics collection timeout
-3. **GoEngine Connection**: 10s - SSH/WinRM connection timeout
+1. **Vert.x Batch**: 300s (5 min) - Overall batch operation timeout (`polling.blocking.timeout.goengine`)
+2. **GoEngine Device**: 60s - Per-device metrics collection timeout (`device.defaults.timeout.seconds`)
+3. **GoEngine Connection**: 20s - SSH/WinRM connection timeout (`polling.connection.timeout.seconds`)
 
-**Network Timeouts:**
-- **fping**: 5s per-IP, 180s batch timeout
-- **Port Check**: 5s per-socket, 10s batch timeout
+**Network Timeouts (2 Levels):**
+- **fping**: 5s per-IP (`tools.fping.timeout.seconds`), 180s batch timeout (`tools.fping.batch.blocking.timeout.seconds`)
+- **Port Check**: 5s per-socket (`tools.port.check.timeout.seconds`), 10s batch timeout (`tools.port.check.batch.blocking.timeout.seconds`)
 
 ### Batch Processing
 
@@ -173,33 +197,58 @@ class DiscoveryBatchProcessor {
 PollingMetricsVerticle maintains in-memory device cache for performance:
 
 ```java
-// Device cache loaded at startup and updated on changes
+// Device cache loaded at startup and updated on changes via event bus
 private final Map<String, PollingDevice> deviceCache = new ConcurrentHashMap<>();
 
-// Fast lookup without database queries
+// Fast lookup without database queries during polling cycles
 PollingDevice device = deviceCache.get(deviceId);
+
+// Cache updated reactively when devices are provisioned/updated/disabled
+vertx.eventBus().consumer("device.cache.update", message -> {
+    // Reload device into cache
+});
 ```
+
+**Cache Lifecycle:**
+- Loaded on startup from database (provisioned + monitoring enabled devices)
+- Updated via event bus when device configuration changes
+- Cleared on verticle shutdown
+- Runtime state (nextScheduledAt, consecutiveFailures) lost on restart (recomputed on startup)
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-1. **Java 21+**
-2. **PostgresSQL 12+**
-3. **fping** (for network connectivity checks)
-4. **GoEngine** (for SSH/WinRM metrics collection)
+1. **Java 21+** - Required for running the application
+2. **PostgreSQL 12+** - Database for storing devices, metrics, and configuration
+3. **fping** - Command-line tool for ICMP ping checks (install via package manager)
+4. **GoEngine** - External Go binary for SSH/WinRM communication (included in `goengine/` directory)
+5. **Maven 3.x** - Build tool (for building from source)
 
 ### Database Setup
 
-1. Create PostgresSQL database:
+1. **Install PostgreSQL 12+** (if not already installed)
+
+2. **Create database and user:**
 ```sql
 CREATE DATABASE nmslite;
+CREATE USER nmslite WITH PASSWORD 'nmslite';
+GRANT ALL PRIVILEGES ON DATABASE nmslite TO nmslite;
 ```
 
-2. Run the schema:
+3. **Run the schema:**
 ```bash
-psql -d nmslite -f database/schema.sql
+psql -h localhost -U nmslite -d nmslite -f database/schema.sql
 ```
+
+The schema creates 7 tables:
+- `users` - Admin users with JWT authentication
+- `device_types` - Device templates (Linux Server, Windows Server, etc.)
+- `credential_profiles` - Reusable credentials (encrypted)
+- `discovery_profiles` - Discovery configurations with IP ranges
+- `devices` - Discovered and provisioned devices
+- `metrics` - Time-series metrics data (CPU, memory, disk)
+- `device_availability` - Availability tracking and statistics
 
 ### Build & Run
 
@@ -210,14 +259,23 @@ mvn clean package
 
 2. **Run the application:**
 ```bash
-java -jar target/NMSLite-2.0-SNAPSHOT-fat.jar
+java -jar target/NMSLite-3.0-SNAPSHOT-fat.jar
 ```
 
 3. **Configuration:**
-All configuration is loaded from `src/main/resources/application.conf`.
+All configuration is loaded from `application.conf` in the application root directory.
 To customize settings, edit the configuration file before building:
 
 ```hocon
+# Logging Configuration
+logging {
+  enabled = true
+  level = "INFO"                           # TRACE, DEBUG, INFO, WARN, ERROR
+  file.path = "logs/nmslite.log"
+  file.enabled = true
+  console.enabled = true
+}
+
 # Database Configuration
 database {
   host = "localhost"
@@ -225,30 +283,73 @@ database {
   database = "nmslite"
   user = "nmslite"
   password = "nmslite"
-  maxSize = 20
+  maxSize = 5
+  blocking.timeout.seconds = 60
 }
 
 # HTTP Server Configuration
-main {
+server {
   http.port = 8080
-  websocket.path = "/ws"
+}
+
+# Worker Pool Configuration
+worker {
+  pool.size = 10
 }
 
 # Shared Tools Configuration
 tools {
   goengine.path = "./goengine/goengine"
-  fping.path = "fping"
+
+  fping {
+    path = "fping"
+    timeout.seconds = 5                    # Per-IP timeout
+    batch.blocking.timeout.seconds = 180   # Batch operation timeout
+  }
+
+  port.check {
+    timeout.seconds = 5                    # Per-socket timeout
+    batch.blocking.timeout.seconds = 10    # Batch operation timeout
+  }
+}
+
+# GoEngine Global Configuration
+goengine {
+  working.directory = "./goengine"
+  config.file = "config/goengine.yaml"
 }
 
 # Discovery Configuration
 discovery {
-  batch.size = 100
+  batch.size = 100                         # Max IPs per GoEngine discovery request
+  blocking.timeout.goengine = 300          # Vert.x blocking timeout (5 minutes)
+
+  goengine {
+    timeout.seconds = 60                   # Per-device timeout
+    connection.timeout.seconds = 20        # Per-credential timeout
+  }
 }
 
 # Polling Configuration
 polling {
-  system.cycle.interval.seconds = 60       # How often the system checks for devices to poll
-  batch.size = 50
+  cycle.interval.seconds = 60              # How often scheduler checks for due devices
+  batch.size = 50                          # Max devices per batch
+  max.cycles.skipped = 5                   # Auto-disable after N failures
+  failure.log.path = "polling_failed/metrics_polling_failed.txt"
+
+  blocking.timeout.goengine = 300          # Vert.x blocking timeout (5 minutes)
+  connection.timeout.seconds = 20          # SSH/WinRM connection timeout
+}
+
+# Device Default Configuration
+device {
+  defaults {
+    alert.threshold.cpu = 80.0
+    alert.threshold.memory = 85.0
+    alert.threshold.disk = 90.0
+    polling.interval.seconds = 300         # Default polling interval (5 minutes)
+    timeout.seconds = 60                   # Default per-device timeout
+  }
 }
 ```
 
@@ -287,12 +388,14 @@ Content-Type: application/json
 # Response
 {
   "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "user": {
-    "user_id": "uuid",
-    "username": "admin",
-    "is_active": true
-  }
+  "authenticated": true,
+  "jwt_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "Bearer",
+  "expires_in_hours": 24,
+  "user_id": "uuid",
+  "username": "admin",
+  "is_active": true,
+  "message": "Authentication successful - JWT token generated"
 }
 ```
 
@@ -382,12 +485,8 @@ Authorization: Bearer <token>
 
 ### Devices
 ```bash
-# Get all devices
-GET /api/devices
-Authorization: Bearer <token>
-
-# Get devices available for provisioning
-GET /api/devices/available-for-provision
+# Get discovered devices (not yet provisioned)
+GET /api/devices/discovered
 Authorization: Bearer <token>
 
 # Get provisioned devices
@@ -398,7 +497,16 @@ Authorization: Bearer <token>
 GET /api/devices/{device_id}
 Authorization: Bearer <token>
 
-# Update device
+# Provision devices (bulk operation - sets is_provisioned=true AND is_monitoring_enabled=true)
+POST /api/devices/provision
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "device_ids": ["uuid1", "uuid2", "uuid3"]
+}
+
+# Update device configuration
 PUT /api/devices/{device_id}
 Authorization: Bearer <token>
 Content-Type: application/json
@@ -408,7 +516,6 @@ Content-Type: application/json
   "port": 22,
   "polling_interval_seconds": 300,
   "timeout_seconds": 60,
-  "retry_count": 2,
   "alert_threshold_cpu": 80.0,
   "alert_threshold_memory": 85.0,
   "alert_threshold_disk": 90.0
@@ -419,10 +526,6 @@ POST /api/devices/{device_id}/monitoring/enable
 POST /api/devices/{device_id}/monitoring/disable
 Authorization: Bearer <token>
 
-# Provision device
-POST /api/devices/{device_id}/provision
-Authorization: Bearer <token>
-
 # Delete device (soft delete)
 DELETE /api/devices/{device_id}
 Authorization: Bearer <token>
@@ -430,19 +533,15 @@ Authorization: Bearer <token>
 
 ### Metrics
 ```bash
-# Get device metrics
-GET /api/devices/{device_id}/metrics
-Authorization: Bearer <token>
-
-# Get latest metric
-GET /api/devices/{device_id}/metrics/latest
+# Get all metrics for a device
+GET /api/metrics/{device_id}
 Authorization: Bearer <token>
 ```
 
 ### Availability
 ```bash
-# Get device availability
-GET /api/devices/{device_id}/availability
+# Get device availability statistics
+GET /api/availability/{device_id}
 Authorization: Bearer <token>
 ```
 
@@ -452,25 +551,40 @@ Authorization: Bearer <token>
 
 ### Configuration File
 
-All configuration is loaded from `src/main/resources/application.conf`. The application uses HOCON format for configuration.
+All configuration is loaded from `application.conf` in the application root directory. The application uses HOCON format for configuration.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `database.host` | localhost | PostgresSQL host |
-| `database.port` | 5432 | PostgresSQL port |
+| `logging.enabled` | true | Enable/disable application logging |
+| `logging.level` | INFO | Log level (TRACE, DEBUG, INFO, WARN, ERROR) |
+| `database.host` | localhost | PostgreSQL host |
+| `database.port` | 5432 | PostgreSQL port |
 | `database.database` | nmslite | Database name |
 | `database.user` | nmslite | Database user |
 | `database.password` | nmslite | Database password |
-| `main.http.port` | 8080 | HTTP server port |
+| `database.maxSize` | 5 | Connection pool size |
+| `server.http.port` | 8080 | HTTP server port |
+| `worker.pool.size` | 10 | Worker thread pool size |
 | `tools.goengine.path` | ./goengine/goengine | Path to GoEngine binary |
 | `tools.fping.path` | fping | Path to fping binary |
-| `tools.network.connection.timeout.seconds` | 30 | Network timeout for device connections |
-| `polling.system.cycle.interval.seconds` | 60 | How often system checks for devices to poll |
-| `device.defaults.device.polling.interval.seconds` | 300 | Default interval for polling individual devices |
+| `tools.fping.timeout.seconds` | 5 | Per-IP fping timeout |
+| `tools.port.check.timeout.seconds` | 5 | Per-socket port check timeout |
+| `discovery.batch.size` | 100 | Max IPs per discovery batch |
+| `discovery.goengine.timeout.seconds` | 60 | Per-device discovery timeout |
+| `discovery.goengine.connection.timeout.seconds` | 20 | Per-credential timeout |
+| `polling.cycle.interval.seconds` | 60 | Polling scheduler interval |
+| `polling.batch.size` | 50 | Max devices per polling batch |
+| `polling.max.cycles.skipped` | 5 | Auto-disable threshold |
+| `polling.connection.timeout.seconds` | 20 | SSH/WinRM connection timeout |
+| `device.defaults.polling.interval.seconds` | 300 | Default device polling interval |
+| `device.defaults.timeout.seconds` | 60 | Default per-device timeout |
+| `device.defaults.alert.threshold.cpu` | 80.0 | Default CPU alert threshold (%) |
+| `device.defaults.alert.threshold.memory` | 85.0 | Default memory alert threshold (%) |
+| `device.defaults.alert.threshold.disk` | 90.0 | Default disk alert threshold (%) |
 
 ### Customizing Configuration
 
-Edit `src/main/resources/application.conf` before building the application to customize settings.
+Edit `application.conf` in the application root directory before building to customize settings.
 
 ## 📊 Workflow & Code Approach
 
@@ -486,7 +600,7 @@ Edit `src/main/resources/application.conf` before building the application to cu
 
 1. **Profile Creation**: Frontend creates discovery profile with IP range and credential array
 2. **Test Discovery**: User triggers test discovery from profile
-3. **IP Parsing**: `IPRangeUtil` parses IP ranges (single IP, range, or CIDR)
+3. **IP Parsing**: `DiscoveryVerticle` parses IP ranges (single IP, range, or CIDR)
 4. **Duplicate Filtering**: Check existing devices to avoid re-discovery
 5. **Batch Processing**: `DiscoveryBatchProcessor` processes IPs in configurable batches (default: 100)
 6. **Connectivity Check**:
@@ -699,12 +813,13 @@ NMSLite integrates with **GoEngine** (external Go binary) for SSH/WinRM device c
     {
       "ip": "192.168.1.100",
       "port": 22,
+      "device_type": "linux",
       "credentials": [
         {"username": "admin", "password": "pass1"},
         {"username": "root", "password": "pass2"}
       ],
-      "timeout": 30,
-      "connection_timeout": 10
+      "timeout": 60,
+      "connection_timeout": 20
     }
   ]
 }
@@ -716,12 +831,13 @@ NMSLite integrates with **GoEngine** (external Go binary) for SSH/WinRM device c
   "mode": "metrics",
   "targets": [
     {
-      "ip": "192.168.1.100",
+      "device_address": "192.168.1.100",
       "port": 22,
+      "device_type": "linux",
       "username": "admin",
       "password": "password",
       "timeout": 60,
-      "connection_timeout": 10
+      "connection_timeout": 20
     }
   ]
 }
@@ -730,14 +846,18 @@ NMSLite integrates with **GoEngine** (external Go binary) for SSH/WinRM device c
 ### Timeout Hierarchy
 
 **Discovery (3 Levels):**
-1. **Vert.x Batch Timeout**: 120s (entire batch operation)
-2. **GoEngine Per-Device**: 30s (per IP address)
-3. **GoEngine Per-Credential**: 10s (per credential attempt)
+1. **Vert.x Batch Timeout**: 300s (entire batch operation) - `discovery.blocking.timeout.goengine`
+2. **GoEngine Per-Device**: 60s (per IP address) - `discovery.goengine.timeout.seconds`
+3. **GoEngine Per-Credential**: 20s (per credential attempt) - `discovery.goengine.connection.timeout.seconds`
 
 **Polling/Metrics (3 Levels):**
-1. **Vert.x Batch Timeout**: 330s (entire batch operation)
-2. **GoEngine Per-Device**: 60s (per device metrics collection)
-3. **GoEngine Connection**: 10s (SSH/WinRM connection timeout)
+1. **Vert.x Batch Timeout**: 300s (entire batch operation) - `polling.blocking.timeout.goengine`
+2. **GoEngine Per-Device**: 60s (per device metrics collection) - `device.defaults.timeout.seconds` (from database)
+3. **GoEngine Connection**: 20s (SSH/WinRM connection timeout) - `polling.connection.timeout.seconds`
+
+**Network Connectivity (2 Levels):**
+- **fping**: 5s per-IP, 180s batch timeout
+- **Port Check**: 5s per-socket, 10s batch timeout
 
 ### Platform Support
 
@@ -748,15 +868,23 @@ NMSLite integrates with **GoEngine** (external Go binary) for SSH/WinRM device c
 ### Configuration
 
 GoEngine configuration managed via:
-- **Java Backend**: Primary configuration from `application.conf`
-- **GoEngine YAML**: Fallback configuration in `goengine/config/goengine.yaml`
-- **Priority**: Java config overrides GoEngine YAML
+- **Java Backend**: Primary configuration from `application.conf` (all operational parameters)
+- **GoEngine YAML**: Feature flags and resource limits in `goengine/config/goengine.yaml`
+- **Priority**: Java backend provides all timeouts, credentials, and connection settings
 
-Key settings:
-- `goengine.path`: Path to GoEngine binary
-- `goengine.max.workers`: Concurrent device processing (default: 30)
-- `goengine.logging.enabled`: Enable GoEngine logging
-- `goengine.timing.enabled`: Enable timing information
+**Java Backend Configuration (`application.conf`):**
+- `tools.goengine.path`: Path to GoEngine binary
+- `goengine.working.directory`: GoEngine working directory
+- `goengine.config.file`: Path to YAML config file
+- All timeout values (discovery, polling, connection)
+- All credential information
+- All device connection parameters
+
+**GoEngine YAML Configuration (`goengine/config/goengine.yaml`):**
+- `logging.enabled`: Enable GoEngine logging to file
+- `max_workers`: Maximum concurrent device processing (default: 30)
+- `discovery.enabled`: Enable discovery mode
+- `metrics.enabled`: Enable metrics mode
 
 ## 📈 Key Features & Implementation Highlights
 
@@ -819,14 +947,15 @@ FROM openjdk:21-jre-slim
 RUN apt-get update && apt-get install -y fping && rm -rf /var/lib/apt/lists/*
 
 # Copy application
-COPY target/NMSLite-2.0-SNAPSHOT-fat.jar /app/nmslite.jar
-COPY goengine/goengine /app/goengine
+COPY target/NMSLite-3.0-SNAPSHOT-fat.jar /app/nmslite.jar
+COPY goengine /app/goengine
+COPY application.conf /app/application.conf
 
 # Set permissions
-RUN chmod +x /app/goengine
+RUN chmod +x /app/goengine/goengine
 
-# Create logs directory
-RUN mkdir -p /app/logs
+# Create directories
+RUN mkdir -p /app/logs /app/polling_failed
 
 WORKDIR /app
 
@@ -835,18 +964,29 @@ EXPOSE 8080
 CMD ["java", "-jar", "nmslite.jar"]
 ```
 
-### Environment Variables for Production
+### Production Configuration
 
-```bash
-DB_HOST=your-Postgress-host
-DB_PORT=5432
-DB_NAME=nmslite_prod
-DB_USER=nmslite_user
-DB_PASSWORD=secure_password
-HTTP_PORT=8080
-GOENGINE_PATH=/app/goengine
-FPING_PATH=fping
-POLLING_INTERVAL=60
+For production deployment, edit `application.conf` with production values:
+
+```hocon
+database {
+  host = "production-db-host"
+  port = 5432
+  database = "nmslite_prod"
+  user = "nmslite_user"
+  password = "secure_password"
+  maxSize = 10
+}
+
+server {
+  http.port = 8080
+}
+
+logging {
+  enabled = true
+  level = "INFO"
+  file.path = "/var/log/nmslite/nmslite.log"
+}
 ```
 
 ## 🔧 Development
@@ -854,22 +994,26 @@ POLLING_INTERVAL=60
 ### Running in Development
 
 ```bash
-# Start PostgresSQL
-docker run -d --name Postgress \
-  -e PostgresS_DB=nmslite \
-  -e PostgresS_USER=nmslite_user \
-  -e PostgresS_PASSWORD=nmslite \
-  -p 5432:5432 Postgress:15
+# Start PostgreSQL
+docker run -d --name postgres \
+  -e POSTGRES_DB=nmslite \
+  -e POSTGRES_USER=nmslite \
+  -e POSTGRES_PASSWORD=nmslite \
+  -p 5432:5432 postgres:15
+
+# Initialize database schema
+psql -h localhost -U nmslite -d nmslite -f database/schema.sql
 
 # Run application
-mvn compile exec:java -Dexec.mainClass="io.vertx.core.Launcher" \
-  -Dexec.args="run com.nmslite.NMSLiteApplication"
+mvn clean compile exec:java -Dexec.mainClass="com.nmslite.Bootstrap"
 ```
 
-### Hot Reload
+### Running with Maven
 
 ```bash
-mvn vertx:run
+# Build and run
+mvn clean package
+java -jar target/NMSLite-3.0-SNAPSHOT-fat.jar
 ```
 
 ### 🔧 Developer Notes - INET Type Handling
@@ -901,10 +1045,24 @@ pgPool.preparedQuery(sql).execute(Tuple.of(otherParam1, otherParam2));
 ## 📝 Logs
 
 Application logs are written to:
-- **Console**: Real-time logging
-- **File**: `logs/nmslite.log` (rotated daily)
+- **Console**: Real-time logging (configurable via `logging.console.enabled`)
+- **File**: `logs/nmslite.log` (configurable via `logging.file.path`)
+- **GoEngine**: `logs/goengine.log` (if GoEngine logging is enabled)
 
-Log levels can be configured in `src/main/resources/logback.xml`.
+Log levels can be configured in `application.conf`:
+```hocon
+logging {
+  enabled = true
+  level = "INFO"  # TRACE, DEBUG, INFO, WARN, ERROR
+  file.enabled = true
+  console.enabled = true
+}
+```
+
+### Log Files
+- `logs/nmslite.log` - Main application log
+- `logs/goengine.log` - GoEngine process log
+- `polling_failed/metrics_polling_failed.txt` - Failed polling attempts log
 
 ## 🎯 Technology Stack
 
@@ -923,13 +1081,14 @@ Log levels can be configured in `src/main/resources/logback.xml`.
 
 NMSLite follows strict coding standards for maintainability:
 
-1. **Comprehensive Documentation**: JavaDoc-style docstrings for all classes and methods
-2. **Readable Formatting**: Blank lines between code statements, Allman-style braces
+1. **Comprehensive Documentation**: JavaDoc-style docstrings for all classes and methods with @param and @return tags
+2. **Readable Formatting**: Blank lines between every line of code, Allman-style braces (opening braces on new lines)
 3. **Descriptive Naming**: Full variable names (exception instead of e, cause instead of c)
-4. **Error Handling**: Centralized exception handling via ExceptionUtil
-5. **Async Patterns**: Consistent use of Future/Promise for async operations
-6. **Service Abstraction**: ProxyGen services for all database operations
-7. **Configuration-Driven**: All timeouts, thresholds, and settings in config file
+4. **Error Handling**: Every method has try-catch with Exception, centralized handling via ExceptionUtil
+5. **Async Patterns**: Consistent use of Future/Promise for async operations, no blocking on event loop
+6. **Service Abstraction**: ProxyGen services for all database operations, no manual event bus messaging
+7. **Configuration-Driven**: All timeouts, thresholds, and settings in application.conf
+8. **Response Handling**: Use ResponseUtil for success responses, ExceptionUtil.handleHttp() for HTTP exceptions
 
 ## 🎯 Summary
 
