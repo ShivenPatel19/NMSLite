@@ -149,6 +149,32 @@ CREATE TABLE device_availability (
 );
 
 -- =====================================================
+-- 8. METRICS BACKUP TABLE - Stores deleted metrics
+-- =====================================================
+-- This table stores a complete backup of metric records when they are deleted
+-- Automatically populated by trigger - completely transparent to application
+CREATE TABLE metrics_backup (
+    backup_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    metric_id UUID NOT NULL,
+    device_id UUID NOT NULL,
+    timestamp TIMESTAMP NOT NULL,
+
+    -- System metrics
+    cpu_usage_percent DECIMAL(5,2) NOT NULL,
+    memory_usage_percent DECIMAL(5,2) NOT NULL,
+    memory_total_bytes BIGINT NOT NULL,
+    memory_used_bytes BIGINT NOT NULL,
+    memory_free_bytes BIGINT NOT NULL,
+    disk_usage_percent DECIMAL(5,2) NOT NULL,
+    disk_total_bytes BIGINT NOT NULL,
+    disk_used_bytes BIGINT NOT NULL,
+    disk_free_bytes BIGINT NOT NULL,
+
+    -- Backup metadata
+    backed_up_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================================================
 -- TRIGGERS FOR AUTOMATIC UPDATES
 -- =====================================================
 
@@ -158,6 +184,44 @@ RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
     RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Metrics backup trigger function
+-- Automatically backs up metric record before deletion
+CREATE OR REPLACE FUNCTION backup_metric_before_delete()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Insert backup record
+    INSERT INTO metrics_backup (
+        metric_id,
+        device_id,
+        timestamp,
+        cpu_usage_percent,
+        memory_usage_percent,
+        memory_total_bytes,
+        memory_used_bytes,
+        memory_free_bytes,
+        disk_usage_percent,
+        disk_total_bytes,
+        disk_used_bytes,
+        disk_free_bytes
+    ) VALUES (
+        OLD.metric_id,
+        OLD.device_id,
+        OLD.timestamp,
+        OLD.cpu_usage_percent,
+        OLD.memory_usage_percent,
+        OLD.memory_total_bytes,
+        OLD.memory_used_bytes,
+        OLD.memory_free_bytes,
+        OLD.disk_usage_percent,
+        OLD.disk_total_bytes,
+        OLD.disk_used_bytes,
+        OLD.disk_free_bytes
+    );
+
+    RETURN OLD;
 END;
 $$ language 'plpgsql';
 
@@ -178,6 +242,12 @@ CREATE TRIGGER update_devices_updated_at
 CREATE TRIGGER update_device_availability_updated_at
     BEFORE UPDATE ON device_availability
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Apply backup trigger to metrics table
+-- This trigger fires BEFORE DELETE and backs up the metric record
+CREATE TRIGGER backup_metric_on_delete
+    BEFORE DELETE ON metrics
+    FOR EACH ROW EXECUTE FUNCTION backup_metric_before_delete();
 
 
 -- ==========
