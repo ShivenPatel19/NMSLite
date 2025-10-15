@@ -487,45 +487,6 @@ public class Bootstrap
                     // Store config in static field for global access via getConfig()
                     applicationConfig = config;
 
-                    var dbConfig = config.getJsonObject("database");
-
-                    var serverConfig = config.getJsonObject("server");
-
-                    var toolsConfig = config.getJsonObject("tools");
-
-                    var deviceConfig = config.getJsonObject("device", new JsonObject())
-                            .getJsonObject("defaults", new JsonObject());
-
-                    // HOCON parses dotted keys as nested objects, so we need to navigate the hierarchy
-                    var pollingInterval = deviceConfig.getJsonObject("polling", new JsonObject())
-                            .getJsonObject("interval", new JsonObject())
-                            .getInteger("seconds", 300);
-
-                    var cpuThreshold = deviceConfig.getJsonObject("alert", new JsonObject())
-                            .getJsonObject("threshold", new JsonObject())
-                            .getDouble("cpu", 80.0);
-
-                    var memoryThreshold = deviceConfig.getJsonObject("alert", new JsonObject())
-                            .getJsonObject("threshold", new JsonObject())
-                            .getDouble("memory", 85.0);
-
-                    var diskThreshold = deviceConfig.getJsonObject("alert", new JsonObject())
-                            .getJsonObject("threshold", new JsonObject())
-                            .getDouble("disk", 90.0);
-
-                    logger.info("Configuration loaded - Database: {}:{}/{}, HTTP Port: {}, GoEngine: {}",
-                        dbConfig.getString("host"),
-                        dbConfig.getInteger("port"),
-                        dbConfig.getString("database"),
-                        serverConfig.getJsonObject("http").getInteger("port"),
-                        toolsConfig.getJsonObject("goengine").getString("path"));
-
-                    logger.info("Device defaults - Polling Interval: {} seconds, CPU Threshold: {}%, Memory Threshold: {}%, Disk Threshold: {}%",
-                        pollingInterval,
-                        cpuThreshold,
-                        memoryThreshold,
-                        diskThreshold);
-
                     promise.complete(config);
                 })
                 .onFailure(cause ->

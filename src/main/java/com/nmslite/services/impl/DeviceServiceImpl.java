@@ -232,7 +232,9 @@ public class DeviceServiceImpl implements DeviceService
         {
             var sql = """
                     UPDATE devices
-                    SET is_deleted = true, deleted_at = CURRENT_TIMESTAMP
+                    SET is_deleted = true,
+                        deleted_at = CURRENT_TIMESTAMP,
+                        is_monitoring_enabled = false
                     WHERE device_id = $1 AND is_deleted = false
                     RETURNING device_id, device_name
                     """;
@@ -537,9 +539,9 @@ public class DeviceServiceImpl implements DeviceService
 
         try
         {
-            // First check if device is provisioned
+            // First check if device is provisioned and current monitoring state
             var checkSql = """
-                    SELECT is_provisioned, is_deleted
+                    SELECT is_provisioned, is_deleted, is_monitoring_enabled
                     FROM devices
                     WHERE device_id = $1
                     """;
@@ -563,6 +565,8 @@ public class DeviceServiceImpl implements DeviceService
 
                         var isProvisioned = checkRow.getBoolean("is_provisioned");
 
+                        var isMonitoringEnabled = checkRow.getBoolean("is_monitoring_enabled");
+
                         if (isDeleted)
                         {
                             promise.complete(new JsonObject()
@@ -577,6 +581,15 @@ public class DeviceServiceImpl implements DeviceService
                             promise.complete(new JsonObject()
                                     .put("updated", false)
                                     .put("reason", "Cannot enable monitoring on unprovisioned device. Please provision the device first."));
+
+                            return;
+                        }
+
+                        if (isMonitoringEnabled)
+                        {
+                            promise.complete(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Monitoring is already enabled for this device"));
 
                             return;
                         }
@@ -657,9 +670,9 @@ public class DeviceServiceImpl implements DeviceService
 
         try
         {
-            // First check if device exists and is not deleted
+            // First check if device exists, is not deleted, and current monitoring state
             var checkSql = """
-                    SELECT is_deleted
+                    SELECT is_deleted, is_monitoring_enabled
                     FROM devices
                     WHERE device_id = $1
                     """;
@@ -681,6 +694,8 @@ public class DeviceServiceImpl implements DeviceService
 
                         var isDeleted = checkRow.getBoolean("is_deleted");
 
+                        var isMonitoringEnabled = checkRow.getBoolean("is_monitoring_enabled");
+
                         if (isDeleted)
                         {
                             promise.complete(new JsonObject()
@@ -690,7 +705,16 @@ public class DeviceServiceImpl implements DeviceService
                             return;
                         }
 
-                        // Device exists and is not deleted, proceed with disabling monitoring
+                        if (!isMonitoringEnabled)
+                        {
+                            promise.complete(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Monitoring is already disabled for this device"));
+
+                            return;
+                        }
+
+                        // Device exists, is not deleted, and monitoring is enabled - proceed with disabling
                         var sql = """
                                 UPDATE devices
                                 SET is_monitoring_enabled = false

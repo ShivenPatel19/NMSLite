@@ -715,7 +715,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     {
                         if (dueDevices.isEmpty())
                         {
-                            logger.debug("Polling cycle: 0 devices due (total cached: {})", totalCachedDevices);
+                            logger.info("Polling cycle: 0 devices due (total cached: {})", totalCachedDevices);
 
                             return;
                         }
@@ -795,6 +795,10 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     logger.info("Phase 1 completed: {}/{} devices processed successfully",
                         dueDevices.size() - failedDevices.size(), dueDevices.size());
 
+                    // Update availability for devices that succeeded in Phase 1 (will not be retried)
+                    // Failed devices will have their availability updated after retry phase
+                    updateAvailabilityForSuccessfulDevices(dueDevices, failedDevices);
+
                     promise.complete(failedDevices);
                 })
                 .onFailure(promise::fail);
@@ -858,6 +862,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 // Note: This loop runs on event loop but is fast (O(n) with O(1) HashMap lookups)
                 // For batch sizes < 1000, this is safe (< 100ms)
                 // For larger batches, consider moving to executeBlocking
+                // Availability will be updated centrally after final result is determined
                 for (var i = 0; i < unreachableDevices.size(); i++)
                 {
                     var deviceId = unreachableDevices.getString(i);
@@ -869,8 +874,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         pd.pollingResult = PollingResult.CONNECTIVITY_FAILED;
 
                         pd.incrementFailures();
-
-                        updateDeviceAvailability(pd.deviceId, false);
                     }
                 }
 
@@ -1097,10 +1100,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                         if (success)
                         {
-                            // Store metrics and update availability
+                            // Store metrics (availability will be updated centrally after final result is determined)
                             storeMetrics(pd.deviceId, result);
-
-                            updateDeviceAvailability(pd.deviceId, true);
 
                             results.put(pd.deviceId, true);
 
@@ -1108,8 +1109,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         }
                         else
                         {
-                            updateDeviceAvailability(pd.deviceId, false);
-
                             results.put(pd.deviceId, false);
                         }
 
@@ -1221,6 +1220,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
             var retriedSuccessfully = failedDevices.size() - exhaustedDevices.size();
 
             logger.info("Phase 2 completed: {}/{} devices recovered on retry", retriedSuccessfully, failedDevices.size());
+
+            // Update availability for all retried devices based on final result (after retry)
+            updateAvailabilityForRetriedDevices(failedDevices, exhaustedDevices);
 
             promise.complete(exhaustedDevices);
         })
@@ -1458,6 +1460,73 @@ public class PollingMetricsVerticle extends AbstractVerticle
         catch (Exception exception)
         {
             logger.error("Error in updateDeviceAvailability: {}", exception.getMessage());
+        }
+    }
+
+    /**
+     * Update availability for devices that succeeded in Phase 1 (will not be retried)
+     *
+     * @param allDevices All devices that were processed in Phase 1
+     * @param failedDevices Devices that failed in Phase 1 (will be retried, so skip them)
+     */
+    private void updateAvailabilityForSuccessfulDevices(List<PollingDevice> allDevices, List<PollingDevice> failedDevices)
+    {
+        try
+        {
+            // Create a set of failed device IDs for O(1) lookup
+            var failedDeviceIds = failedDevices.stream()
+                .map(pd -> pd.deviceId)
+                .collect(Collectors.toSet());
+
+            // Update availability for devices that succeeded (not in failed list)
+            for (var pd : allDevices)
+            {
+                if (!failedDeviceIds.contains(pd.deviceId))
+                {
+                    // Device succeeded in Phase 1, update availability as UP
+                    updateDeviceAvailability(pd.deviceId, true);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in updateAvailabilityForSuccessfulDevices: {}", exception.getMessage());
+        }
+    }
+
+    /**
+     * Update availability for devices that were retried in Phase 2 based on final result
+     *
+     * @param retriedDevices All devices that were retried in Phase 2
+     * @param exhaustedDevices Devices that failed even after retry
+     */
+    private void updateAvailabilityForRetriedDevices(List<PollingDevice> retriedDevices, List<PollingDevice> exhaustedDevices)
+    {
+        try
+        {
+            // Create a set of exhausted device IDs for O(1) lookup
+            var exhaustedDeviceIds = exhaustedDevices.stream()
+                .map(pd -> pd.deviceId)
+                .collect(Collectors.toSet());
+
+            // Update availability for all retried devices based on final result
+            for (var pd : retriedDevices)
+            {
+                if (exhaustedDeviceIds.contains(pd.deviceId))
+                {
+                    // Device failed even after retry, update availability as DOWN
+                    updateDeviceAvailability(pd.deviceId, false);
+                }
+                else
+                {
+                    // Device succeeded on retry, update availability as UP
+                    updateDeviceAvailability(pd.deviceId, true);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in updateAvailabilityForRetriedDevices: {}", exception.getMessage());
         }
     }
 

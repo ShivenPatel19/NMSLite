@@ -133,9 +133,6 @@ public class UserServiceImpl implements UserService
                 return promise.future();
             }
 
-            // ===== TRUST HANDLER VALIDATION =====
-            // No validation here - handler has already validated all input
-
             var sql = """
                 INSERT INTO users (username, password_hash, is_active)
                 VALUES ($1, $2, $3)
@@ -200,9 +197,6 @@ public class UserServiceImpl implements UserService
             var password = userData.getString("password");
 
             var isActive = userData.getBoolean("is_active");
-
-            // ===== TRUST HANDLER VALIDATION =====
-            // No validation here - handler has already validated all input
 
             var sqlBuilder = new StringBuilder("UPDATE users SET ");
 
