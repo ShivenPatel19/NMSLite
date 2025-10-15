@@ -263,7 +263,80 @@ public class AvailabilityServiceImpl implements AvailabilityService
     }
 
     /**
-     * Delete device availability by device ID (when device is deleted)
+     * Reset device availability by device ID (when device is soft deleted)
+     * Sets availability to 0%, status to 'unknown', and resets all counters to 0
+     *
+     * @param deviceId Device ID
+     * @return Future containing JsonObject with reset result
+     */
+    @Override
+    public Future<JsonObject> availabilityResetDevice(String deviceId)
+    {
+        var promise = Promise.<JsonObject>promise();
+
+        try
+        {
+            var sql = """
+                    UPDATE device_availability
+                    SET total_checks = 0,
+                        successful_checks = 0,
+                        failed_checks = 0,
+                        availability_percent = 0.00,
+                        current_status = 'unknown',
+                        last_check_time = NULL,
+                        last_success_time = NULL,
+                        last_failure_time = NULL,
+                        updated_at = NOW()
+                    WHERE device_id = $1
+                    RETURNING device_id, availability_percent, current_status
+                    """;
+
+            pgPool.preparedQuery(sql)
+                    .execute(Tuple.of(UUID.fromString(deviceId)))
+                    .onSuccess(rows ->
+                    {
+                        if (rows.size() == 0)
+                        {
+                            var result = new JsonObject()
+                                    .put("success", false)
+                                    .put("device_id", deviceId)
+                                    .put("message", "No availability record found for device");
+
+                            promise.complete(result);
+
+                            return;
+                        }
+
+                        var row = rows.iterator().next();
+
+                        var result = new JsonObject()
+                                .put("success", true)
+                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("availability_percent", row.getBigDecimal("availability_percent"))
+                                .put("current_status", row.getString("current_status"))
+                                .put("message", "Device availability reset to 0% and unknown successfully");
+
+                        promise.complete(result);
+                    })
+                    .onFailure(cause ->
+                    {
+                        logger.error("Failed to reset device availability: {}", cause.getMessage());
+
+                        promise.fail(cause);
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in availabilityResetDevice service: {}", exception.getMessage());
+
+            promise.fail(exception);
+        }
+
+        return promise.future();
+    }
+
+    /**
+     * Delete device availability by device ID (when device is permanently deleted)
      *
      * @param deviceId Device ID
      * @return Future containing JsonObject with deletion result

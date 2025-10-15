@@ -140,11 +140,21 @@ paths:
               properties:
                 username:
                   type: string
+                  description: Username (3-50 characters, alphanumeric and underscore only)
+                  minLength: 3
+                  maxLength: 50
+                  pattern: '^[a-zA-Z0-9_]+$'
+                  example: "john_doe"
                 password:
                   type: string
+                  description: Password (minimum 8 characters)
+                  minLength: 8
+                  example: "SecurePass123"
                 is_active:
                   type: boolean
+                  description: Whether the user account is active
                   default: true
+                  example: true
       responses:
         '200':
           description: User created successfully
@@ -182,13 +192,24 @@ paths:
           application/json:
             schema:
               type: object
+              description: At least one field must be provided
               properties:
                 username:
                   type: string
+                  description: Username (3-50 characters, alphanumeric and underscore only)
+                  minLength: 3
+                  maxLength: 50
+                  pattern: '^[a-zA-Z0-9_]+$'
+                  example: "john_doe_updated"
                 password:
                   type: string
+                  description: Password (minimum 8 characters)
+                  minLength: 8
+                  example: "NewSecurePass123"
                 is_active:
                   type: boolean
+                  description: Whether the user account is active
+                  example: false
       responses:
         '200':
           description: User updated successfully
@@ -262,7 +283,7 @@ paths:
       tags:
         - Credentials
       summary: Create credential profile
-      description: Create a new credential profile
+      description: Create a new credential profile for device authentication
       requestBody:
         required: true
         content:
@@ -271,21 +292,24 @@ paths:
               type: object
               required:
                 - profile_name
-                - protocol
                 - username
                 - password
               properties:
                 profile_name:
                   type: string
-                protocol:
-                  type: string
-                  enum: [ssh, snmp]
+                  description: Unique name for the credential profile
+                  maxLength: 100
+                  example: "SSH Admin Credentials"
                 username:
                   type: string
+                  description: Username for device authentication
+                  maxLength: 100
+                  example: "admin"
                 password:
                   type: string
-                port:
-                  type: integer
+                  description: Password for device authentication
+                  maxLength: 500
+                  example: "SecurePassword123"
       responses:
         '200':
           description: Credential created successfully
@@ -318,18 +342,23 @@ paths:
           application/json:
             schema:
               type: object
+              description: At least one field must be provided
               properties:
                 profile_name:
                   type: string
-                protocol:
-                  type: string
-                  enum: [ssh, snmp]
+                  description: Unique name for the credential profile
+                  maxLength: 100
+                  example: "SSH Admin Credentials"
                 username:
                   type: string
+                  description: Username for device authentication
+                  maxLength: 100
+                  example: "admin"
                 password:
                   type: string
-                port:
-                  type: integer
+                  description: Password for device authentication
+                  maxLength: 500
+                  example: "NewSecurePassword123"
       responses:
         '200':
           description: Credential updated successfully
@@ -394,7 +423,7 @@ paths:
       tags:
         - Discovery Profiles
       summary: Create discovery profile
-      description: Create a new discovery profile
+      description: Create a new discovery profile for device discovery
       requestBody:
         required: true
         content:
@@ -402,22 +431,51 @@ paths:
             schema:
               type: object
               required:
-                - profile_name
+                - discovery_name
+                - ip_address
                 - device_type_id
                 - credential_profile_ids
+                - protocol
               properties:
-                profile_name:
+                discovery_name:
                   type: string
+                  description: Unique name for the discovery profile
+                  maxLength: 100
+                  example: "Office Network Discovery"
+                ip_address:
+                  type: string
+                  description: Single IP address (e.g., "192.168.1.100") or IP range (e.g., "192.168.1.1-50")
+                  example: "192.168.1.100"
+                is_range:
+                  type: boolean
+                  description: Whether ip_address is a range (true) or single IP (false)
+                  default: false
+                  example: false
                 device_type_id:
                   type: string
                   format: uuid
+                  description: UUID of the device type
+                  example: "5b882cc2-8d95-497f-a2f8-8fb9917d16bf"
                 credential_profile_ids:
                   type: array
+                  description: Array of credential profile UUIDs (1-10 credentials for brute-force testing)
+                  minItems: 1
+                  maxItems: 10
                   items:
                     type: string
                     format: uuid
+                  example: ["04ecd98c-ded2-44db-b269-00d4e88bf956", "23521ed8-cfe2-458a-9a57-b4c17e3ff091"]
+                protocol:
+                  type: string
+                  description: Protocol to use for discovery
+                  maxLength: 50
+                  example: "ssh"
                 port:
                   type: integer
+                  description: Port number (1-65535)
+                  minimum: 1
+                  maximum: 65535
+                  example: 22
       responses:
         '200':
           description: Discovery profile created successfully
@@ -461,8 +519,8 @@ paths:
     post:
       tags:
         - Discovery Operations
-      summary: Test discovery
-      description: Execute device discovery using GoEngine (single IP or IP range)
+      summary: Test discovery from profile
+      description: Execute device discovery using a saved discovery profile. The profile contains all necessary configuration (IP targets, credentials, device type, ports, timeouts).
       requestBody:
         required: true
         content:
@@ -470,26 +528,16 @@ paths:
             schema:
               type: object
               required:
-                - discovery_profile_id
-                - ip_address
-                - is_range
+                - profile_id
               properties:
-                discovery_profile_id:
+                profile_id:
                   type: string
                   format: uuid
-                  description: Discovery profile to use
-                ip_address:
-                  type: string
-                  description: Single IP or start of IP range
-                is_range:
-                  type: boolean
-                  description: Whether this is an IP range discovery
-                end_ip_address:
-                  type: string
-                  description: End IP for range discovery (required if is_range=true)
+                  description: UUID of the discovery profile to execute
+                  example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
       responses:
         '200':
-          description: Discovery completed
+          description: Discovery test completed successfully
           content:
             application/json:
               schema:
@@ -497,21 +545,96 @@ paths:
                 properties:
                   success:
                     type: boolean
-                  results:
+                    example: true
+                  profile_id:
+                    type: string
+                    format: uuid
+                    description: Discovery profile ID
+                  discovery_name:
+                    type: string
+                    description: Name of the discovery profile
+                  total_targets:
+                    type: integer
+                    description: Total number of IP targets tested
+                    example: 10
+                  devices_discovered:
+                    type: integer
+                    description: Number of new devices discovered and created
+                    example: 7
+                  devices_failed:
+                    type: integer
+                    description: Number of devices that failed discovery
+                    example: 2
+                  devices_existing:
+                    type: integer
+                    description: Number of devices that already exist in database
+                    example: 1
+                  discovered_devices:
                     type: array
+                    description: Array of newly discovered devices
+                    items:
+                      type: object
+                      properties:
+                        device_id:
+                          type: string
+                          format: uuid
+                        ip_address:
+                          type: string
+                        hostname:
+                          type: string
+                        device_type:
+                          type: string
+                  failed_devices:
+                    type: array
+                    description: Array of devices that failed discovery
                     items:
                       type: object
                       properties:
                         ip_address:
                           type: string
-                        status:
+                        error:
                           type: string
-                          enum: [success, failed]
+                  existing_devices:
+                    type: array
+                    description: Array of devices that already exist
+                    items:
+                      type: object
+                      properties:
                         device_id:
                           type: string
                           format: uuid
-                        message:
+                        ip_address:
                           type: string
+                  message:
+                    type: string
+                    description: Summary message
+                    example: "Test discovery completed: 7 discovered, 2 failed, 1 existing"
+        '400':
+          description: Invalid request (missing profile_id)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Missing required field: profile_id"
+        '500':
+          description: Discovery execution failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Failed to execute test discovery"
 
   /api/devices/discovered:
     get:
@@ -606,26 +729,51 @@ paths:
           application/json:
             schema:
               type: object
+              description: At least one field must be provided
               properties:
                 device_name:
                   type: string
+                  description: Name of the device
+                  example: "Core Router 1"
                 port:
                   type: integer
+                  description: Port number (1-65535)
+                  minimum: 1
+                  maximum: 65535
+                  example: 22
                 polling_interval_seconds:
                   type: integer
+                  description: Polling interval in seconds (60-86400)
+                  minimum: 60
+                  maximum: 86400
+                  example: 300
                 timeout_seconds:
                   type: integer
-                retry_count:
-                  type: integer
+                  description: Timeout in seconds (0-600)
+                  minimum: 0
+                  maximum: 600
+                  example: 30
                 alert_threshold_cpu:
                   type: number
                   format: float
+                  description: CPU usage alert threshold percentage (0-100)
+                  minimum: 0
+                  maximum: 100
+                  example: 80.0
                 alert_threshold_memory:
                   type: number
                   format: float
+                  description: Memory usage alert threshold percentage (0-100)
+                  minimum: 0
+                  maximum: 100
+                  example: 85.0
                 alert_threshold_disk:
                   type: number
                   format: float
+                  description: Disk usage alert threshold percentage (0-100)
+                  minimum: 0
+                  maximum: 100
+                  example: 90.0
       responses:
         '200':
           description: Device configuration updated successfully

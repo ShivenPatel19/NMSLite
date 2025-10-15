@@ -12,7 +12,10 @@
 
 package com.nmslite.verticles;
 
+import com.nmslite.Bootstrap;
+
 import com.nmslite.core.NetworkConnectivity;
+
 import com.nmslite.models.PollingDevice;
 
 import com.nmslite.models.PollingResult;
@@ -100,6 +103,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
     // Key: device_id, Value: PollingDevice (persistent data + runtime state)
     private HashMap<String, PollingDevice> deviceCache;
 
+    // File write synchronization lock to prevent concurrent writes to failure log
+    private final Object fileWriteLock = new Object();
+
     /**
      * Start the verticle: load configuration, initialize service proxies, load devices into cache, and start polling.
      *
@@ -113,24 +119,37 @@ public class PollingMetricsVerticle extends AbstractVerticle
             logger.info("Starting PollingMetricsVerticle");
 
             // Load configuration from tools and polling sections
-            var toolsConfig = config().getJsonObject("tools", new JsonObject());
+            var toolsConfig = Bootstrap.getConfig().getJsonObject("tools", new JsonObject());
 
-            var pollingConfig = config().getJsonObject("polling", new JsonObject());
+            var pollingConfig = Bootstrap.getConfig().getJsonObject("polling", new JsonObject());
 
-            goEnginePath = toolsConfig.getString("goengine.path", "./goengine/goengine");
+            // HOCON parses dotted keys as nested objects: goengine.path becomes goengine -> path
+            goEnginePath = toolsConfig.getJsonObject("goengine", new JsonObject())
+                    .getString("path", "./goengine/goengine");
 
-            // Load polling configuration
-            cycleIntervalSeconds = pollingConfig.getInteger("cycle.interval.seconds", 60);
+            // Load polling configuration - HOCON parses dotted keys as nested objects
+            cycleIntervalSeconds = pollingConfig.getJsonObject("cycle", new JsonObject())
+                    .getJsonObject("interval", new JsonObject())
+                    .getInteger("seconds", 60);
 
-            batchSize = pollingConfig.getInteger("batch.size", 50);
+            batchSize = pollingConfig.getJsonObject("batch", new JsonObject())
+                    .getInteger("size", 50);
 
-            maxCyclesSkipped = pollingConfig.getInteger("max.cycles.skipped", 5);
+            maxCyclesSkipped = pollingConfig.getJsonObject("max", new JsonObject())
+                    .getJsonObject("cycles", new JsonObject())
+                    .getInteger("skipped", 5);
 
-            failureLogPath = pollingConfig.getString("failure.log.path", "polling_failed/metrics_polling_failed.txt");
+            failureLogPath = pollingConfig.getJsonObject("failure", new JsonObject())
+                    .getJsonObject("log", new JsonObject())
+                    .getString("path", "polling_failed/metrics_polling_failed.txt");
 
-            blockingTimeoutGoEngine = pollingConfig.getInteger("blocking.timeout.goengine", 330);
+            blockingTimeoutGoEngine = pollingConfig.getJsonObject("blocking", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("goengine", 330);
 
-            defaultConnectionTimeoutSeconds = pollingConfig.getInteger("connection.timeout.seconds", 10);
+            defaultConnectionTimeoutSeconds = pollingConfig.getJsonObject("connection", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("seconds", 10);
 
             // Initialize service proxies
             initializeServiceProxies();
@@ -406,6 +425,24 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                 onDeviceConfigUpdated(deviceId);
             });
+
+            vertx.eventBus().consumer("device.deleted", msg ->
+            {
+                var data = (JsonObject) msg.body();
+
+                var deviceId = data.getString("device_id");
+
+                onDeviceDeleted(deviceId);
+            });
+
+            vertx.eventBus().consumer("device.restored", msg ->
+            {
+                var data = (JsonObject) msg.body();
+
+                var deviceId = data.getString("device_id");
+
+                onDeviceRestored(deviceId);
+            });
         }
         catch (Exception exception)
         {
@@ -533,10 +570,107 @@ public class PollingMetricsVerticle extends AbstractVerticle
         }
     }
 
+    /**
+     * Handle device deleted event.
+     * Remove device from cache, delete all metrics, and reset availability to 0/unknown.
+     *
+     * @param deviceId Device ID that was deleted
+     */
+    private void onDeviceDeleted(String deviceId)
+    {
+        try
+        {
+            logger.debug("Device deleted event: {}", deviceId);
+
+            // Step 1: Remove from cache
+            var removed = deviceCache.remove(deviceId);
+
+            if (removed != null)
+            {
+                logger.info("Device cache updated: {} removed due to deletion (total cached: {})",
+                    removed.deviceName, deviceCache.size());
+            }
+
+            // Step 2: Delete all metrics for this device
+            metricsService.metricsDeleteAllByDevice(deviceId)
+                .onSuccess(result ->
+                    logger.info("Deleted all metrics for device: {}", deviceId))
+                .onFailure(cause ->
+                    logger.error("Failed to delete metrics for device {}: {}", deviceId, cause.getMessage()));
+
+            // Step 3: Reset availability to 0% and unknown (keep row for future polling)
+            availabilityService.availabilityResetDevice(deviceId)
+                .onSuccess(result ->
+                    logger.info("Reset availability to 0%/unknown for device: {}", deviceId))
+                .onFailure(cause ->
+                    logger.error("Failed to reset availability for device {}: {}", deviceId, cause.getMessage()));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in onDeviceDeleted: {}", exception.getMessage());
+        }
+    }
+
+    /**
+     * Handle device restored event.
+     * Add device back to cache if monitoring is enabled.
+     *
+     * @param deviceId Device ID that was restored
+     */
+    private void onDeviceRestored(String deviceId)
+    {
+        try
+        {
+            logger.debug("Device restored event: {}", deviceId);
+
+            // Fetch device and add to cache only if monitoring is enabled
+            deviceService.deviceGetById(deviceId)
+                .onSuccess(deviceData ->
+                {
+                    try
+                    {
+                        var isMonitoringEnabled = deviceData.getBoolean("is_monitoring_enabled", false);
+
+                        if (!isMonitoringEnabled)
+                        {
+                            logger.debug("Device {} restored but monitoring not enabled, skipping cache add", deviceId);
+
+                            return;
+                        }
+
+                        var pd = createPollingDeviceFromJson(deviceData);
+
+                        if (pd != null)
+                        {
+                            deviceCache.put(pd.deviceId, pd);
+
+                            logger.info("Device cache updated: {} restored and added (total cached: {})",
+                                pd.deviceName, deviceCache.size());
+                        }
+                        else
+                        {
+                            logger.error("Failed to create PollingDevice from JSON for restored device {}", deviceId);
+                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.error("Failed to add restored device {} to cache: {}", deviceId, exception.getMessage());
+                    }
+                })
+                .onFailure(cause ->
+                    logger.error("Failed to fetch restored device {} for cache: {}", deviceId, cause.getMessage()));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in onDeviceRestored: {}", exception.getMessage());
+        }
+    }
+
     private void startPeriodicPolling()
     {
         try
         {
+            // Schedule periodic execution every cycleIntervalSeconds
             pollingTimerId = vertx.setPeriodic(cycleIntervalSeconds * 1000L, timerId -> executePollingCycle());
 
             logger.info("Periodic polling started with {} second interval", cycleIntervalSeconds);
@@ -711,7 +845,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                 var unreachableDevices = connectivityResults.getJsonArray("unreachable");
 
-                logger.debug("Connectivity check: {}/{} devices reachable", reachableDevices.size(), batch.size());
+                var reachableCount = reachableDevices.size();
+
+                var unreachableCount = unreachableDevices.size();
+
+                var batchSize = batch.size();
+
+                logger.info("Connectivity check: {}/{} devices reachable, {}/{} unreachable",
+                    reachableCount, batchSize, unreachableCount, batchSize);
 
                 // Step 2: Mark unreachable devices as CONNECTIVITY_FAILED
                 // Note: This loop runs on event loop but is fast (O(n) with O(1) HashMap lookups)
@@ -851,6 +992,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
     {
         Map<String, Boolean> results = new HashMap<>();
 
+        var deviceCount = devices.size();
+
         // Initialize all devices as failed (will be updated on success)
         for (PollingDevice pd : devices)
         {
@@ -872,12 +1015,13 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 devicesArray.add(pd.toGoEngineJson());
             }
 
-            // Execute GoEngine with batch input
-            var pb = new ProcessBuilder(
-                goEnginePath,
-                "--mode", "metrics",
-                "--devices", devicesArray.encode()
-            );
+            // Execute GoEngine - only mode flag, data passed via stdin
+            // Use absolute path for binary, set working directory for config file
+            var goEngineBinary = new File(goEnginePath).getAbsolutePath();
+
+            var pb = new ProcessBuilder(goEngineBinary, "--mode", "metrics");
+
+            pb.directory(new File("./goengine"));
 
             var process = pb.start();
 
@@ -889,9 +1033,23 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 devicesByIp.put(pd.address, pd);
             }
 
-            // Read streaming output line by line and process results as they arrive
             var errorOutput = new StringBuilder();
 
+            // Write devices array to stdin
+            try (var writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream())))
+            {
+                writer.write(devicesArray.encode());
+
+                writer.flush();
+            }
+            catch (Exception exception)
+            {
+                logger.error("Failed to write devices array to GoEngine stdin: {}", exception.getMessage());
+            }
+
+            var successCount = 0;
+
+            // Read streaming output line by line and process results as they arrive
             try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                  var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
             {
@@ -904,12 +1062,38 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         // Parse JSON result for this device
                         var result = new JsonObject(line);
 
-                        var deviceAddress = result.getString("device_address");
+                        // Extract device address from nested device_info object
+                        var deviceInfo = result.getJsonObject("device_info");
 
-                        var success = result.getBoolean("success", false);
+                        if (deviceInfo == null)
+                        {
+                            logger.error("GoEngine result missing device_info: {}", line);
+
+                            continue;
+                        }
+
+                        var deviceAddress = deviceInfo.getString("address");
+
+                        if (deviceAddress == null)
+                        {
+                            logger.error("GoEngine result missing device address: {}", line);
+
+                            continue;
+                        }
 
                         // Find the device by IP address
                         var pd = devicesByIp.get(deviceAddress);
+
+                        if (pd == null)
+                        {
+                            logger.error("No matching device found for address {}", deviceAddress);
+
+                            continue;
+                        }
+
+                        // Check if metrics collection was successful (no error field present)
+                        // GoEngine returns "error" field only when collection fails
+                        var success = !result.containsKey("error");
 
                         if (success)
                         {
@@ -919,6 +1103,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
                             updateDeviceAvailability(pd.deviceId, true);
 
                             results.put(pd.deviceId, true);
+
+                            successCount++;
                         }
                         else
                         {
@@ -967,8 +1153,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 }
             }
 
-            logger.info("Batch poll completed: {}/{} devices successful",
-                results.values().stream().filter(v -> v).count(), devices.size());
+            // Log with pre-calculated count (no stream operations on event loop)
+            logger.info("Batch poll completed: {}/{} devices successful", successCount, deviceCount);
 
         }
         catch (Exception exception)
@@ -1046,56 +1232,78 @@ public class PollingMetricsVerticle extends AbstractVerticle
     /**
      * Phase 3: Log Exhausted Failures
 
-     * Log devices that failed after exhausting all retries to file.
+     * Log devices that reached max consecutive failures (about to be auto-disabled) to file.
+     * Scans entire cache for devices where consecutiveFailures == maxCyclesSkipped (one-time logging).
      *
-     * @param exhaustedDevices Devices that failed after all retries
+     * @param exhaustedDevices Devices that failed after all retries (unused, kept for chain compatibility)
      * @return Future<Void>
      */
     private Future<Void> executeLogFailures(List<PollingDevice> exhaustedDevices)
     {
         var promise = Promise.<Void>promise();
 
-        if (exhaustedDevices.isEmpty())
-        {
-            logger.info("Phase 3: No exhausted failures to log");
-
-            promise.complete();
-
-            return promise.future();
-        }
-
-        logger.info("Phase 3: Logging {} exhausted failures to {}", exhaustedDevices.size(), failureLogPath);
-
+        // Scan entire cache for devices that JUST reached max failures (one-time logging)
+        // Use executeBlocking to avoid blocking event loop with cache iteration
         vertx.executeBlocking(() ->
+                        deviceCache.values().stream()
+                            .filter(pd -> pd.consecutiveFailures == maxCyclesSkipped)
+                            .collect(Collectors.toList()))
+        .compose(devicesToLog ->
         {
-            var logFile = new File(failureLogPath);
-
-            logFile.getParentFile().mkdirs(); // Create directory if needed
-
-            try (var fw = new FileWriter(logFile, true);
-                 var bw = new BufferedWriter(fw);
-                 var out = new PrintWriter(bw))
+            if (devicesToLog.isEmpty())
             {
-                // Human-readable timestamp: "2025-10-11 11:30:45"
-                var formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+                logger.info("Phase 3: No devices reached max failures threshold ({}), skipping log", maxCyclesSkipped);
 
-                var timestamp = LocalDateTime.now().format(formatter);
-
-                for (var pd : exhaustedDevices)
-                {
-                    var logEntry = String.format("%s | %s | %s | %s | failures=%d",
-                        timestamp, pd.deviceId, pd.deviceName, pd.address, pd.consecutiveFailures);
-
-                    out.println(logEntry);
-                }
+                return Future.succeededFuture(0);
             }
 
-            return null;
+            logger.info("Phase 3: Logging {} devices that reached max failures ({}) to {}",
+                devicesToLog.size(), maxCyclesSkipped, failureLogPath);
 
-        }, false)
-        .onSuccess(result ->
+            return vertx.executeBlocking(() ->
+            {
+                // Synchronize file writes to prevent concurrent access from multiple polling cycles
+                synchronized (fileWriteLock)
+                {
+                    try
+                    {
+                        var logFile = new File(failureLogPath);
+
+                        logFile.getParentFile().mkdirs(); // Create directory if needed
+
+                        try (var fw = new FileWriter(logFile, true);
+                             var bw = new BufferedWriter(fw);
+                             var out = new PrintWriter(bw))
+                        {
+                            // Human-readable timestamp: "2025-10-11 11:30:45"
+                            var formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+                            var timestamp = LocalDateTime.now().format(formatter);
+
+                            for (var pd : devicesToLog)
+                            {
+                                var logEntry = String.format("%s | %s | %s | %s",
+                                    timestamp, pd.deviceId, pd.deviceName, pd.address);
+
+                                out.println(logEntry);
+                            }
+                        }
+
+                        return devicesToLog.size();
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.error("Error writing failure log: {}", exception.getMessage());
+
+                        throw exception;
+                    }
+                }
+
+            }, false);
+        })
+        .onSuccess(count ->
         {
-            logger.info("Phase 3 completed: {} failures logged", exhaustedDevices.size());
+            logger.info("Phase 3 completed: {} devices logged to failure file", count);
 
             promise.complete();
         })
@@ -1270,7 +1478,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         var ipList = devices.stream().map(pd -> pd.address).collect(Collectors.toList());
 
         // Step 1: Batch fping check (single fping process for all IPs) - wrapped in executeBlocking
-        return vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList, config()))
+        return vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList, Bootstrap.getConfig()))
             .compose(fpingResults ->
             {
                 // Filter IPs that successfully passed fping
@@ -1305,7 +1513,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                             continue;
                         }
 
-                        var portOpen = NetworkConnectivity.portCheck(pd.address, pd.port, config());
+                        var portOpen = NetworkConnectivity.portCheck(pd.address, pd.port, Bootstrap.getConfig());
 
                         portCheckResults.add(new JsonObject()
                             .put("device_id", pd.deviceId)

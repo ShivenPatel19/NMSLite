@@ -69,13 +69,23 @@ public class NetworkConnectivity
                 return results;
             }
 
-            var fpingPath = config.getString("tools.fping.path", "fping");
+            // HOCON parses dotted keys as nested objects: tools.fping.path becomes tools -> fping -> path
+            var fpingPath = config.getJsonObject("tools", new JsonObject())
+                    .getJsonObject("fping", new JsonObject())
+                    .getString("path", "fping");
 
             // Level 2: Per-IP timeout (fping -t parameter)
-            var perIpTimeoutSeconds = config.getInteger("tools.fping.timeout.seconds", 5);
+            var perIpTimeoutSeconds = config.getJsonObject("tools", new JsonObject())
+                    .getJsonObject("fping", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("seconds", 5);
 
             // Level 1: Batch operation timeout (process.waitFor)
-            var batchTimeoutSeconds = config.getInteger("fping.batch.blocking.timeout.seconds", 180);
+            var batchTimeoutSeconds = config.getJsonObject("fping", new JsonObject())
+                    .getJsonObject("batch", new JsonObject())
+                    .getJsonObject("blocking", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("seconds", 180);
 
             // fping batch mode: -a (show alive), -q (quiet), -t (timeout in ms)
             var pb = new ProcessBuilder(
@@ -91,7 +101,7 @@ public class NetworkConnectivity
                 {
                     writer.write(ip + "\n");
 
-                    results.put(ip, false); // Default to unreachable
+                    results.put(ip, false); // Default to unreachable, then update to alive if reachable
                 }
             } // Writer closed here, signals EOF to fping
 
@@ -120,7 +130,7 @@ public class NetworkConnectivity
 
                     if (results.containsKey(aliveIp))
                     {
-                        results.put(aliveIp, true);
+                        results.put(aliveIp, true);  // Update to reachable
 
                         reachableCount++;
                     }
@@ -156,7 +166,12 @@ public class NetworkConnectivity
     {
         try
         {
-            var perSocketTimeoutSeconds = config.getInteger("tools.port.check.timeout.seconds", 5);
+            // HOCON parses dotted keys as nested objects: tools.port.check.timeout.seconds
+            var perSocketTimeoutSeconds = config.getJsonObject("tools", new JsonObject())
+                    .getJsonObject("port", new JsonObject())
+                    .getJsonObject("check", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("seconds", 5);
 
             try (var socket = new Socket())
             {
@@ -169,7 +184,7 @@ public class NetworkConnectivity
         }
         catch (Exception exception)
         {
-            logger.error("Error in portCheck: {}", exception.getMessage());
+            logger.debug("Port {} not reachable on {}: {}", port, ipAddress, exception.getMessage());
 
             return false;
         }
@@ -180,6 +195,7 @@ public class NetworkConnectivity
 
      * Uses Java parallel streams to check multiple ports concurrently.
      * Much faster than sequential port checks.
+     * Internally calls portCheck() for each IP to avoid code duplication.
 
      * 2-Level Timeout Hierarchy:
      * - Level 2: Per-socket timeout (tools.port.check.timeout.seconds)
@@ -201,30 +217,14 @@ public class NetworkConnectivity
                 return new HashMap<>();
             }
 
-            // Level 2: Per-socket timeout (TCP connection timeout)
-            var perSocketTimeoutSeconds = config.getInteger("tools.port.check.timeout.seconds", 5);
-
             // Use ConcurrentHashMap for thread-safe parallel access
             var results = new ConcurrentHashMap<String, Boolean>();
 
             // Use parallel stream for concurrent port checks
+            // Reuses portCheck() method to avoid code duplication
             ipAddresses.parallelStream().forEach(ip ->
             {
-                var portOpen = false;
-
-                try (var socket = new Socket())
-                {
-                    socket.connect(new InetSocketAddress(ip, port), perSocketTimeoutSeconds * 1000);
-
-                    portOpen = true;
-
-                    logger.debug("Port {} open on {}", port, ip);
-                }
-                catch (Exception exception)
-                {
-                    // Port not reachable (timeout, connection refused, etc.)
-                    logger.debug("Port {} not reachable on {}: {}", port, ip, exception.getMessage());
-                }
+                var portOpen = portCheck(ip, port, config);
 
                 // ConcurrentHashMap.put() is thread-safe, no synchronization needed
                 results.put(ip, portOpen);

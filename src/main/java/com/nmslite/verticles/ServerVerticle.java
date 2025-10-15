@@ -1,5 +1,7 @@
 package com.nmslite.verticles;
 
+import com.nmslite.Bootstrap;
+
 import com.nmslite.handlers.*;
 
 import com.nmslite.middleware.AuthenticationMiddleware;
@@ -94,7 +96,9 @@ public class ServerVerticle extends AbstractVerticle
         {
             logger.info("Starting ServerVerticle");
 
-            httpPort = config().getInteger("http.port", 8080);
+            httpPort = Bootstrap.getConfig().getJsonObject("server", new JsonObject())
+                .getJsonObject("http", new JsonObject())
+                .getInteger("port", 8080);
 
             // Initialize all service proxies
             initializeServiceProxies();

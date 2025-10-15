@@ -26,6 +26,7 @@ import io.vertx.core.Promise;
 
 import io.vertx.core.WorkerExecutor;
 
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 
 import org.slf4j.Logger;
@@ -71,6 +72,8 @@ public class Bootstrap
 
     private static final List<String> deployedVerticleIds = new ArrayList<>();
 
+    private static JsonObject applicationConfig;
+
     /**
      * Gets the shared Vertx instance.
      * This method provides global access to the Vertx instance from anywhere in the application.
@@ -80,6 +83,17 @@ public class Bootstrap
     public static Vertx getVertxInstance()
     {
             return vertx;
+    }
+
+    /**
+     * Gets the application configuration.
+     * This method provides global access to the configuration from anywhere in the application.
+     *
+     * @return The application configuration JsonObject, or null if not yet loaded
+     */
+    public static JsonObject getConfig()
+    {
+            return applicationConfig;
     }
 
     /**
@@ -268,11 +282,15 @@ public class Bootstrap
 
             var logLevel = loggingConfig.getString("level", "INFO");
 
-            var fileEnabled = loggingConfig.getBoolean("file.enabled", true);
+            // HOCON parses dotted keys as nested objects: file.enabled becomes file -> enabled
+            var fileEnabled = loggingConfig.getJsonObject("file", new JsonObject())
+                    .getBoolean("enabled", true);
 
-            var consoleEnabled = loggingConfig.getBoolean("console.enabled", true);
+            var consoleEnabled = loggingConfig.getJsonObject("console", new JsonObject())
+                    .getBoolean("enabled", true);
 
-            var filePath = loggingConfig.getString("file.path", "logs/nmslite.log");
+            var filePath = loggingConfig.getJsonObject("file", new JsonObject())
+                    .getString("path", "logs/nmslite.log");
 
             // Set system properties for logback.xml
             System.setProperty("nmslite.log.level", loggingEnabled ? logLevel : "OFF");
@@ -416,7 +434,10 @@ public class Bootstrap
         try
         {
             // Get worker pool configuration from config or use defaults
-            var workerPoolSize = config.getInteger("worker.pool.size", 10);
+            // HOCON parses dotted keys as nested objects: worker.pool.size becomes worker -> pool -> size
+            var workerPoolSize = config.getJsonObject("worker", new JsonObject())
+                    .getJsonObject("pool", new JsonObject())
+                    .getInteger("size", 10);
 
             // Create shared worker executor for all blocking operations
             workerExecutor = vertx.createSharedWorkerExecutor("nmslite-worker", workerPoolSize);
@@ -453,11 +474,34 @@ public class Bootstrap
             retriever.getConfig()
                 .onSuccess(config ->
                 {
+                    // Store config in static field for global access via getConfig()
+                    applicationConfig = config;
+
                     var dbConfig = config.getJsonObject("database");
 
                     var serverConfig = config.getJsonObject("server");
 
                     var toolsConfig = config.getJsonObject("tools");
+
+                    var deviceConfig = config.getJsonObject("device", new JsonObject())
+                            .getJsonObject("defaults", new JsonObject());
+
+                    // HOCON parses dotted keys as nested objects, so we need to navigate the hierarchy
+                    var pollingInterval = deviceConfig.getJsonObject("polling", new JsonObject())
+                            .getJsonObject("interval", new JsonObject())
+                            .getInteger("seconds", 300);
+
+                    var cpuThreshold = deviceConfig.getJsonObject("alert", new JsonObject())
+                            .getJsonObject("threshold", new JsonObject())
+                            .getDouble("cpu", 80.0);
+
+                    var memoryThreshold = deviceConfig.getJsonObject("alert", new JsonObject())
+                            .getJsonObject("threshold", new JsonObject())
+                            .getDouble("memory", 85.0);
+
+                    var diskThreshold = deviceConfig.getJsonObject("alert", new JsonObject())
+                            .getJsonObject("threshold", new JsonObject())
+                            .getDouble("disk", 90.0);
 
                     logger.info("Configuration loaded - Database: {}:{}/{}, HTTP Port: {}, GoEngine: {}",
                         dbConfig.getString("host"),
@@ -465,6 +509,12 @@ public class Bootstrap
                         dbConfig.getString("database"),
                         serverConfig.getJsonObject("http").getInteger("port"),
                         toolsConfig.getJsonObject("goengine").getString("path"));
+
+                    logger.info("Device defaults - Polling Interval: {} seconds, CPU Threshold: {}%, Memory Threshold: {}%, Disk Threshold: {}%",
+                        pollingInterval,
+                        cpuThreshold,
+                        memoryThreshold,
+                        diskThreshold);
 
                     promise.complete(config);
                 })

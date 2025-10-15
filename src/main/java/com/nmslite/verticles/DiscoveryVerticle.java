@@ -1,5 +1,6 @@
 package com.nmslite.verticles;
 
+import com.nmslite.Bootstrap;
 import com.nmslite.core.NetworkConnectivity;
 
 import com.nmslite.services.DeviceService;
@@ -28,7 +29,13 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 
+import java.io.BufferedWriter;
+
 import java.io.InputStreamReader;
+
+import java.io.OutputStreamWriter;
+
+import java.io.File;
 
 import java.util.*;
 
@@ -82,22 +89,30 @@ public class DiscoveryVerticle extends AbstractVerticle
             logger.info("Starting DiscoveryVerticle");
 
             // Load configuration from tools and discovery sections
-            var toolsConfig = config().getJsonObject("tools", new JsonObject());
+            var toolsConfig = Bootstrap.getConfig().getJsonObject("tools", new JsonObject());
 
-            var discoveryConfig = config().getJsonObject("discovery", new JsonObject());
+            var discoveryConfig = Bootstrap.getConfig().getJsonObject("discovery", new JsonObject());
 
             var goEngineConfig = discoveryConfig.getJsonObject("goengine", new JsonObject());
 
-            goEnginePath = toolsConfig.getString("goengine.path", "./goengine/goengine");
+            // HOCON parses dotted keys as nested objects: goengine.path becomes goengine -> path
+            goEnginePath = toolsConfig.getJsonObject("goengine", new JsonObject())
+                    .getString("path", "./goengine/goengine");
 
-            // GoEngine configuration parameters
-            timeoutSeconds = goEngineConfig.getInteger("timeout.seconds", 30);
+            // GoEngine configuration parameters - HOCON parses dotted keys as nested objects
+            timeoutSeconds = goEngineConfig.getJsonObject("timeout", new JsonObject())
+                    .getInteger("seconds", 30);
 
-            connectionTimeoutSeconds = goEngineConfig.getInteger("connection.timeout.seconds", 10);
+            connectionTimeoutSeconds = goEngineConfig.getJsonObject("connection", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("seconds", 10);
 
-            discoveryBatchSize = discoveryConfig.getInteger("batch.size", 100);
+            discoveryBatchSize = discoveryConfig.getJsonObject("batch", new JsonObject())
+                    .getInteger("size", 100);
 
-            blockingTimeoutGoEngine = discoveryConfig.getInteger("blocking.timeout.goengine", 120);
+            blockingTimeoutGoEngine = discoveryConfig.getJsonObject("blocking", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("goengine", 120);
 
             // Initialize service proxies
             this.deviceService = DeviceService.createProxy();
@@ -452,12 +467,12 @@ public class DiscoveryVerticle extends AbstractVerticle
 
                         if (isDeleted)
                         {
-                            // isDeleted = true, create a new entry for the same IP as old same IP is soft deleted
+                            // isDeleted = true, device was soft deleted - user must restore it
                             status = "soft_deleted";
 
-                            message = "Device was soft deleted, proceeding with new discovery";
+                            message = "Device was previously deleted. Please restore it using the restore API instead of rediscovering";
 
-                            proceedWithDiscovery = true;
+                            proceedWithDiscovery = false;
                         }
                         else if (!isProvisioned && !isMonitoring)
                         {
@@ -465,6 +480,8 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "available_for_provision";
 
                             message = "Device already exists and is available for provision";
+
+                            proceedWithDiscovery = false;
                         }
                         else if (isProvisioned && isMonitoring)
                         {
@@ -472,6 +489,8 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "being_monitored";
 
                             message = "Device already available and is being monitored";
+
+                            proceedWithDiscovery = false;
                         }
                         else if (isProvisioned && !isMonitoring)
                         {
@@ -479,12 +498,16 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "monitoring_disabled";
 
                             message = "Device already available, and monitoring is disabled";
+
+                            proceedWithDiscovery = false;
                         }
                         else
                         {
                             status = "unknown_state";
 
                             message = "Device in unknown state";
+
+                            proceedWithDiscovery = false;
                         }
 
                         devicePromise.complete(new JsonObject()
@@ -780,7 +803,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             var port = profileData.getInteger("port", 22);
 
             // Step 1: Batch fping check (single fping process for all IPs) - wrapped in executeBlocking
-            vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList, config()))
+            vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList, Bootstrap.getConfig()))
                 .compose(fpingResults ->
                 {
                     // Filter IPs that passed fping
@@ -804,7 +827,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                     }
 
                     // Step 2: Batch port check (parallel checks for alive IPs only) - wrapped in executeBlocking
-                    return vertx.executeBlocking(() -> NetworkConnectivity.batchPortCheck(pingAliveIps, port, config()))
+                    return vertx.executeBlocking(() -> NetworkConnectivity.batchPortCheck(pingAliveIps, port, Bootstrap.getConfig()))
                         .map(portResults ->
                         {
                             var reachableIPs = new JsonArray();
@@ -860,93 +883,125 @@ public class DiscoveryVerticle extends AbstractVerticle
         try
         {
             vertx.executeBlocking(() ->
-        {
-            // Create GoEngine discovery request (--targets) format for reachable IPs only
-            var discoveryRequest = createDiscoveryRequest(profileData, reachableIPs);
-
-            // Prepare GoEngine command
-            var command = Arrays.asList(
-                goEnginePath,
-                "--mode", "discovery",
-                "--targets", discoveryRequest.encode()
-            );
-
-            var pb = new ProcessBuilder(command);
-
-            var process = pb.start();
-
-            var results = new JsonArray();
-
-            // Read results from stdout line by line
-            try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
-            {
-                String line;
-
-                while ((line = reader.readLine()) != null)
-                {
-                    try
                     {
-                        var result = new JsonObject(line);
+                        // Create GoEngine discovery request format for reachable IPs only
+                        var discoveryRequest = createDiscoveryRequest(profileData, reachableIPs);
 
-                        if (result.containsKey("ip_address"))
-                        {  // uses ip_address instead of device_address
-                            results.add(result);
+                        // Prepare GoEngine command - only mode flag, data passed via stdin
+                        // Use absolute path for binary, set working directory for config file
+                        var goEngineBinary = new File(goEnginePath).getAbsolutePath();
+
+                        var pb = new ProcessBuilder(goEngineBinary, "--mode", "discovery");
+
+                        pb.directory(new File("./goengine"));
+
+                        var process = pb.start();
+
+                        var results = new JsonArray();
+
+                        var errorOutput = new StringBuilder();
+
+                        // Write discovery request to stdin
+                        try (var writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream())))
+                        {
+                            writer.write(discoveryRequest.encode());
+
+                            writer.flush();
                         }
-                    }
-                    catch (Exception exception)
-                    {
-                        logger.warn("Failed to parse GoEngine result line: {}", line);
-                    }
-                }
-            }
+                        catch (Exception exception)
+                        {
+                            logger.error("Failed to write discovery request to GoEngine stdin: {}", exception.getMessage());
+                        }
 
-            // Process timeout handled by Vert.x blocking timeout (blockingTimeoutGoEngine)
-            var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
+                        // Read results from stdout and stderr simultaneously
+                        try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                             var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
+                        {
+                            String line;
 
-            if (!finished)
-            {
-                process.destroyForcibly();
+                            while ((line = reader.readLine()) != null)
+                            {
+                                try
+                                {
+                                    var result = new JsonObject(line);
 
-                throw new Exception("GoEngine discovery process timed out after " + blockingTimeoutGoEngine + " seconds");
-            }
+                                    if (result.containsKey("ip_address"))
+                                    {  // uses ip_address instead of device_address
+                                        results.add(result);
+                                    }
+                                }
+                                catch (Exception exception)
+                                {
+                                    logger.warn("Failed to parse GoEngine result line: {}", line);
+                                }
+                            }
 
-            var exitCode = process.exitValue();
+                            // Read any error output
+                            String errLine;
 
-            logger.debug("GoEngine discovery completed with exit code: {}, {} results", exitCode, results.size());
+                            while ((errLine = errorReader.readLine()) != null)
+                            {
+                                errorOutput.append(errLine).append("\n");
+                            }
+                        }
 
-            // Combine GoEngine results with unreachable IPs
-            var finalResults = new JsonArray();
+                        // Process timeout handled by Vert.x blocking timeout (blockingTimeoutGoEngine)
+                        var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
 
-            // Add GoEngine results
-            for (var obj : results)
-            {
-                finalResults.add(obj);
-            }
+                        if (!finished)
+                        {
+                            process.destroyForcibly();
 
-            // Add failed results for unreachable IPs
-            for (var i = 0; i < unreachableIPs.size(); i++)
-            {
-                var unreachableIP = unreachableIPs.getString(i);
+                            throw new Exception("GoEngine discovery process timed out after " + blockingTimeoutGoEngine + " seconds");
+                        }
 
-                var failedResult = new JsonObject()
-                    .put("ip_address", unreachableIP)
-                    .put("success", false)
-                    .put("error", "Device unreachable - connectivity check failed")
-                    .put("timestamp", System.currentTimeMillis());
+                        var exitCode = process.exitValue();
 
-                finalResults.add(failedResult);
-            }
+                        if (exitCode != 0)
+                        {
+                            logger.warn("GoEngine discovery exited with code: {}", exitCode);
 
-            return finalResults;
+                            if (!errorOutput.isEmpty())
+                            {
+                                logger.warn("GoEngine stderr: {}", errorOutput.toString().trim());
+                            }
+                        }
 
-            }, false)
-            .onSuccess(promise::complete)
-            .onFailure(cause ->
-            {
-                logger.error("GoEngine discovery execution failed: {}", cause.getMessage());
+                        logger.debug("GoEngine discovery completed with exit code: {}, {} results", exitCode, results.size());
 
-                promise.fail(cause);
-            });
+                        // Combine GoEngine results with unreachable IPs
+                        var finalResults = new JsonArray();
+
+                        // Add GoEngine results
+                        for (var obj : results)
+                        {
+                            finalResults.add(obj);
+                        }
+
+                        // Add failed results for unreachable IPs
+                        for (var i = 0; i < unreachableIPs.size(); i++)
+                        {
+                            var unreachableIP = unreachableIPs.getString(i);
+
+                            var failedResult = new JsonObject()
+                                .put("ip_address", unreachableIP)
+                                .put("success", false)
+                                .put("error", "Device unreachable - connectivity check failed")
+                                .put("timestamp", System.currentTimeMillis());
+
+                            finalResults.add(failedResult);
+                        }
+
+                        return finalResults;
+
+                        }, false)
+                        .onSuccess(promise::complete)
+                        .onFailure(cause ->
+                        {
+                            logger.error("GoEngine discovery execution failed: {}", cause.getMessage());
+
+                            promise.fail(cause);
+                        });
         }
         catch (Exception exception)
         {

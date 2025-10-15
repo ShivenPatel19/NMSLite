@@ -57,7 +57,7 @@ public class DeviceServiceImpl implements DeviceService
 
         this.pgPool = pgPool;
 
-        this.config = vertx.getOrCreateContext().config();
+        this.config = Bootstrap.getConfig();
     }
 
     /**
@@ -67,9 +67,12 @@ public class DeviceServiceImpl implements DeviceService
      */
     private double getDefaultCpuThreshold()
     {
+        // HOCON parses dotted keys as nested objects: alert.threshold.cpu becomes alert -> threshold -> cpu
         return config.getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
-                .getDouble("alert.threshold.cpu", 80.0);
+                .getJsonObject("alert", new JsonObject())
+                .getJsonObject("threshold", new JsonObject())
+                .getDouble("cpu", 80.0);
     }
 
     /**
@@ -79,9 +82,12 @@ public class DeviceServiceImpl implements DeviceService
      */
     private double getDefaultMemoryThreshold()
     {
+        // HOCON parses dotted keys as nested objects: alert.threshold.memory becomes alert -> threshold -> memory
         return config.getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
-                .getDouble("alert.threshold.memory", 85.0);
+                .getJsonObject("alert", new JsonObject())
+                .getJsonObject("threshold", new JsonObject())
+                .getDouble("memory", 85.0);
     }
 
     /**
@@ -91,9 +97,12 @@ public class DeviceServiceImpl implements DeviceService
      */
     private double getDefaultDiskThreshold()
     {
+        // HOCON parses dotted keys as nested objects: alert.threshold.disk becomes alert -> threshold -> disk
         return config.getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
-                .getDouble("alert.threshold.disk", 90.0);
+                .getJsonObject("alert", new JsonObject())
+                .getJsonObject("threshold", new JsonObject())
+                .getDouble("disk", 90.0);
     }
 
     /**
@@ -103,9 +112,16 @@ public class DeviceServiceImpl implements DeviceService
      */
     private int getDefaultPollingInterval()
     {
-        return config.getJsonObject("device", new JsonObject())
+        // HOCON parses dotted keys as nested objects: polling.interval.seconds becomes polling -> interval -> seconds
+        var pollingInterval = config.getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
-                .getInteger("polling.interval.seconds", 300);
+                .getJsonObject("polling", new JsonObject())
+                .getJsonObject("interval", new JsonObject())
+                .getInteger("seconds", 300);
+
+        logger.debug("getDefaultPollingInterval() returning: {} seconds (config value or fallback)", pollingInterval);
+
+        return pollingInterval;
     }
 
     /**
@@ -115,11 +131,11 @@ public class DeviceServiceImpl implements DeviceService
      */
     private int getDefaultTimeout()
     {
+        // HOCON parses dotted keys as nested objects: timeout.seconds becomes timeout -> seconds
         return config.getJsonObject("device", new JsonObject())
-
                 .getJsonObject("defaults", new JsonObject())
-
-                .getInteger("timeout.seconds", 60);
+                .getJsonObject("timeout", new JsonObject())
+                .getInteger("seconds", 60);
     }
 
     /**
@@ -241,6 +257,13 @@ public class DeviceServiceImpl implements DeviceService
                                 .put("message", "Device deleted successfully");
 
                         promise.complete(result);
+
+                        // Publish event to notify PollingMetricsVerticle to remove device from cache
+                        // and clean up metrics/availability data
+                        vertx.eventBus().publish("device.deleted", new JsonObject()
+                                .put("device_id", deviceId));
+
+                        logger.debug("Published device.deleted event for device: {}", deviceId);
                     })
                     .onFailure(cause ->
                     {
@@ -299,6 +322,13 @@ public class DeviceServiceImpl implements DeviceService
                                 .put("message", "Device restored successfully");
 
                         promise.complete(result);
+
+                        // Publish event to notify PollingMetricsVerticle to add device back to cache
+                        // (only if monitoring is enabled)
+                        vertx.eventBus().publish("device.restored", new JsonObject()
+                                .put("device_id", deviceId));
+
+                        logger.debug("Published device.restored event for device: {}", deviceId);
                     })
                     .onFailure(cause ->
                     {

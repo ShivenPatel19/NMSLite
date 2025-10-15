@@ -154,10 +154,11 @@ getDiscoveryProfile(profileId)
 
 NMSLite implements **hierarchical timeout strategy** for reliability:
 
-**Discovery Timeouts (3 Levels):**
-1. **Vert.x Batch**: 300s (5 min) - Overall batch operation timeout (`discovery.blocking.timeout.goengine`)
-2. **GoEngine Device**: 60s - Per-device discovery timeout (`discovery.goengine.timeout.seconds`)
-3. **GoEngine Credential**: 20s - Per-credential attempt timeout (`discovery.goengine.connection.timeout.seconds`)
+**Discovery Timeouts (4 Levels):**
+1. **Event Bus**: 300s (5 min) - HTTP request to event bus communication timeout (`discovery.eventbus.timeout.seconds`)
+2. **Vert.x Batch**: 300s (5 min) - Overall batch operation timeout (`discovery.blocking.timeout.goengine`)
+3. **GoEngine Device**: 60s - Per-device discovery timeout (`discovery.goengine.timeout.seconds`)
+4. **GoEngine Credential**: 20s - Per-credential attempt timeout (`discovery.goengine.connection.timeout.seconds`)
 
 **Polling/Metrics Timeouts (3 Levels):**
 1. **Vert.x Batch**: 300s (5 min) - Overall batch operation timeout (`polling.blocking.timeout.goengine`)
@@ -323,6 +324,7 @@ goengine {
 discovery {
   batch.size = 100                         # Max IPs per GoEngine discovery request
   blocking.timeout.goengine = 300          # Vert.x blocking timeout (5 minutes)
+  eventbus.timeout.seconds = 300           # Event bus timeout for test discovery (5 minutes)
 
   goengine {
     timeout.seconds = 60                   # Per-device timeout

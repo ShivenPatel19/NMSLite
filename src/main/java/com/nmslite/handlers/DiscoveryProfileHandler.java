@@ -24,6 +24,8 @@ import io.vertx.core.Handler;
 
 import io.vertx.core.json.JsonObject;
 
+import io.vertx.core.eventbus.DeliveryOptions;
+
 import io.vertx.ext.web.RoutingContext;
 
 import org.slf4j.Logger;
@@ -54,6 +56,8 @@ public class DiscoveryProfileHandler
 
     private final CredentialProfileService credentialService;
 
+    private final int eventBusTimeoutMs;
+
     /**
      * Constructor for DiscoveryProfileHandler.
      *
@@ -69,6 +73,14 @@ public class DiscoveryProfileHandler
         this.deviceTypeService = deviceTypeService;
 
         this.credentialService = credentialService;
+
+        // Load event bus timeout from configuration (default 5 minutes)
+        var discoveryConfig = Bootstrap.getConfig().getJsonObject("discovery", new JsonObject());
+
+        // HOCON parses dotted keys as nested objects: eventbus.timeout.seconds
+        this.eventBusTimeoutMs = discoveryConfig.getJsonObject("eventbus", new JsonObject())
+                .getJsonObject("timeout", new JsonObject())
+                .getInteger("seconds", 300) * 1000;
     }
 
     /**
@@ -322,8 +334,12 @@ public class DiscoveryProfileHandler
 
             var profileId = requestBody.getString("profile_id");
 
+            // Create delivery options with extended timeout for discovery operations
+            var deliveryOptions = new DeliveryOptions().setSendTimeout(eventBusTimeoutMs);
+
             // Execute discovery test via DiscoveryVerticle
-            Bootstrap.getVertxInstance().eventBus().request("discovery.test_profile", new JsonObject().put("profile_id", profileId))
+            Bootstrap.getVertxInstance().eventBus().request("discovery.test_profile",
+                new JsonObject().put("profile_id", profileId), deliveryOptions)
                 .onSuccess(reply ->
                 {
                     var result = (JsonObject) reply.body();
