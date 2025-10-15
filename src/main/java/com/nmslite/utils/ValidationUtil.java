@@ -358,10 +358,6 @@ public class ValidationUtil
 
 
 
-    // ========================================
-    // NESTED STATIC CLASSES FOR DOMAIN-SPECIFIC VALIDATIONS
-    // ========================================
-
     /**
      * User - User-related validations
      */

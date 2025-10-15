@@ -108,7 +108,6 @@ public class DeviceHandler
         {
             var deviceId = ctx.pathParam("id");
 
-            // ===== PATH PARAMETER VALIDATION =====
             if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
             {
                 return;
@@ -139,7 +138,6 @@ public class DeviceHandler
         {
             var deviceId = ctx.pathParam("id");
 
-            // ===== PATH PARAMETER VALIDATION =====
             if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
             {
                 return;
@@ -234,8 +232,7 @@ public class DeviceHandler
             if (body == null || !body.containsKey("device_ids"))
             {
                 ExceptionUtil.handleHttp(ctx,
-                    new Exception("Request body must contain 'device_ids' array"),
-                    "Invalid request body");
+                    new Exception("Request body must contain 'device_ids' array"), "Invalid request body");
 
                 return;
             }
@@ -245,8 +242,7 @@ public class DeviceHandler
             if (deviceIds == null || deviceIds.isEmpty())
             {
                 ExceptionUtil.handleHttp(ctx,
-                    new Exception("device_ids array cannot be empty"),
-                    "Invalid request body");
+                    new Exception("device_ids array cannot be empty"), "Invalid request body");
 
                 return;
             }
@@ -259,8 +255,7 @@ public class DeviceHandler
                 if (!ValidationUtil.isValidUUID(deviceId))
                 {
                     ExceptionUtil.handleHttp(ctx,
-                        new Exception("Invalid device ID at index " + i),
-                        "Invalid device ID format");
+                        new Exception("Invalid device ID at index " + i), "Invalid device ID format");
 
                     return;
                 }
@@ -295,7 +290,6 @@ public class DeviceHandler
 
             var body = ctx.body().asJsonObject();
 
-            // ===== VALIDATION =====
             // 1) Validate path parameter
             if (!ValidationUtil.validatePathParameterUUID(ctx, deviceId, "Device ID"))
             {

@@ -79,7 +79,6 @@ public class ExceptionUtil
             return defaultMessage + ": " + exceptionMessage;
         }
 
-        // If no exception message, use default message only
         return defaultMessage;
     }
 

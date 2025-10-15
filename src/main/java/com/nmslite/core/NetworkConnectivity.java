@@ -217,7 +217,7 @@ public class NetworkConnectivity
                 return new HashMap<>();
             }
 
-            // Use ConcurrentHashMap for thread-safe parallel access
+            // Use ConcurrentHashMap for thread-safe parallel access, as using parallelStream() further down
             var results = new ConcurrentHashMap<String, Boolean>();
 
             // Use parallel stream for concurrent port checks

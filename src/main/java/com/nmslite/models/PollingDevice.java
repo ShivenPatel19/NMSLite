@@ -24,8 +24,6 @@ import java.time.Instant;
 public class PollingDevice
 {
 
-    // ===== PERSISTENT DATA (from database) =====
-
     // Identity
     public String deviceId;              // devices.device_id
 
@@ -159,9 +157,7 @@ public class PollingDevice
      */
     public boolean hasFailed()
     {
-        return pollingResult == PollingResult.CONNECTIVITY_FAILED ||
-
-               pollingResult == PollingResult.GOENGINE_FAILED;
+        return pollingResult == PollingResult.CONNECTIVITY_FAILED || pollingResult == PollingResult.GOENGINE_FAILED;
     }
 }
 

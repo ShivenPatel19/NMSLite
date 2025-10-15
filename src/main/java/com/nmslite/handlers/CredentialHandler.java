@@ -147,7 +147,6 @@ public class CredentialHandler
         {
             var credentialId = ctx.pathParam("id");
 
-            // ===== PATH PARAMETER VALIDATION =====
             if (!ValidationUtil.validatePathParameterUUID(ctx, credentialId, "Credential ID"))
             {
                 return; // Validation failed, response already sent

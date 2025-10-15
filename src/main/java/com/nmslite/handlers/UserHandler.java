@@ -179,7 +179,6 @@ public class UserHandler
         {
             var userId = ctx.pathParam("id");
 
-            // ===== PATH PARAMETER VALIDATION =====
             if (!ValidationUtil.validatePathParameterUUID(ctx, userId, "User ID"))
             {
                 return; // Validation failed, response already sent

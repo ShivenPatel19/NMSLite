@@ -471,8 +471,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "soft_deleted";
 
                             message = "Device was previously deleted. Please restore it using the restore API instead of rediscovering";
-
-                            proceedWithDiscovery = false;
                         }
                         else if (!isProvisioned && !isMonitoring)
                         {
@@ -480,8 +478,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "available_for_provision";
 
                             message = "Device already exists and is available for provision";
-
-                            proceedWithDiscovery = false;
                         }
                         else if (isProvisioned && isMonitoring)
                         {
@@ -489,25 +485,19 @@ public class DiscoveryVerticle extends AbstractVerticle
                             status = "being_monitored";
 
                             message = "Device already available and is being monitored";
-
-                            proceedWithDiscovery = false;
                         }
-                        else if (isProvisioned && !isMonitoring)
+                        else if (isProvisioned)
                         {
                             // isProvisioned = true, isMonitored = false, isDeleted = false
                             status = "monitoring_disabled";
 
                             message = "Device already available, and monitoring is disabled";
-
-                            proceedWithDiscovery = false;
                         }
                         else
                         {
                             status = "unknown_state";
 
                             message = "Device in unknown state";
-
-                            proceedWithDiscovery = false;
                         }
 
                         devicePromise.complete(new JsonObject()

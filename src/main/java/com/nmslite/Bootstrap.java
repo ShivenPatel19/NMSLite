@@ -26,7 +26,6 @@ import io.vertx.core.Promise;
 
 import io.vertx.core.WorkerExecutor;
 
-import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 
 import org.slf4j.Logger;
@@ -111,7 +110,6 @@ public class Bootstrap
             vertx = Vertx.vertx();
 
             // Load configuration, initialize database, and deploy all verticles
-            // Deploy all verticles using single method
             loadConfiguration()
                 .compose(config ->
                 {
@@ -280,6 +278,33 @@ public class Bootstrap
 
             var loggingEnabled = loggingConfig.getBoolean("enabled", true);
 
+            // If logging is disabled, turn off all loggers and return early
+            if (!loggingEnabled)
+            {
+                // Programmatically configure logback to disable all logging
+                var loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+
+                // Set root logger level to OFF
+                var rootLogger = loggerContext.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
+
+                rootLogger.setLevel(Level.OFF);
+
+                // Set application logger level to OFF
+                var appLogger = loggerContext.getLogger("com.nmslite");
+
+                appLogger.setLevel(Level.OFF);
+
+                // Set system properties for logback.xml
+                System.setProperty("nmslite.log.level", "OFF");
+
+                System.setProperty("nmslite.log.console.appender", "NULL");
+
+                System.setProperty("nmslite.log.file.appender", "NULL");
+
+                return;
+            }
+
+            // Logging is enabled - proceed with full configuration
             var logLevel = loggingConfig.getString("level", "INFO");
 
             // HOCON parses dotted keys as nested objects: file.enabled becomes file -> enabled
@@ -293,7 +318,7 @@ public class Bootstrap
                     .getString("path", "logs/nmslite.log");
 
             // Set system properties for logback.xml
-            System.setProperty("nmslite.log.level", loggingEnabled ? logLevel : "OFF");
+            System.setProperty("nmslite.log.level", logLevel);
 
             System.setProperty("nmslite.log.file.path", filePath);
 
@@ -322,29 +347,15 @@ public class Bootstrap
             // Set root logger level
             var rootLogger = loggerContext.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
 
-            if (loggingEnabled)
-            {
-                rootLogger.setLevel(Level.toLevel(logLevel, Level.INFO));
-            }
-            else
-            {
-                rootLogger.setLevel(Level.OFF);
-            }
+            rootLogger.setLevel(Level.toLevel(logLevel, Level.INFO));
 
             // Set application logger level
             var appLogger = loggerContext.getLogger("com.nmslite");
 
-            if (loggingEnabled)
-            {
-                appLogger.setLevel(Level.toLevel(logLevel, Level.INFO));
-            }
-            else
-            {
-                appLogger.setLevel(Level.OFF);
-            }
+            appLogger.setLevel(Level.toLevel(logLevel, Level.INFO));
 
             // Create logs directory if file logging is enabled
-            if (fileEnabled && loggingEnabled)
+            if (fileEnabled)
             {
                 var logFile = new java.io.File(filePath);
 
@@ -434,7 +445,6 @@ public class Bootstrap
         try
         {
             // Get worker pool configuration from config or use defaults
-            // HOCON parses dotted keys as nested objects: worker.pool.size becomes worker -> pool -> size
             var workerPoolSize = config.getJsonObject("worker", new JsonObject())
                     .getJsonObject("pool", new JsonObject())
                     .getInteger("size", 10);
