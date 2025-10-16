@@ -151,7 +151,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     .getJsonObject("timeout", new JsonObject())
                     .getInteger("seconds", 10);
 
-            // Initialize service proxies
             initializeServiceProxies();
 
             // Initialize CACHE (in-memory device store for fast lookups)
@@ -501,7 +500,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Handle device monitoring disabled event.
      * Remove device from cache.
      *
-     * @param deviceId Device ID to add to cache
+     * @param deviceId Device ID to remove from cache
      */
     private void onDeviceMonitoringDisabled(String deviceId)
     {
@@ -530,7 +529,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Handle device config updated event.
      * Reload device from database and update cache.
      *
-     * @param deviceId Device ID to add to cache
+     * @param deviceId Device ID to update in cache
      */
     private void onDeviceConfigUpdated(String deviceId)
     {
@@ -633,7 +632,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                         if (!isMonitoringEnabled)
                         {
-                            logger.debug("Device {} restored but monitoring not enabled, skipping cache add", deviceId);
+                            logger.info("Device {} restored but monitoring not enabled, skipping cache add", deviceId);
 
                             return;
                         }
@@ -687,17 +686,17 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Phase 1: Batch Processing
      *   - Filter devices due for polling (using aligned scheduling)
      *   - Process in batches with fping + GoEngine
-     *   - Track failures
+     *   - Track failures across all batches
 
      * Phase 2: Retry Failed Devices
-     *   - Retry devices that failed in Phase 1 (1 retry attempt for all devices)
-     *   - Uses batch processing for retry attempt
+     *   - Retry ALL devices that failed in Phase 1 (1 retry attempt)
+     *   - Sends all failed devices to GoEngine in a single call
 
      * Phase 3: Log Exhausted Failures
-     *   - Log devices that failed after retry to file
+     *   - Log devices that reached max consecutive failures to file
 
      * Phase 4: Auto-Disable
-     *   - Disable monitoring for devices exceeding max_cycles_skipped
+     *   - Disable monitoring for devices that reached or exceeded max_cycles_skipped
      */
     private void executePollingCycle()
     {
@@ -722,9 +721,10 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                         logger.info("Polling cycle: {} devices due for polling (total cached: {})", dueDevices.size(), totalCachedDevices);
 
-                        // Phase 1: Batch Processing
-                        // Phase 2: Retry Failed Devices, for current batch only
-                        // Phase 3: Log Exhausted Failures, for current batch only
+                        // Phase 1: Batch Processing (processes all due devices in batches)
+                        // Phase 2: Retry Failed Devices (retries ALL accumulated failures from Phase 1)
+                        // Phase 3: Log Exhausted Failures (logs devices that reached max failures)
+                        // Phase 4: Auto-Disable (disables devices that reached/exceeded max failures)
                         executeBatchProcessing(dueDevices)
                                 .compose(this::executeRetryFailures)
                                 .compose(this::executeLogFailures)
@@ -859,9 +859,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     reachableCount, batchSize, unreachableCount, batchSize);
 
                 // Step 2: Mark unreachable devices as CONNECTIVITY_FAILED
-                // Note: This loop runs on event loop but is fast (O(n) with O(1) HashMap lookups)
-                // For batch sizes < 1000, this is safe (< 100ms)
-                // For larger batches, consider moving to executeBlocking
                 // Availability will be updated centrally after final result is determined
                 for (var i = 0; i < unreachableDevices.size(); i++)
                 {
@@ -1165,13 +1162,13 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Phase 2: Retry Failed Devices (BATCH MODE)
+     * Phase 2: Retry Failed Devices
 
-     * Retry devices that failed in Phase 1 using batch processing.
-     * Uses the same batch approach as Phase 1 for consistency and efficiency.
+     * Retry ALL devices that failed in Phase 1 (across all batches).
+     * Sends all failed devices to GoEngine in a single call.
      * All devices get exactly 1 retry attempt.
      *
-     * @param failedDevices Devices that failed in Phase 1
+     * @param failedDevices ALL devices that failed in Phase 1 (accumulated across all batches)
      * @return Future with list of exhausted devices (failed after retry)
      */
     private Future<List<PollingDevice>> executeRetryFailures(List<PollingDevice> failedDevices)
@@ -1284,8 +1281,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                             for (var pd : devicesToLog)
                             {
-                                var logEntry = String.format("%s | %s | %s | %s",
-                                    timestamp, pd.deviceId, pd.deviceName, pd.address);
+                                var logEntry = String.format("%s | %s | %s | %s", timestamp, pd.deviceId, pd.deviceName, pd.address);
 
                                 out.println(logEntry);
                             }
@@ -1297,7 +1293,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     {
                         logger.error("Error writing failure log: {}", exception.getMessage());
 
-                        throw exception;
+                        return 0;
                     }
                 }
 
@@ -1455,7 +1451,17 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
             availabilityService.availabilityUpdateDeviceStatus(deviceId, status)
                 .onFailure(cause ->
-                        logger.error("Failed to record availability for device {}: {}", deviceId, cause.getMessage()));
+                {
+                    // Device might have been deleted during polling cycle - this is expected
+                    if (cause.getMessage() != null && cause.getMessage().contains("Device not found"))
+                    {
+                        logger.debug("Device {} was deleted during polling cycle, skipping availability update", deviceId);
+                    }
+                    else
+                    {
+                        logger.error("Failed to record availability for device {}: {}", deviceId, cause.getMessage());
+                    }
+                });
         }
         catch (Exception exception)
         {
@@ -1592,9 +1598,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     }
 
                     return portCheckResults;
-                })
-
-                    .map(portCheckResults ->
+                }).map(portCheckResults ->
                     {
                         var reachableDeviceIds = new JsonArray();
 

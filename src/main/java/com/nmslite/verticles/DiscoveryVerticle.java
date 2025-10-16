@@ -1,6 +1,7 @@
 package com.nmslite.verticles;
 
 import com.nmslite.Bootstrap;
+
 import com.nmslite.core.NetworkConnectivity;
 
 import com.nmslite.services.DeviceService;
@@ -114,10 +115,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                     .getJsonObject("timeout", new JsonObject())
                     .getInteger("goengine", 120);
 
-            // Initialize service proxies
-            this.deviceService = DeviceService.createProxy();
-
-            this.discoveryProfileService = DiscoveryProfileService.createProxy();
+            initializeServiceProxies();
 
             setupEventBusConsumers();
 
@@ -128,6 +126,23 @@ public class DiscoveryVerticle extends AbstractVerticle
             logger.error("Error in start: {}", exception.getMessage());
 
             startPromise.fail(exception);
+        }
+    }
+
+    /**
+     * Initialize service proxies for database operations
+     */
+    private void initializeServiceProxies()
+    {
+        try
+        {
+            this.deviceService = DeviceService.createProxy();
+
+            this.discoveryProfileService = DiscoveryProfileService.createProxy();
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in initializeServiceProxies: {}", exception.getMessage());
         }
     }
 
@@ -305,7 +320,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                     }
 
                     // Replace credential_profiles with decrypted credentials
-                    profileResponse.remove("credential_profiles"); // Remove encrypted version to avoid duplication
+                    profileResponse.remove("credential_profiles");
 
                     profileResponse.put("credentials", decryptedCredentials);
 
@@ -368,8 +383,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                     targetIps.add(ip);
                 }
 
-                logger.debug("Discovery targets: {} ({} {})", ipAddress, targetIps.size(),
-                           isRange ? "IPs from range" : "single IP");
+                logger.debug("Discovery targets: {} ({} {})", ipAddress, targetIps.size(), isRange ? "IPs from range" : "single IP");
 
                 // Create result with profile data and target IPs
                 return profile.copy()
@@ -636,10 +650,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
             var totalTargets = newTargets.size();
 
-            var totalBatches = (int) Math.ceil((double) totalTargets / discoveryBatchSize);
-
-            logger.info("Starting sequential batch discovery for {} targets in {} batches",
-                       totalTargets, totalBatches);
+            logger.info("Starting sequential batch discovery for {} targets", totalTargets);
 
             // Use QueueBatchProcessor for sequential batch discovery
             var processor = new DiscoveryBatchProcessor(profileData, newTargets);
@@ -1198,15 +1209,23 @@ public class DiscoveryVerticle extends AbstractVerticle
 
         try
         {
+            // Extract hostname from discovery result, replace empty string with "-"
+            var hostname = discovery.getString("hostname", "");
+
+            if (hostname == null || hostname.trim().isEmpty())
+            {
+                hostname = "-";
+            }
+
             // Prepare device data for DeviceService.deviceCreateFromDiscovery
             var deviceData = new JsonObject()
-                .put("device_name", discovery.getString("hostname", discovery.getString("ip_address")))
+                .put("device_name", hostname.equals("-") ? discovery.getString("ip_address") : hostname)
                 .put("ip_address", discovery.getString("ip_address"))
                 .put("device_type", discovery.getString("device_type"))
                 .put("port", discovery.getInteger("port", 22))
                 .put("protocol", discovery.getString("device_type").contains("windows") ? "winrm" : "ssh")
                 .put("credential_profile_id", discovery.getString("credential_id")) // ONLY the successful credential ID
-                .put("host_name", discovery.getString("hostname", discovery.getString("ip_address")));
+                .put("host_name", hostname);
 
             deviceService.deviceCreateFromDiscovery(deviceData)
                 .onSuccess(result ->
@@ -1349,14 +1368,7 @@ public class DiscoveryVerticle extends AbstractVerticle
         @Override
         protected void handleBatchFailure(List<String> batch, Throwable cause)
         {
-            try
-            {
-                logger.warn("Failed to discover {} IPs in batch: {}", batch.size(), cause.getMessage());
-            }
-            catch (Exception exception)
-            {
-                logger.error("Error in handleBatchFailure: {}", exception.getMessage());
-            }
+            logger.warn("Failed to discover {} IPs in batch: {}", batch.size(), cause.getMessage());
         }
     }
 
