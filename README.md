@@ -349,7 +349,7 @@ device {
     alert.threshold.cpu = 80.0
     alert.threshold.memory = 85.0
     alert.threshold.disk = 90.0
-    polling.interval.seconds = 300         # Default polling interval (5 minutes)
+    polling.interval.seconds = 65          # Default polling interval (65 seconds for testing)
     timeout.seconds = 60                   # Default per-device timeout
   }
 }
@@ -578,7 +578,7 @@ All configuration is loaded from `application.conf` in the application root dire
 | `polling.batch.size` | 50 | Max devices per polling batch |
 | `polling.max.cycles.skipped` | 5 | Auto-disable threshold |
 | `polling.connection.timeout.seconds` | 20 | SSH/WinRM connection timeout |
-| `device.defaults.polling.interval.seconds` | 300 | Default device polling interval |
+| `device.defaults.polling.interval.seconds` | 65 | Default device polling interval (testing value) |
 | `device.defaults.timeout.seconds` | 60 | Default per-device timeout |
 | `device.defaults.alert.threshold.cpu` | 80.0 | Default CPU alert threshold (%) |
 | `device.defaults.alert.threshold.memory` | 85.0 | Default memory alert threshold (%) |
@@ -610,8 +610,8 @@ Edit `application.conf` in the application root directory before building to cus
    - **Port Check**: TCP socket connection with 5s per-socket timeout, 10s batch timeout
 7. **GoEngine Discovery**:
    - Sequential credential iteration per IP (try all credentials until success)
-   - 30s per-device timeout, 10s per-credential timeout
-   - 120s Vert.x blocking timeout for batch
+   - 60s per-device timeout, 20s per-credential timeout
+   - 300s Vert.x blocking timeout for batch (5 minutes)
 8. **Device Creation**: Successful discoveries create device entries with `is_provisioned=false`
 9. **Results**: Return discovered, failed, and existing device counts
 
