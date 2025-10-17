@@ -1359,6 +1359,10 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Disable devices sequentially
+
+     * Removes device from cache FIRST (synchronous) to prevent race condition,
+     * then updates database (async). This ensures the device won't be polled
+     * in the next cycle before the database update completes.
      */
     private void disableDevicesSequentially(List<PollingDevice> devices, int index, Promise<Void> promise)
     {
@@ -1367,6 +1371,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             if (index >= devices.size())
             {
                 promise.complete();
+
                 return;
             }
 
@@ -1374,18 +1379,22 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
             logger.warn("Auto-disabling device {} due to consecutive failures", pd.deviceName);
 
+            // Remove from cache FIRST (synchronous, immediate) to prevent race condition
+            // This ensures the device won't be polled in the next cycle before DB update completes
+            deviceCache.remove(pd.deviceId);
+
+            // THEN update database (async, non-blocking)
             deviceService.deviceDisableMonitoring(pd.deviceId)
                 .onSuccess(result ->
                 {
-                    // Remove from cache (will be removed by event handler too, but this is immediate)
-                    deviceCache.remove(pd.deviceId);
+                    logger.info("Device {} monitoring disabled successfully in database", pd.deviceName);
 
                     // Continue with next device
                     disableDevicesSequentially(devices, index + 1, promise);
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("Failed to disable monitoring for device {}: {}", pd.deviceName, cause.getMessage());
+                    logger.error("Failed to disable monitoring for device {} in database: {}", pd.deviceName, cause.getMessage());
 
                     // Continue with next device even on failure
                     disableDevicesSequentially(devices, index + 1, promise);
@@ -1405,11 +1414,23 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Transforms GoEngine response format to database schema format:
      * GoEngine: {"cpu":{"usage_percent":15.2},"memory":{...},"disk":{...}}
      * Database: {"cpu_usage_percent":15.2,"memory_usage_percent":...}
+
+     * Includes cache check to prevent race conditions in overlapping cycles.
+     * If device was removed from cache by a concurrent cycle, skip metrics insertion.
      */
     private void storeMetrics(String deviceId, JsonObject goEngineResult)
     {
         try
         {
+            // Check if device is still in cache before inserting metrics
+            // Prevents race condition: device removed by concurrent cycle while this cycle is still processing
+            if (!deviceCache.containsKey(deviceId))
+            {
+                logger.debug("Device {} removed from cache during polling, skipping metrics insert", deviceId);
+
+                return;
+            }
+
             // Extract nested metrics from GoEngine response
             var cpu = goEngineResult.getJsonObject("cpu");
 
@@ -1442,11 +1463,23 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     /**
      * Update device availability status
+
+     * Includes cache check to prevent race conditions in overlapping cycles.
+     * If device was removed from cache by a concurrent cycle, skip availability update.
      */
     private void updateDeviceAvailability(String deviceId, boolean isAvailable)
     {
         try
         {
+            // Check if device is still in cache before updating availability
+            // Prevents race condition: device removed by concurrent cycle while this cycle is still processing
+            if (!deviceCache.containsKey(deviceId))
+            {
+                logger.debug("Device {} removed from cache during polling, skipping availability update", deviceId);
+
+                return;
+            }
+
             var status = isAvailable ? "UP" : "DOWN";
 
             availabilityService.availabilityUpdateDeviceStatus(deviceId, status)
