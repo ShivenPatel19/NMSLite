@@ -66,10 +66,6 @@ public abstract class QueueBatchProcessor<T>
 
     private final int batchSize;
 
-    private int processedBatches;
-
-    private final int totalItems;
-
     /**
      * Constructs a new QueueBatchProcessor with the given items and batch size.
 
@@ -86,10 +82,6 @@ public abstract class QueueBatchProcessor<T>
         this.allResults = new JsonArray();
 
         this.batchSize = batchSize;
-
-        this.processedBatches = 0;
-
-        this.totalItems = items.size();
     }
 
     /**
@@ -117,7 +109,7 @@ public abstract class QueueBatchProcessor<T>
         {
             if (remainingItems.isEmpty())
             {
-                logger.info("Batch processing completed: {} results from {} items", allResults.size(), totalItems);
+                logger.info("Batch processing completed: {} results", allResults.size());
 
                 promise.complete(allResults);
 
@@ -132,10 +124,6 @@ public abstract class QueueBatchProcessor<T>
 
                 return;
             }
-
-            processedBatches++;
-
-            logger.debug("Processing batch {}: {} items, {} remaining", processedBatches, currentBatch.size(), remainingItems.size());
 
             processBatch(currentBatch)
                 .onSuccess(batchResults ->
@@ -154,7 +142,7 @@ public abstract class QueueBatchProcessor<T>
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("Batch {} failed: {}", processedBatches, cause.getMessage());
+                    logger.error("Batch failed: {}", cause.getMessage());
 
                     handleBatchFailure(currentBatch, cause);
 

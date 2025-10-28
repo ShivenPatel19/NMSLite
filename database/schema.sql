@@ -73,27 +73,24 @@ CREATE TABLE devices (
     device_type VARCHAR(100) NOT NULL,
     port INTEGER NOT NULL,
     protocol VARCHAR(50),
+    host_name VARCHAR(100),
     credential_profile_id UUID NOT NULL REFERENCES credential_profiles(credential_profile_id) ON DELETE RESTRICT,  -- Reference to the successful credential
-    is_monitoring_enabled BOOLEAN DEFAULT true,
 
     -- Monitoring configuration
     polling_interval_seconds INTEGER,
     timeout_seconds INTEGER,
+
     alert_threshold_cpu DECIMAL(5,2),
     alert_threshold_memory DECIMAL(5,2),
     alert_threshold_disk DECIMAL(5,2),
 
-    host_name VARCHAR(100),
     is_provisioned BOOLEAN DEFAULT false,
-
-    -- Soft delete fields
+    is_monitoring_enabled BOOLEAN DEFAULT true,
     is_deleted BOOLEAN DEFAULT false,
     deleted_at TIMESTAMP,
-
-    -- Timestamps
+    monitoring_enabled_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    monitoring_enabled_at TIMESTAMP,
 
     -- Constraints
     CONSTRAINT chk_port_range CHECK (port BETWEEN 1 AND 65535),
@@ -249,6 +246,9 @@ CREATE TRIGGER backup_metric_on_delete
     BEFORE DELETE ON metrics
     FOR EACH ROW EXECUTE FUNCTION backup_metric_before_delete();
 
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- ==========
 -- DEFAULTS

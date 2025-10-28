@@ -1,5 +1,7 @@
 package com.nmslite.services.impl;
 
+import com.nmslite.core.DatabaseInitializer;
+
 import com.nmslite.services.UserService;
 
 import com.nmslite.utils.PasswordUtil;
@@ -29,6 +31,10 @@ import java.util.UUID;
  * - User CRUD operations
  * - Password hashing and authentication
  * - User session management
+
+ * Database Access:
+ * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - No constructor parameters needed
  */
 public class UserServiceImpl implements UserService
 {
@@ -38,13 +44,12 @@ public class UserServiceImpl implements UserService
     private final Pool pgPool;
 
     /**
-     * Constructor for UserServiceImpl
-     *
-     * @param pgPool PostgresSQL connection pool
+     * Constructor for UserServiceImpl.
+     * Accesses database pool via DatabaseInitializer.getPool().
      */
-    public UserServiceImpl(Pool pgPool)
+    public UserServiceImpl()
     {
-        this.pgPool = pgPool;
+        this.pgPool = DatabaseInitializer.getPool();
     }
 
     /**
@@ -111,8 +116,6 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userCreate(JsonObject userData)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var username = userData.getString("username");
@@ -128,10 +131,10 @@ public class UserServiceImpl implements UserService
             {
                 logger.error("Failed to hash password");
 
-                promise.fail(new Exception("Failed to hash password"));
-
-                return promise.future();
+                return Future.failedFuture(new Exception("Failed to hash password"));
             }
+
+            var promise = Promise.<JsonObject>promise();
 
             var sql = """
                 INSERT INTO users (username, password_hash, is_active)
@@ -167,15 +170,15 @@ public class UserServiceImpl implements UserService
                         promise.fail(cause);
                     }
                 });
+
+            return promise.future();
         }
         catch (Exception exception)
         {
             logger.error("Error in userCreate service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**

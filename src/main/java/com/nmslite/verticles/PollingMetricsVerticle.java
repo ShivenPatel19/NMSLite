@@ -118,8 +118,10 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             logger.info("Starting PollingMetricsVerticle");
 
-            // Load configuration from tools and polling sections
-            var toolsConfig = Bootstrap.getConfig().getJsonObject("tools", new JsonObject());
+            // Note: requireNonNull() only on first call to validate Bootstrap.getConfig() is not null
+            // Bootstrap.getConfig() can return null if config retrieval from shared data fails
+            // Once validated, subsequent calls in same method are safe to use directly
+            var toolsConfig = Objects.requireNonNull(Bootstrap.getConfig()).getJsonObject("tools", new JsonObject());
 
             var pollingConfig = Bootstrap.getConfig().getJsonObject("polling", new JsonObject());
 
@@ -145,7 +147,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
             blockingTimeoutGoEngine = pollingConfig.getJsonObject("blocking", new JsonObject())
                     .getJsonObject("timeout", new JsonObject())
-                    .getInteger("goengine", 330);
+                    .getInteger("goengine", 300);
 
             defaultConnectionTimeoutSeconds = pollingConfig.getJsonObject("connection", new JsonObject())
                     .getJsonObject("timeout", new JsonObject())
@@ -681,21 +683,18 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Execute 4-phase polling cycle:
+     * Execute 3-phase polling cycle:
 
      * Phase 1: Batch Processing
      *   - Filter devices due for polling (using aligned scheduling)
      *   - Process in batches with fping + GoEngine
+     *   - Update device availability status immediately (both success and failure)
      *   - Track failures across all batches
 
-     * Phase 2: Retry Failed Devices
-     *   - Retry ALL devices that failed in Phase 1 (1 retry attempt)
-     *   - Sends all failed devices to GoEngine in a single call
-
-     * Phase 3: Log Exhausted Failures
+     * Phase 2: Log Exhausted Failures
      *   - Log devices that reached max consecutive failures to file
 
-     * Phase 4: Auto-Disable
+     * Phase 3: Auto-Disable
      *   - Disable monitoring for devices that reached or exceeded max_cycles_skipped
      */
     private void executePollingCycle()
@@ -719,18 +718,16 @@ public class PollingMetricsVerticle extends AbstractVerticle
                             return;
                         }
 
-                        logger.info("Polling cycle: {} devices due for polling (total cached: {})", dueDevices.size(), totalCachedDevices);
+                        logger.info("New Polling cycle: {} devices due for polling (total cached: {})", dueDevices.size(), totalCachedDevices);
 
-                        // Phase 1: Batch Processing (processes all due devices in batches)
-                        // Phase 2: Retry Failed Devices (retries ALL accumulated failures from Phase 1)
-                        // Phase 3: Log Exhausted Failures (logs devices that reached max failures)
-                        // Phase 4: Auto-Disable (disables devices that reached/exceeded max failures)
+                        // Phase 1: Batch Processing (processes all due devices in batches, updates availability immediately)
+                        // Phase 2: Log Exhausted Failures (logs devices that reached max failures)
+                        // Phase 3: Auto-Disable (disables devices that reached/exceeded max failures)
                         executeBatchProcessing(dueDevices)
-                                .compose(this::executeRetryFailures)
                                 .compose(this::executeLogFailures)
                                 .compose(v ->
                                 {
-                                    // Phase 4: Auto-Disable
+                                    // Phase 3: Auto-Disable
                                     return executePhaseAutoDisable();
                                 })
                                 .onComplete(result ->
@@ -756,7 +753,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         }
     }
 
-    // ========== 4-PHASE POLLING CYCLE IMPLEMENTATION ==========
+    // ========== 3-PHASE POLLING CYCLE IMPLEMENTATION ==========
 
     /**
      * Phase 1: Batch Processing
@@ -766,15 +763,16 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * 2. For alive devices: GoEngine metrics collection
      * 3. For dead devices: Record connectivity failure
      * 4. Update device schedules and failure counters
+     * 5. Update device availability status immediately (both success and failure)
 
      * Uses QueueBatchProcessor for sequential batch processing.
      *
      * @param dueDevices List of devices due for polling
-     * @return Future with list of failed devices (for retry)
+     * @return Future<Void> - completes when all devices are processed and availability updated
      */
-    private Future<List<PollingDevice>> executeBatchProcessing(List<PollingDevice> dueDevices)
+    private Future<Void> executeBatchProcessing(List<PollingDevice> dueDevices)
     {
-        var promise = Promise.<List<PollingDevice>>promise();
+        var promise = Promise.<Void>promise();
 
         try
         {
@@ -792,14 +790,12 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 {
                     var failedDevices = processor.getFailedDevices();
 
-                    logger.info("Phase 1 completed: {}/{} devices processed successfully",
-                        dueDevices.size() - failedDevices.size(), dueDevices.size());
+                    logger.info("Phase 1 completed: {}/{} devices processed successfully", dueDevices.size() - failedDevices.size(), dueDevices.size());
 
-                    // Update availability for devices that succeeded in Phase 1 (will not be retried)
-                    // Failed devices will have their availability updated after retry phase
-                    updateAvailabilityForSuccessfulDevices(dueDevices, failedDevices);
+                    // Update availability for ALL devices immediately (both successful and failed)
+                    updateAvailabilityForAllDevices(dueDevices);
 
-                    promise.complete(failedDevices);
+                    promise.complete();
                 })
                 .onFailure(promise::fail);
         }
@@ -938,8 +934,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * @param reachableDeviceIds JsonArray of device IDs that passed connectivity checks
      * @return Future<Map<String, Boolean>> - Map of device_id -> success status
      */
-    private Future<Map<String, Boolean>> executeGoEngineForReachableDevices(
-        List<PollingDevice> allDevices, JsonArray reachableDeviceIds)
+    private Future<Map<String, Boolean>> executeGoEngineForReachableDevices(List<PollingDevice> allDevices, JsonArray reachableDeviceIds)
     {
         var promise = Promise.<Map<String, Boolean>>promise();
 
@@ -1025,7 +1020,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
             var process = pb.start();
 
-            // Create a map for quick device lookup by IP address
+            // Create IP-to-device lookup map for O(1) access when processing GoEngine streaming results
+            // GoEngine returns results with IP address, we need to map back to PollingDevice objects
+            // Without this map, we'd need O(n) linear search for each result line
             var devicesByIp = new HashMap<String, PollingDevice>();
 
             for (var pd : devices)
@@ -1049,7 +1046,19 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
             var successCount = 0;
 
-            // Read streaming output line by line and process results as they arrive
+            // Wait for process to complete with timeout
+            var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
+
+            if (!finished)
+            {
+                process.destroyForcibly();
+
+                logger.warn("GoEngine batch timeout after {} seconds - process killed", blockingTimeoutGoEngine);
+
+                return results;
+            }
+
+            // Read streaming output line by line and process results after process completes
             try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                  var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
             {
@@ -1125,18 +1134,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 }
             }
 
-            // Wait for process to complete (timeout handled by Vert.x blocking timeout)
-            var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
-
-            if (!finished)
-            {
-                process.destroyForcibly();
-
-                logger.warn("GoEngine batch timeout after {} seconds", blockingTimeoutGoEngine);
-
-                return results;
-            }
-
             var exitCode = process.exitValue();
 
             if (exitCode != 0)
@@ -1162,82 +1159,15 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Phase 2: Retry Failed Devices
-
-     * Retry ALL devices that failed in Phase 1 (across all batches).
-     * Sends all failed devices to GoEngine in a single call.
-     * All devices get exactly 1 retry attempt.
-     *
-     * @param failedDevices ALL devices that failed in Phase 1 (accumulated across all batches)
-     * @return Future with list of exhausted devices (failed after retry)
-     */
-    private Future<List<PollingDevice>> executeRetryFailures(List<PollingDevice> failedDevices)
-    {
-        var promise = Promise.<List<PollingDevice>>promise();
-
-        if (failedDevices.isEmpty())
-        {
-            logger.info("Phase 2: No failed devices to retry");
-
-            promise.complete(new ArrayList<>());
-
-            return promise.future();
-        }
-
-        logger.info("Phase 2: Retrying {} failed devices (1 retry attempt)", failedDevices.size());
-
-        vertx.executeBlocking(() ->
-        {
-            var exhaustedDevices = new ArrayList<PollingDevice>();
-
-            // Perform 1 retry attempt for all failed devices using batch processing
-            var retryResults = pollDeviceMetricsBatch(failedDevices);
-
-            for (var pd : failedDevices)
-            {
-                var success = retryResults.getOrDefault(pd.deviceId, false);
-
-                if (success)
-                {
-                    pd.resetFailures();
-
-                    pd.advanceSchedule();
-                }
-                else
-                {
-                    exhaustedDevices.add(pd);
-                }
-            }
-
-            return exhaustedDevices;
-
-        }, false)
-        .onSuccess(exhaustedDevices ->
-        {
-            var retriedSuccessfully = failedDevices.size() - exhaustedDevices.size();
-
-            logger.info("Phase 2 completed: {}/{} devices recovered on retry", retriedSuccessfully, failedDevices.size());
-
-            // Update availability for all retried devices based on final result (after retry)
-            updateAvailabilityForRetriedDevices(failedDevices, exhaustedDevices);
-
-            promise.complete(exhaustedDevices);
-        })
-        .onFailure(promise::fail);
-
-        return promise.future();
-    }
-
-    /**
-     * Phase 3: Log Exhausted Failures
+     * Phase 2: Log Exhausted Failures
 
      * Log devices that reached max consecutive failures (about to be auto-disabled) to file.
      * Scans entire cache for devices where consecutiveFailures == maxCyclesSkipped (one-time logging).
      *
-     * @param exhaustedDevices Devices that failed after all retries (unused, kept for chain compatibility)
+     * @param unused Unused parameter for chain compatibility
      * @return Future<Void>
      */
-    private Future<Void> executeLogFailures(List<PollingDevice> exhaustedDevices)
+    private Future<Void> executeLogFailures(Void unused)
     {
         var promise = Promise.<Void>promise();
 
@@ -1251,13 +1181,12 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             if (devicesToLog.isEmpty())
             {
-                logger.info("Phase 3: No devices reached max failures threshold ({}), skipping log", maxCyclesSkipped);
+                logger.info("Phase 2: No devices reached max failures threshold ({}), skipping log", maxCyclesSkipped);
 
                 return Future.succeededFuture(0);
             }
 
-            logger.info("Phase 3: Logging {} devices that reached max failures ({}) to {}",
-                devicesToLog.size(), maxCyclesSkipped, failureLogPath);
+            logger.info("Phase 2: Logging {} devices that reached max failures ({}) to {}", devicesToLog.size(), maxCyclesSkipped, failureLogPath);
 
             return vertx.executeBlocking(() ->
             {
@@ -1316,7 +1245,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Phase 4: Auto-Disable
+     * Phase 3: Auto-Disable
 
      * Disable monitoring for devices that have exceeded max_cycles_skipped consecutive failures.
      *
@@ -1335,14 +1264,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             if (devicesToDisable.isEmpty())
             {
-                logger.info("Phase 4: No devices to auto-disable");
+                logger.info("Phase 3: No devices to auto-disable");
 
                 promise.complete();
 
                 return;
             }
 
-            logger.warn("Phase 4: Auto-disabling {} devices due to {} consecutive failures", devicesToDisable.size(), maxCyclesSkipped);
+            logger.warn("Phase 3: Auto-disabling {} devices due to {} consecutive failures", devicesToDisable.size(), maxCyclesSkipped);
 
             // Disable devices sequentially
             disableDevicesSequentially(devicesToDisable, 0, promise);
@@ -1503,69 +1432,27 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Update availability for devices that succeeded in Phase 1 (will not be retried)
+     * Update availability for all devices based on their polling result
      *
      * @param allDevices All devices that were processed in Phase 1
-     * @param failedDevices Devices that failed in Phase 1 (will be retried, so skip them)
      */
-    private void updateAvailabilityForSuccessfulDevices(List<PollingDevice> allDevices, List<PollingDevice> failedDevices)
+    private void updateAvailabilityForAllDevices(List<PollingDevice> allDevices)
     {
         try
         {
-            // Create a set of failed device IDs for O(1) lookup
-            var failedDeviceIds = failedDevices.stream()
-                .map(pd -> pd.deviceId)
-                .collect(Collectors.toSet());
-
-            // Update availability for devices that succeeded (not in failed list)
+            // Update availability for all devices based on their polling result
             for (var pd : allDevices)
             {
-                if (!failedDeviceIds.contains(pd.deviceId))
-                {
-                    // Device succeeded in Phase 1, update availability as UP
-                    updateDeviceAvailability(pd.deviceId, true);
-                }
+                // Device succeeded (PollingResult.SUCCESS) -> update availability as UP
+                // Device failed (CONNECTIVITY_FAILED or GOENGINE_FAILED) -> update availability as DOWN
+                var isUp = (pd.pollingResult == PollingResult.SUCCESS);
+
+                updateDeviceAvailability(pd.deviceId, isUp);
             }
         }
         catch (Exception exception)
         {
-            logger.error("Error in updateAvailabilityForSuccessfulDevices: {}", exception.getMessage());
-        }
-    }
-
-    /**
-     * Update availability for devices that were retried in Phase 2 based on final result
-     *
-     * @param retriedDevices All devices that were retried in Phase 2
-     * @param exhaustedDevices Devices that failed even after retry
-     */
-    private void updateAvailabilityForRetriedDevices(List<PollingDevice> retriedDevices, List<PollingDevice> exhaustedDevices)
-    {
-        try
-        {
-            // Create a set of exhausted device IDs for O(1) lookup
-            var exhaustedDeviceIds = exhaustedDevices.stream()
-                .map(pd -> pd.deviceId)
-                .collect(Collectors.toSet());
-
-            // Update availability for all retried devices based on final result
-            for (var pd : retriedDevices)
-            {
-                if (exhaustedDeviceIds.contains(pd.deviceId))
-                {
-                    // Device failed even after retry, update availability as DOWN
-                    updateDeviceAvailability(pd.deviceId, false);
-                }
-                else
-                {
-                    // Device succeeded on retry, update availability as UP
-                    updateDeviceAvailability(pd.deviceId, true);
-                }
-            }
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in updateAvailabilityForRetriedDevices: {}", exception.getMessage());
+            logger.error("Error in updateAvailabilityForAllDevices: {}", exception.getMessage());
         }
     }
 
@@ -1586,7 +1473,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         var ipList = devices.stream().map(pd -> pd.address).collect(Collectors.toList());
 
         // Step 1: Batch fping check (single fping process for all IPs) - wrapped in executeBlocking
-        return vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList, Bootstrap.getConfig()))
+        return vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList))
             .compose(fpingResults ->
             {
                 // Filter IPs that successfully passed fping
@@ -1621,7 +1508,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                             continue;
                         }
 
-                        var portOpen = NetworkConnectivity.portCheck(pd.address, pd.port, Bootstrap.getConfig());
+                        var portOpen = NetworkConnectivity.portCheck(pd.address, pd.port);
 
                         portCheckResults.add(new JsonObject()
                             .put("device_id", pd.deviceId)

@@ -1,5 +1,7 @@
 package com.nmslite.services.impl;
 
+import com.nmslite.core.DatabaseInitializer;
+
 import com.nmslite.services.AvailabilityService;
 
 import io.vertx.core.Future;
@@ -27,6 +29,10 @@ import java.util.UUID;
  * - Current device availability status retrieval
  * - Real-time status updates for polling
  * - Availability cleanup operations
+
+ * Database Access:
+ * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - No constructor parameters needed
  */
 public class AvailabilityServiceImpl implements AvailabilityService
 {
@@ -36,13 +42,12 @@ public class AvailabilityServiceImpl implements AvailabilityService
     private final Pool pgPool;
 
     /**
-     * Constructor for AvailabilityServiceImpl
-     *
-     * @param pgPool PostgresSQL connection pool
+     * Constructor for AvailabilityServiceImpl.
+     * Accesses database pool via DatabaseInitializer.getPool().
      */
-    public AvailabilityServiceImpl(Pool pgPool)
+    public AvailabilityServiceImpl()
     {
-        this.pgPool = pgPool;
+        this.pgPool = DatabaseInitializer.getPool();
     }
 
     /**

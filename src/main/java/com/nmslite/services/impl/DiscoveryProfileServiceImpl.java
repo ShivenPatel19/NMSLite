@@ -1,5 +1,7 @@
 package com.nmslite.services.impl;
 
+import com.nmslite.core.DatabaseInitializer;
+
 import com.nmslite.services.DiscoveryProfileService;
 
 import io.vertx.core.Future;
@@ -28,6 +30,10 @@ import java.util.UUID;
  * - IP address conflict detection
  * - Device type and credential integration
  * - Discovery execution and validation
+
+ * Database Access:
+ * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - No constructor parameters needed
  */
 public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
 {
@@ -37,13 +43,12 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
     private final Pool pgPool;
 
     /**
-     * Constructor for DiscoveryProfileServiceImpl
-     *
-     * @param pgPool PostgresSQL connection pool
+     * Constructor for DiscoveryProfileServiceImpl.
+     * Accesses database pool via DatabaseInitializer.getPool().
      */
-    public DiscoveryProfileServiceImpl(Pool pgPool)
+    public DiscoveryProfileServiceImpl()
     {
-        this.pgPool = pgPool;
+        this.pgPool = DatabaseInitializer.getPool();
     }
 
     /**

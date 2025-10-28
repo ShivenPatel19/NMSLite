@@ -1,5 +1,7 @@
 package com.nmslite.services.impl;
 
+import com.nmslite.core.DatabaseInitializer;
+
 import com.nmslite.services.MetricsService;
 
 import io.vertx.core.Future;
@@ -27,6 +29,10 @@ import java.util.UUID;
  * - Metrics creation for polling
  * - Metrics retrieval by device
  * - Metrics cleanup operations
+
+ * Database Access:
+ * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - No constructor parameters needed
  */
 public class MetricsServiceImpl implements MetricsService
 {
@@ -36,13 +42,12 @@ public class MetricsServiceImpl implements MetricsService
     private final Pool pgPool;
 
     /**
-     * Constructor for MetricsServiceImpl
-     *
-     * @param pgPool PostgresSQL connection pool
+     * Constructor for MetricsServiceImpl.
+     * Accesses database pool via DatabaseInitializer.getPool().
      */
-    public MetricsServiceImpl(Pool pgPool)
+    public MetricsServiceImpl()
     {
-        this.pgPool = pgPool;
+        this.pgPool = DatabaseInitializer.getPool();
     }
 
     /**

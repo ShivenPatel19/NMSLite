@@ -89,8 +89,10 @@ public class DiscoveryVerticle extends AbstractVerticle
         {
             logger.info("Starting DiscoveryVerticle");
 
-            // Load configuration from tools and discovery sections
-            var toolsConfig = Bootstrap.getConfig().getJsonObject("tools", new JsonObject());
+            // Note: requireNonNull() only on first call to validate Bootstrap.getConfig() is not null
+            // Bootstrap.getConfig() can return null if config retrieval from shared data fails
+            // Once validated, subsequent calls in same method are safe to use directly
+            var toolsConfig = Objects.requireNonNull(Bootstrap.getConfig()).getJsonObject("tools", new JsonObject());
 
             var discoveryConfig = Bootstrap.getConfig().getJsonObject("discovery", new JsonObject());
 
@@ -113,7 +115,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
             blockingTimeoutGoEngine = discoveryConfig.getJsonObject("blocking", new JsonObject())
                     .getJsonObject("timeout", new JsonObject())
-                    .getInteger("goengine", 120);
+                    .getInteger("goengine", 300);
 
             initializeServiceProxies();
 
@@ -301,8 +303,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
                         if (decryptedPassword == null)
                         {
-                            logger.error("Failed to decrypt password for credential profile: {}",
-                                credential.getString("credential_profile_id"));
+                            logger.error("Failed to decrypt password for credential profile: {}", credential.getString("credential_profile_id"));
 
                             promise.fail(new Exception("Failed to decrypt credential password"));
 
@@ -744,7 +745,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                     }
 
                     // Step 2: Proceed with GoEngine discovery for reachable IPs only
-
                     return executeGoEngineForReachableIPs(profileData, reachableIPs, unreachableIPs);
                 })
                 .onSuccess(promise::complete)
@@ -804,7 +804,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             var port = profileData.getInteger("port", 22);
 
             // Step 1: Batch fping check (single fping process for all IPs) - wrapped in executeBlocking
-            vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList, Bootstrap.getConfig()))
+            vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList))
                 .compose(fpingResults ->
                 {
                     // Filter IPs that passed fping
@@ -828,7 +828,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                     }
 
                     // Step 2: Batch port check (parallel checks for alive IPs only) - wrapped in executeBlocking
-                    return vertx.executeBlocking(() -> NetworkConnectivity.batchPortCheck(pingAliveIps, port, Bootstrap.getConfig()))
+                    return vertx.executeBlocking(() -> NetworkConnectivity.batchPortCheck(pingAliveIps, port))
                         .map(portResults ->
                         {
                             var reachableIPs = new JsonArray();
@@ -876,8 +876,7 @@ public class DiscoveryVerticle extends AbstractVerticle
     /**
      * Execute GoEngine discovery for reachable IPs and create results including unreachable ones
      */
-    private Future<JsonArray> executeGoEngineForReachableIPs(JsonObject profileData, JsonArray reachableIPs,
-                                                             JsonArray unreachableIPs)
+    private Future<JsonArray> executeGoEngineForReachableIPs(JsonObject profileData, JsonArray reachableIPs, JsonArray unreachableIPs)
     {
         var promise = Promise.<JsonArray>promise();
 
@@ -914,7 +913,19 @@ public class DiscoveryVerticle extends AbstractVerticle
                             logger.error("Failed to write discovery request to GoEngine stdin: {}", exception.getMessage());
                         }
 
-                        // Read results from stdout and stderr simultaneously
+                        // Wait for process to complete with timeout
+                        var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
+
+                        if (!finished)
+                        {
+                            process.destroyForcibly();
+
+                            logger.warn("GoEngine discovery process timed out after {} seconds - process killed", blockingTimeoutGoEngine);
+
+                            return results;
+                        }
+
+                        // Read results from stdout and stderr after process completes
                         try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                              var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
                         {
@@ -927,7 +938,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                                     var result = new JsonObject(line);
 
                                     if (result.containsKey("ip_address"))
-                                    {  // uses ip_address instead of device_address
+                                    {
                                         results.add(result);
                                     }
                                 }
@@ -944,16 +955,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                             {
                                 errorOutput.append(errLine).append("\n");
                             }
-                        }
-
-                        // Process timeout handled by Vert.x blocking timeout (blockingTimeoutGoEngine)
-                        var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
-
-                        if (!finished)
-                        {
-                            process.destroyForcibly();
-
-                            throw new Exception("GoEngine discovery process timed out after " + blockingTimeoutGoEngine + " seconds");
                         }
 
                         var exitCode = process.exitValue();
@@ -1110,8 +1111,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                 }
             }
 
-            logger.info("Discovery results: {} successful, {} failed, {} existing",
-                       successfulDevices.size(), failedDevices.size(), existingDevices.size());
+            logger.info("Discovery results: {} successful, {} failed, {} existing", successfulDevices.size(), failedDevices.size(), existingDevices.size());
 
             if (successfulDevices.isEmpty())
             {

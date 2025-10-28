@@ -2,6 +2,8 @@ package com.nmslite.services.impl;
 
 import com.nmslite.Bootstrap;
 
+import com.nmslite.core.DatabaseInitializer;
+
 import com.nmslite.services.DeviceService;
 
 import io.vertx.core.Future;
@@ -34,6 +36,11 @@ import java.util.UUID;
  * - Device monitoring management
  * - Device provisioning and discovery integration
  * - Device status and availability tracking
+
+ * Database Access:
+ * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - Uses Bootstrap.getVertxInstance() to access Vertx for event bus publishing
+ * - No constructor parameters needed
  */
 public class DeviceServiceImpl implements DeviceService
 {
@@ -44,20 +51,16 @@ public class DeviceServiceImpl implements DeviceService
 
     private final Pool pgPool;
 
-    private final JsonObject config;
-
     /**
-     * Constructor for DeviceServiceImpl
-     *
-     * @param pgPool PostgresSQL connection pool
+     * Constructor for DeviceServiceImpl.
+     * Accesses database pool via DatabaseInitializer.getPool().
+     * Accesses Vertx instance via Bootstrap.getVertxInstance().
      */
-    public DeviceServiceImpl(Pool pgPool)
+    public DeviceServiceImpl()
     {
         this.vertx = Bootstrap.getVertxInstance();
 
-        this.pgPool = pgPool;
-
-        this.config = Bootstrap.getConfig();
+        this.pgPool = DatabaseInitializer.getPool();
     }
 
     /**
@@ -68,7 +71,7 @@ public class DeviceServiceImpl implements DeviceService
     private double getDefaultCpuThreshold()
     {
         // HOCON parses dotted keys as nested objects: alert.threshold.cpu becomes alert -> threshold -> cpu
-        return config.getJsonObject("device", new JsonObject())
+        return Bootstrap.getConfig().getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
                 .getJsonObject("alert", new JsonObject())
                 .getJsonObject("threshold", new JsonObject())
@@ -83,7 +86,7 @@ public class DeviceServiceImpl implements DeviceService
     private double getDefaultMemoryThreshold()
     {
         // HOCON parses dotted keys as nested objects: alert.threshold.memory becomes alert -> threshold -> memory
-        return config.getJsonObject("device", new JsonObject())
+        return Bootstrap.getConfig().getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
                 .getJsonObject("alert", new JsonObject())
                 .getJsonObject("threshold", new JsonObject())
@@ -98,7 +101,7 @@ public class DeviceServiceImpl implements DeviceService
     private double getDefaultDiskThreshold()
     {
         // HOCON parses dotted keys as nested objects: alert.threshold.disk becomes alert -> threshold -> disk
-        return config.getJsonObject("device", new JsonObject())
+        return Bootstrap.getConfig().getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
                 .getJsonObject("alert", new JsonObject())
                 .getJsonObject("threshold", new JsonObject())
@@ -113,7 +116,7 @@ public class DeviceServiceImpl implements DeviceService
     private int getDefaultPollingInterval()
     {
         // HOCON parses dotted keys as nested objects: polling.interval.seconds becomes polling -> interval -> seconds
-        var pollingInterval = config.getJsonObject("device", new JsonObject())
+        var pollingInterval = Bootstrap.getConfig().getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
                 .getJsonObject("polling", new JsonObject())
                 .getJsonObject("interval", new JsonObject())
@@ -132,7 +135,7 @@ public class DeviceServiceImpl implements DeviceService
     private int getDefaultTimeout()
     {
         // HOCON parses dotted keys as nested objects: timeout.seconds becomes timeout -> seconds
-        return config.getJsonObject("device", new JsonObject())
+        return Bootstrap.getConfig().getJsonObject("device", new JsonObject())
                 .getJsonObject("defaults", new JsonObject())
                 .getJsonObject("timeout", new JsonObject())
                 .getInteger("seconds", 60);

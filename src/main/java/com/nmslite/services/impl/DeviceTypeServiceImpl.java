@@ -1,5 +1,7 @@
 package com.nmslite.services.impl;
 
+import com.nmslite.core.DatabaseInitializer;
+
 import com.nmslite.services.DeviceTypeService;
 
 import io.vertx.core.Future;
@@ -29,6 +31,10 @@ import java.util.UUID;
  * - Active device types filtering
 
  * NOTE: Users cannot create, update, or delete device types for security reasons
+
+ * Database Access:
+ * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - No constructor parameters needed
  */
 public class DeviceTypeServiceImpl implements DeviceTypeService
 {
@@ -38,13 +44,12 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
     private final Pool pgPool;
 
     /**
-     * Constructor for DeviceTypeServiceImpl
-     *
-     * @param pgPool PostgresSQL connection pool
+     * Constructor for DeviceTypeServiceImpl.
+     * Accesses database pool via DatabaseInitializer.getPool().
      */
-    public DeviceTypeServiceImpl(Pool pgPool)
+    public DeviceTypeServiceImpl()
     {
-        this.pgPool = pgPool;
+        this.pgPool = DatabaseInitializer.getPool();
     }
 
     /**

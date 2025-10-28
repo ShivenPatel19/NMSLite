@@ -1,5 +1,7 @@
 package com.nmslite.core;
 
+import com.nmslite.Bootstrap;
+
 import io.vertx.core.json.JsonObject;
 
 import org.slf4j.Logger;
@@ -55,10 +57,9 @@ public class NetworkConnectivity
      * WARNING: This method is BLOCKING and must be called from within executeBlocking() in verticles.
      *
      * @param ipAddresses List of IP addresses to check
-     * @param config Configuration object
      * @return Map<String, Boolean> - Map of IP -> reachability status
      */
-    public static Map<String, Boolean> batchFpingCheck(List<String> ipAddresses, JsonObject config)
+    public static Map<String, Boolean> batchFpingCheck(List<String> ipAddresses)
     {
         try
         {
@@ -68,6 +69,8 @@ public class NetworkConnectivity
             {
                 return results;
             }
+
+            var config = Bootstrap.getConfig();
 
             // HOCON parses dotted keys as nested objects: tools.fping.path becomes tools -> fping -> path
             var fpingPath = config.getJsonObject("tools", new JsonObject())
@@ -159,13 +162,14 @@ public class NetworkConnectivity
      *
      * @param ipAddress IP address to check
      * @param port Port number to check
-     * @param config Configuration object
      * @return Boolean - true if port is open, false otherwise
      */
-    public static Boolean portCheck(String ipAddress, int port, JsonObject config)
+    public static Boolean portCheck(String ipAddress, int port)
     {
         try
         {
+            var config = Bootstrap.getConfig();
+
             // HOCON parses dotted keys as nested objects: tools.port.check.timeout.seconds
             var perSocketTimeoutSeconds = config.getJsonObject("tools", new JsonObject())
                     .getJsonObject("port", new JsonObject())
@@ -205,10 +209,9 @@ public class NetworkConnectivity
      *
      * @param ipAddresses List of IP addresses to check
      * @param port Port number to check
-     * @param config Configuration object
      * @return Map<String, Boolean> - Map of IP -> port reachability status
      */
-    public static Map<String, Boolean> batchPortCheck(List<String> ipAddresses, int port, JsonObject config)
+    public static Map<String, Boolean> batchPortCheck(List<String> ipAddresses, int port)
     {
         try
         {
@@ -224,10 +227,9 @@ public class NetworkConnectivity
             // Reuses portCheck() method to avoid code duplication
             ipAddresses.parallelStream().forEach(ip ->
             {
-                var portOpen = portCheck(ip, port, config);
+                var portOpen = portCheck(ip, port);
 
-                // ConcurrentHashMap.put() is thread-safe, no synchronization needed
-                results.put(ip, portOpen);
+                results.put(ip, portOpen);  // ConcurrentHashMap.put() is thread-safe, no synchronization needed
             });
 
             logger.debug("Batch port check (port {}): {}/{} ports reachable",

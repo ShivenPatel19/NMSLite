@@ -1,5 +1,7 @@
 package com.nmslite.services.impl;
 
+import com.nmslite.core.DatabaseInitializer;
+
 import com.nmslite.services.CredentialProfileService;
 
 import com.nmslite.utils.PasswordUtil;
@@ -28,6 +30,10 @@ import java.util.UUID;
  * Provides credential profile management operations including:
  * - Credential profile CRUD operations
  * - Password encryption/decryption for secure storage
+
+ * Database Access:
+ * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - No constructor parameters needed
  */
 public class CredentialProfileServiceImpl implements CredentialProfileService
 {
@@ -37,13 +43,12 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     private final Pool pgPool;
 
     /**
-     * Constructor for CredentialProfileServiceImpl
-     *
-     * @param pgPool PostgresSQL connection pool
+     * Constructor for CredentialProfileServiceImpl.
+     * Accesses database pool via DatabaseInitializer.getPool().
      */
-    public CredentialProfileServiceImpl(Pool pgPool)
+    public CredentialProfileServiceImpl()
     {
-        this.pgPool = pgPool;
+        this.pgPool = DatabaseInitializer.getPool();
     }
 
     /**
@@ -500,18 +505,16 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialGetByIds(JsonArray credentialIds)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             if (credentialIds.isEmpty())
             {
-                promise.complete(new JsonObject()
+                return Future.succeededFuture(new JsonObject()
                     .put("success", true)
                     .put("data", new JsonObject().put("credentials", new JsonArray())));
-
-                return promise.future();
             }
+
+            var promise = Promise.<JsonObject>promise();
 
             // Convert JsonArray to UUID array for PostgresSQL
             var uuidArray = new UUID[credentialIds.size()];
@@ -573,15 +576,15 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
 
                         promise.fail(cause);
                     });
+
+            return promise.future();
         }
         catch (Exception exception)
         {
             logger.error("Error in credentialGetByIds service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
 }
