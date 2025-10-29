@@ -13,7 +13,6 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <vertx.version>5.0.4</vertx.version>
-        <junit.version>5.10.0</junit.version>
         <logback.version>1.4.14</logback.version>
     </properties>
 
@@ -57,13 +56,6 @@
         <dependency>
             <groupId>io.vertx</groupId>
             <artifactId>vertx-service-proxy</artifactId>
-            <version>${vertx.version}</version>
-        </dependency>
-
-        <!-- Vert.x Web OpenAPI Router for Swagger/OpenAPI Support (Vert.x 5) -->
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-web-openapi-router</artifactId>
             <version>${vertx.version}</version>
         </dependency>
 
@@ -128,21 +120,6 @@
             <groupId>com.auth0</groupId>
             <artifactId>java-jwt</artifactId>
             <version>4.4.0</version>
-        </dependency>
-
-        <!-- Test Dependencies -->
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-junit5</artifactId>
-            <version>${vertx.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>${junit.version}</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 

@@ -4,8 +4,9 @@
 **Framework:** Vert.x 5.0.4
 **Java Version:** 21
 **Database:** PostgreSQL 12+
+**Security:** HTTPS-only with JWT Authentication
 
-A lightweight, event-driven network monitoring system built with Vert.x and PostgreSQL, featuring JWT authentication, ProxyGen service architecture, GoEngine integration for SSH/WinRM metrics collection, and automated device discovery with continuous monitoring.
+A lightweight, event-driven network monitoring system built with Vert.x and PostgreSQL, featuring HTTPS-only communication, JWT authentication, ProxyGen service architecture, GoEngine integration for SSH/WinRM metrics collection, automated device discovery, and dual-cycle monitoring (availability + metrics).
 
 ---
 
@@ -31,13 +32,14 @@ A lightweight, event-driven network monitoring system built with Vert.x and Post
 
 ## 🏗️ Architecture
 
-NMSLite uses a **3-verticle event-driven architecture** with ProxyGen-based service communication:
+NMSLite uses a **4-verticle event-driven architecture** with ProxyGen-based service communication:
 
 ### Core Verticles
 
-- **ServerVerticle**: HTTP API server with JWT authentication middleware
-- **DiscoveryVerticle**: Device discovery workflow (fping + GoEngine + sequential batch processing)
-- **PollingMetricsVerticle**: Continuous monitoring with 4-phase polling cycle
+- **ServerVerticle**: HTTPS API server with JWT authentication middleware
+- **AvailabilityVerticle**: Device availability monitoring (10-second cycle with fping + port checks)
+- **PollingMetricsVerticle**: Device metrics collection (60-second cycle with GoEngine SSH/WinRM)
+- **DiscoveryVerticle**: Device discovery workflow (fping + port check + GoEngine + sequential batch processing)
 
 ### Database Initialization
 
@@ -51,19 +53,19 @@ NMSLite uses a **3-verticle event-driven architecture** with ProxyGen-based serv
 All database operations are abstracted through Vert.x ProxyGen services for type-safe event bus communication:
 
 - **UserService**: User management and authentication
-- **DeviceTypeService**: Device type management
-- **CredentialProfileService**: Credential profile management
-- **DiscoveryProfileService**: Discovery profile management
+- **DeviceTypeService**: Device type management (read-only for security)
+- **CredentialProfileService**: Credential profile management with encryption
+- **DiscoveryProfileService**: Discovery profile management with IP range support
 - **DeviceService**: Device CRUD and monitoring configuration
 - **MetricsService**: Time-series metrics data collection
-- **AvailabilityService**: Device availability tracking
+- **AvailabilityService**: Device availability tracking and statistics
 
 ### Communication Pattern
 
 ```
-HTTP Request → ServerVerticle → Service Proxy (Event Bus) → Service Implementation → PostgreSQL
-                                      ↓
-                          (Registered at startup by DatabaseInitializer)
+HTTPS Request → ServerVerticle → Service Proxy (Event Bus) → Service Implementation → PostgreSQL
+                                       ↓
+                           (Registered at startup by DatabaseInitializer)
 ```
 
 All services use `createProxy()` pattern for seamless event bus communication without manual message handling.
@@ -77,20 +79,29 @@ All services use `createProxy()` pattern for seamless event bus communication wi
    ↓
 3. Configure logging (Logback)
    ↓
-4. Setup worker executor (pool size: 10)
+4. Configure Vert.x options (blocked thread checker, worker pool)
    ↓
 5. DatabaseInitializer.initialize()
    - Create PostgreSQL connection pool
    - Instantiate all 7 service implementations
    - Register ProxyGen services on event bus
    ↓
-6. Deploy verticles sequentially:
-   - ServerVerticle (HTTP API)
-   - PollingMetricsVerticle (monitoring)
-   - DiscoveryVerticle (device discovery)
+6. Deploy verticles sequentially via VerticleDeployer:
+   - ServerVerticle (HTTPS API on port 8443)
+   - AvailabilityVerticle (10s cycle, creates shared availability cache)
+   - PollingMetricsVerticle (60s cycle, reads from availability cache)
+   - DiscoveryVerticle (on-demand device discovery)
    ↓
-7. Application ready (HTTP server on port 8080)
+7. Application ready (HTTPS server on port 8443)
 ```
+
+### Verticle Dependencies
+
+**Critical Deployment Order:**
+- **AvailabilityVerticle** MUST deploy BEFORE **PollingMetricsVerticle**
+- AvailabilityVerticle creates and populates the shared `availability-cache` LocalMap
+- PollingMetricsVerticle reads from this cache to check device status before metrics collection
+- If order is reversed, PollingMetricsVerticle will create an empty cache
 
 ## 💡 Code Approach & Design Patterns
 
@@ -154,20 +165,22 @@ getDiscoveryProfile(profileId)
 
 NMSLite implements **hierarchical timeout strategy** for reliability:
 
-**Discovery Timeouts (4 Levels):**
+**Discovery Timeouts (3 Levels):**
 1. **Event Bus**: 300s (5 min) - HTTP request to event bus communication timeout (`discovery.eventbus.timeout.seconds`)
 2. **Vert.x Batch**: 300s (5 min) - Overall batch operation timeout (`discovery.blocking.timeout.goengine`)
 3. **GoEngine Device**: 60s - Per-device discovery timeout (`discovery.goengine.timeout.seconds`)
 4. **GoEngine Credential**: 20s - Per-credential attempt timeout (`discovery.goengine.connection.timeout.seconds`)
 
-**Polling/Metrics Timeouts (3 Levels):**
-1. **Vert.x Batch**: 300s (5 min) - Overall batch operation timeout (`polling.blocking.timeout.goengine`)
-2. **GoEngine Device**: 60s - Per-device metrics collection timeout (`device.defaults.timeout.seconds`)
-3. **GoEngine Connection**: 20s - SSH/WinRM connection timeout (`polling.connection.timeout.seconds`)
+**Availability Timeouts (2 Levels):**
+1. **Vert.x Worker Pool**: 600s (10 min) - Worker pool timeout (`availability.worker.pool.timeout.seconds`)
+2. **fping**: 5s per-IP (`tools.fping.timeout.seconds`), 180s batch timeout (`tools.fping.batch.blocking.timeout.seconds`)
+3. **Port Check**: 5s per-socket (`tools.port.check.timeout.seconds`), 10s batch timeout (`tools.port.check.batch.blocking.timeout.seconds`)
 
-**Network Timeouts (2 Levels):**
-- **fping**: 5s per-IP (`tools.fping.timeout.seconds`), 180s batch timeout (`tools.fping.batch.blocking.timeout.seconds`)
-- **Port Check**: 5s per-socket (`tools.port.check.timeout.seconds`), 10s batch timeout (`tools.port.check.batch.blocking.timeout.seconds`)
+**Polling/Metrics Timeouts (3 Levels):**
+1. **Vert.x Worker Pool**: 600s (10 min) - Worker pool timeout (`polling.worker.pool.timeout.seconds`)
+2. **Vert.x Batch**: 300s (5 min) - Overall batch operation timeout (`polling.blocking.timeout.goengine`)
+3. **GoEngine Device**: 60s - Per-device metrics collection timeout (`device.defaults.timeout.seconds`)
+4. **GoEngine Connection**: 20s - SSH/WinRM connection timeout (`polling.connection.timeout.seconds`)
 
 ### Batch Processing
 
@@ -195,7 +208,41 @@ class DiscoveryBatchProcessor {
 
 ### In-Memory Caching
 
-PollingMetricsVerticle maintains in-memory device cache for performance:
+NMSLite uses **two separate in-memory caches** for optimal performance:
+
+#### 1. Availability Cache (SharedData LocalMap)
+**Owner:** AvailabilityVerticle
+**Shared With:** PollingMetricsVerticle (read-only)
+**Storage:** `vertx.sharedData().getLocalMap("availability-cache")`
+
+```java
+// AvailabilityVerticle creates and updates the cache
+LocalMap<String, JsonObject> availabilityCache = vertx.sharedData().getLocalMap("availability-cache");
+
+// Stores device availability status (up/down)
+availabilityCache.put(deviceId, new JsonObject()
+    .put("device_id", deviceId)
+    .put("address", ipAddress)
+    .put("port", port)
+    .put("status", "up"));  // or "down"
+
+// PollingMetricsVerticle reads from cache before metrics collection
+JsonObject deviceStatus = availabilityCache.get(deviceId);
+if ("up".equals(deviceStatus.getString("status"))) {
+    // Collect metrics
+}
+```
+
+**Cache Lifecycle:**
+- Created and populated by AvailabilityVerticle on startup
+- Updated every 10 seconds by availability cycle
+- Shared across verticles via Vert.x SharedData
+- Thread-safe with immutable JsonObject pattern
+
+#### 2. Polling Device Cache (ConcurrentHashMap)
+**Owner:** PollingMetricsVerticle
+**Shared With:** None (private to PollingMetricsVerticle)
+**Storage:** `ConcurrentHashMap<String, PollingDevice>`
 
 ```java
 // Device cache loaded at startup and updated on changes via event bus
@@ -211,7 +258,7 @@ vertx.eventBus().consumer("device.cache.update", message -> {
 ```
 
 **Cache Lifecycle:**
-- Loaded on startup from database (provisioned + monitoring enabled devices)
+- Loaded on startup from database (provisioned devices only)
 - Updated via event bus when device configuration changes
 - Cleared on verticle shutdown
 - Runtime state (nextScheduledAt, consecutiveFailures) lost on restart (recomputed on startup)
@@ -225,6 +272,7 @@ vertx.eventBus().consumer("device.cache.update", message -> {
 3. **fping** - Command-line tool for ICMP ping checks (install via package manager)
 4. **GoEngine** - External Go binary for SSH/WinRM communication (included in `goengine/` directory)
 5. **Maven 3.x** - Build tool (for building from source)
+6. **SSL Certificate** - HTTPS keystore file (keystore.jks) for secure communication
 
 ### Database Setup
 
@@ -242,14 +290,15 @@ GRANT ALL PRIVILEGES ON DATABASE nmslite TO nmslite;
 psql -h localhost -U nmslite -d nmslite -f database/schema.sql
 ```
 
-The schema creates 7 tables:
+The schema creates 8 tables:
 - `users` - Admin users with JWT authentication
 - `device_types` - Device templates (Linux Server, Windows Server, etc.)
-- `credential_profiles` - Reusable credentials (encrypted)
-- `discovery_profiles` - Discovery configurations with IP ranges
+- `credential_profiles` - Reusable credentials (encrypted) with port and protocol
+- `discovery_profiles` - Discovery configurations with IP ranges and credential arrays
 - `devices` - Discovered and provisioned devices
 - `metrics` - Time-series metrics data (CPU, memory, disk)
 - `device_availability` - Availability tracking and statistics
+- `metrics_backup` - Automatic backup of deleted metrics (via trigger)
 
 ### Build & Run
 
@@ -264,7 +313,7 @@ java -jar target/NMSLite-3.0-SNAPSHOT-fat.jar
 ```
 
 3. **Configuration:**
-All configuration is loaded from `application.conf` in the application root directory.
+All configuration is loaded from `src/main/resources/application.conf`.
 To customize settings, edit the configuration file before building:
 
 ```hocon
@@ -285,17 +334,28 @@ database {
   user = "nmslite"
   password = "nmslite"
   maxSize = 5
-  blocking.timeout.seconds = 60
 }
 
-# HTTP Server Configuration
+# HTTPS Server Configuration (Production - HTTPS Only)
 server {
-  http.port = 8080
+  https {
+    port = 8443
+    keystore {
+      path = "keystore.jks"                  # Path to keystore file
+      password = "motadataadmin"             # Keystore password
+    }
+  }
 }
 
-# Worker Pool Configuration
-worker {
-  pool.size = 10
+# Vert.x Configuration
+vertx {
+  blocked.thread.check {
+    interval = 5                           # Check interval (5 seconds)
+    max.eventloop.execute.time = 2         # Event loop warning threshold (2 seconds)
+    max.worker.execute.time = 600          # Worker thread warning threshold (10 minutes)
+    warning.exception.time = 30            # Full stack trace threshold (30 seconds)
+  }
+  worker.pool.size = 10                    # Worker pool size
 }
 
 # Shared Tools Configuration
@@ -332,11 +392,21 @@ discovery {
   }
 }
 
+# Availability Configuration
+availability {
+  cycle.interval.seconds = 10              # How often to check device availability (10 seconds)
+  batch.size = 50                          # Max devices per batch
+  worker.pool.size = 10                    # Worker pool size
+  worker.pool.timeout.seconds = 600        # Worker pool timeout (10 minutes)
+}
+
 # Polling Configuration
 polling {
   cycle.interval.seconds = 60              # How often scheduler checks for due devices
   batch.size = 50                          # Max devices per batch
   max.cycles.skipped = 5                   # Auto-disable after N failures
+  worker.pool.size = 10                    # Worker pool size
+  worker.pool.timeout.seconds = 600        # Worker pool timeout (10 minutes)
 
   blocking.timeout.goengine = 300          # Vert.x blocking timeout (5 minutes)
   connection.timeout.seconds = 20          # SSH/WinRM connection timeout
@@ -345,22 +415,27 @@ polling {
 # Device Default Configuration
 device {
   defaults {
-    alert.threshold.cpu = 80.0
-    alert.threshold.memory = 85.0
-    alert.threshold.disk = 90.0
     polling.interval.seconds = 65          # Default polling interval (65 seconds for testing)
     timeout.seconds = 60                   # Default per-device timeout
   }
 }
 ```
 
-## 🔐 Authentication
+## 🔐 Authentication & Security
 
-NMSLite uses **JWT (JSON Web Token)** authentication for all API endpoints (except `/api/auth/login`).
+NMSLite uses **HTTPS-only communication** with **JWT (JSON Web Token)** authentication for all API endpoints (except `/api/auth/login`).
+
+### Security Features
+
+1. **HTTPS Only**: All communication encrypted via TLS/SSL (port 8443)
+2. **JWT Authentication**: Token-based authentication for all protected endpoints
+3. **Password Encryption**: Secure password hashing for user credentials
+4. **Credential Encryption**: Encrypted storage of device credentials in database
+5. **Keystore Security**: SSL certificates managed via Java KeyStore (keystore.jks)
 
 ### Authentication Flow
 
-1. **Login**: POST `/api/auth/login` with username/password
+1. **Login**: POST `https://localhost:8443/api/auth/login` with username/password
 2. **Receive JWT**: Server returns JWT token valid for 24 hours
 3. **Use Token**: Include `Authorization: Bearer <token>` header in all subsequent requests
 4. **Token Validation**: AuthenticationMiddleware validates JWT on every request
@@ -372,6 +447,12 @@ NMSLite uses **JWT (JSON Web Token)** authentication for all API endpoints (exce
 - **Expiry**: 24 hours (configurable via `JWTUtil.TOKEN_EXPIRY_HOURS`)
 - **Issuer**: "NMSLite"
 - **Claims**: user_id, username, is_active, iat, exp
+
+### Default Users
+
+The schema includes two default users:
+- **motadataadmin** / motadataadmin (active)
+- **nmsliteadmin** / nmsliteadmin (inactive)
 
 ## 📡 API Endpoints
 
@@ -400,10 +481,15 @@ Content-Type: application/json
 }
 ```
 
-### Health Check
+### Health Check & API Documentation
 ```bash
-GET /api/health
+# Health check
+GET https://localhost:8443/api/health
 Authorization: Bearer <token>
+
+# Swagger UI (API Documentation)
+GET https://localhost:8443/swagger-ui
+# Interactive API documentation with request/response examples
 ```
 
 ### User Management
@@ -498,15 +584,6 @@ Authorization: Bearer <token>
 GET /api/devices/{device_id}
 Authorization: Bearer <token>
 
-# Provision devices (bulk operation - sets is_provisioned=true AND is_monitoring_enabled=true)
-POST /api/devices/provision
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "device_ids": ["uuid1", "uuid2", "uuid3"]
-}
-
 # Update device configuration
 PUT /api/devices/{device_id}
 Authorization: Bearer <token>
@@ -514,20 +591,19 @@ Content-Type: application/json
 
 {
   "device_name": "Updated Name",
-  "port": 22,
   "polling_interval_seconds": 300,
-  "timeout_seconds": 60,
-  "alert_threshold_cpu": 80.0,
-  "alert_threshold_memory": 85.0,
-  "alert_threshold_disk": 90.0
+  "timeout_seconds": 60
 }
 
-# Enable/Disable monitoring
-POST /api/devices/{device_id}/monitoring/enable
-POST /api/devices/{device_id}/monitoring/disable
+# Enable monitoring (sets is_provisioned=true)
+POST /api/devices/{device_id}/enable
 Authorization: Bearer <token>
 
-# Delete device (soft delete)
+# Disable monitoring (sets is_provisioned=false)
+POST /api/devices/{device_id}/disable
+Authorization: Bearer <token>
+
+# Delete device (soft delete - sets is_deleted=true)
 DELETE /api/devices/{device_id}
 Authorization: Bearer <token>
 ```
@@ -552,7 +628,7 @@ Authorization: Bearer <token>
 
 ### Configuration File
 
-All configuration is loaded from `application.conf` in the application root directory. The application uses HOCON format for configuration.
+All configuration is loaded from `src/main/resources/application.conf`. The application uses HOCON format for configuration.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -564,8 +640,13 @@ All configuration is loaded from `application.conf` in the application root dire
 | `database.user` | nmslite | Database user |
 | `database.password` | nmslite | Database password |
 | `database.maxSize` | 5 | Connection pool size |
-| `server.http.port` | 8080 | HTTP server port |
-| `worker.pool.size` | 10 | Worker thread pool size |
+| `server.https.port` | 8443 | HTTPS server port |
+| `server.https.keystore.path` | keystore.jks | Path to SSL keystore |
+| `server.https.keystore.password` | motadataadmin | Keystore password |
+| `vertx.worker.pool.size` | 10 | Worker thread pool size |
+| `vertx.blocked.thread.check.interval` | 5 | Blocked thread check interval (seconds) |
+| `vertx.blocked.thread.check.max.eventloop.execute.time` | 2 | Event loop warning threshold (seconds) |
+| `vertx.blocked.thread.check.max.worker.execute.time` | 600 | Worker thread warning threshold (seconds) |
 | `tools.goengine.path` | ./goengine/goengine | Path to GoEngine binary |
 | `tools.fping.path` | fping | Path to fping binary |
 | `tools.fping.timeout.seconds` | 5 | Per-IP fping timeout |
@@ -573,19 +654,20 @@ All configuration is loaded from `application.conf` in the application root dire
 | `discovery.batch.size` | 100 | Max IPs per discovery batch |
 | `discovery.goengine.timeout.seconds` | 60 | Per-device discovery timeout |
 | `discovery.goengine.connection.timeout.seconds` | 20 | Per-credential timeout |
+| `availability.cycle.interval.seconds` | 10 | Availability check interval |
+| `availability.batch.size` | 50 | Max devices per availability batch |
+| `availability.worker.pool.size` | 10 | Availability worker pool size |
 | `polling.cycle.interval.seconds` | 60 | Polling scheduler interval |
 | `polling.batch.size` | 50 | Max devices per polling batch |
 | `polling.max.cycles.skipped` | 5 | Auto-disable threshold |
+| `polling.worker.pool.size` | 10 | Polling worker pool size |
 | `polling.connection.timeout.seconds` | 20 | SSH/WinRM connection timeout |
 | `device.defaults.polling.interval.seconds` | 65 | Default device polling interval (testing value) |
 | `device.defaults.timeout.seconds` | 60 | Default per-device timeout |
-| `device.defaults.alert.threshold.cpu` | 80.0 | Default CPU alert threshold (%) |
-| `device.defaults.alert.threshold.memory` | 85.0 | Default memory alert threshold (%) |
-| `device.defaults.alert.threshold.disk` | 90.0 | Default disk alert threshold (%) |
 
 ### Customizing Configuration
 
-Edit `application.conf` in the application root directory before building to customize settings.
+Edit `src/main/resources/application.conf` before building to customize settings.
 
 ## 📊 Workflow & Code Approach
 
@@ -621,25 +703,47 @@ Edit `application.conf` in the application root directory before building to cus
 - Duplicate prevention via IP address uniqueness
 
 ### 3. Provision Phase
-- **Manual Provisioning**: User provisions discovered devices via API
-- **Auto-Configuration**: Devices populated with default thresholds from config
-- **Monitoring Ready**: Set `is_provisioned=true`, `is_monitoring_enabled=true`
+- **Automatic Provisioning**: Devices are automatically provisioned upon successful discovery
+- **Auto-Configuration**: Devices populated with default configuration from config
+- **Monitoring Ready**: Set `is_provisioned=true` (monitoring enabled)
 - **Availability Tracking**: Initialize device_availability record
 
-### 4. Monitoring Phase (PollingMetricsVerticle)
+### 4. Monitoring Phase (Dual-Cycle Architecture)
 
-**4-Phase Polling Cycle Approach:**
+NMSLite uses **two separate monitoring cycles** running independently:
 
-**Phase 1: Batch Processing**
-1. **Scheduler**: Wakes up every 60 seconds (configurable)
-2. **Device Selection**: Filter devices due for polling based on `polling_interval_seconds`
+#### Cycle 1: Availability Monitoring (AvailabilityVerticle)
+**Interval:** 10 seconds
+**Purpose:** Fast device availability detection
+
+1. **Scheduler**: Wakes up every 10 seconds
+2. **Device Selection**: All provisioned devices (is_provisioned=true, is_deleted=false)
 3. **Batch Processing**: Process devices in batches (default: 50)
 4. **Connectivity Check**:
    - **fping**: Batch ICMP ping for all devices
    - **Port Check**: TCP socket connection for alive devices
-5. **GoEngine Metrics**: Collect CPU, memory, disk metrics for connected devices
-6. **Success Handling**: Store metrics, update availability, advance schedule
-7. **Failure Tracking**: Track failed devices for retry
+5. **Cache Update**: Update shared availability cache (up/down status)
+6. **Database Update**: Update device_availability table
+7. **Statistics**: Track total_checks, successful_checks, failed_checks, availability_percent
+
+**Key Features:**
+- Fast 10-second cycle for quick availability detection
+- Shared cache accessible by PollingMetricsVerticle
+- No GoEngine calls (lightweight checks only)
+- Real-time availability statistics
+
+#### Cycle 2: Metrics Collection (PollingMetricsVerticle)
+**Interval:** 60 seconds
+**Purpose:** Detailed metrics collection via SSH/WinRM
+
+**Phase 1: Batch Processing**
+1. **Scheduler**: Wakes up every 60 seconds
+2. **Device Selection**: Filter devices due for polling based on `polling_interval_seconds`
+3. **Availability Check**: Read from shared availability cache (no fping/port check)
+4. **Batch Processing**: Process "up" devices in batches (default: 50)
+5. **GoEngine Metrics**: Collect CPU, memory, disk metrics via SSH/WinRM
+6. **Success Handling**: Store metrics, advance schedule
+7. **Failure Tracking**: Track failed devices for auto-disable
 
 **Phase 2: Auto-Disable**
 1. **Threshold Check**: Devices exceeding `max.cycles.skipped` (default: 5) consecutive failures
@@ -647,65 +751,91 @@ Edit `application.conf` in the application root directory before building to cus
 3. **Notification**: Log auto-disabled devices
 
 **Key Features:**
+- Reads availability from cache (no redundant fping/port checks)
+- Only polls devices marked as "up" in availability cache
 - In-memory device cache for fast lookups
 - Aligned scheduling for predictable polling
 - Consecutive failure tracking
 - Auto-disable for persistent failures
-- Comprehensive error logging
-- Real-time availability updates
 
 ## 🗄️ Database Schema
 
-The system uses **7 normalized tables** with PostgresSQL INET type for IP addresses:
+The system uses **8 normalized tables** with PostgreSQL INET type for IP addresses:
 
 ### Core Tables
 
 1. **users** - Admin users with JWT authentication
    - Fields: user_id (UUID), username, password_hash, is_active
-   - Soft delete support
+   - No soft delete (users are deactivated via is_active flag)
+   - Default users: motadataadmin (active), nmsliteadmin (inactive)
 
 2. **device_types** - Device templates with default ports
-   - Fields: device_type_id (UUID), device_type_name, default_port, is_active
-   - Examples: Linux Server (22), Windows Server (5985)
+   - Fields: device_type_id (UUID), device_type_name, default_port, is_active, created_at
+   - Examples: server linux (22), server windows (5985), router (161, inactive)
+   - Read-only for security (users cannot create/update/delete device types)
 
 3. **credential_profiles** - Reusable credentials (encrypted)
    - Fields: credential_profile_id (UUID), profile_name, username, password_encrypted
+   - **port** (INTEGER) - Port for this credential
+   - **protocol** (VARCHAR) - Protocol (ssh/winrm)
    - Used for both discovery and monitoring
+   - Timestamps: created_at, updated_at
 
 4. **discovery_profiles** - Discovery configurations
    - Fields: profile_id (UUID), discovery_name, ip_address (TEXT), is_range (BOOLEAN)
+   - **device_type_id** (UUID FK) - Reference to device_types
    - **credential_profile_ids (UUID[])** - Array of credentials for sequential testing
    - Supports single IP, IP range, and CIDR notation
+   - Timestamps: created_at, updated_at
 
 5. **devices** - Provisioned devices for monitoring
-   - Fields: device_id (UUID), device_name, **ip_address (INET)**, device_type, port, protocol
-   - **credential_profile_id** - Reference to successful credential
-   - **Monitoring Config**: polling_interval_seconds, timeout_seconds, retry_count
-   - **Alert Thresholds**: alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk
-   - **Flags**: is_provisioned, is_monitoring_enabled, is_deleted
-   - **Timestamps**: created_at, updated_at, last_polled_at, monitoring_enabled_at
+   - Fields: device_id (UUID), device_name, **ip_address (INET)**, device_type, host_name
+   - **credential_profile_id** (UUID FK) - Reference to successful credential
+   - **Monitoring Config**: polling_interval_seconds, timeout_seconds
+   - **Flags**: is_provisioned (true = monitoring enabled), is_deleted (soft delete)
+   - **Timestamps**: created_at, updated_at, deleted_at
+   - **Note**: port and protocol stored in credential_profiles, not devices
 
 6. **metrics** - Time-series metrics data
-   - Fields: metric_id (UUID), device_id (FK), timestamp, duration_ms
-   - **CPU**: cpu_usage_percent
+   - Fields: metric_id (UUID), device_id (FK), timestamp
+   - **CPU**: cpu_usage_percent (DECIMAL 5,2)
    - **Memory**: memory_usage_percent, memory_total_bytes, memory_used_bytes, memory_free_bytes
    - **Disk**: disk_usage_percent, disk_total_bytes, disk_used_bytes, disk_free_bytes
    - Only successful metrics stored (failures tracked in availability)
+   - Constraints: cpu/memory/disk percentages between 0-100
 
 7. **device_availability** - Availability tracking
    - Fields: device_id (PK/FK), total_checks, successful_checks, failed_checks
-   - **Availability**: availability_percent (calculated)
-   - **Status**: current_status (up/down/unknown), status_since
-   - **Timestamps**: last_check_time, last_success_time, last_failure_time
+   - **Availability**: availability_percent (DECIMAL 5,2, calculated)
+   - **Status**: current_status (up/down/unknown)
+   - **Timestamps**: last_check_time, last_success_time, last_failure_time, updated_at
+   - Constraint: total_checks = successful_checks + failed_checks
+
+8. **metrics_backup** - Automatic backup of deleted metrics
+   - Fields: backup_id (UUID), metric_id, device_id, timestamp, all metric fields
+   - **backed_up_at** (TIMESTAMP) - When backup was created
+   - Automatically populated via trigger (transparent to application)
+   - Preserves historical data when metrics are deleted
+
+### Database Triggers
+
+1. **update_updated_at_column()** - Automatically updates updated_at timestamp
+   - Applied to: credential_profiles, discovery_profiles, devices, device_availability
+
+2. **backup_metric_before_delete()** - Backs up metrics before deletion
+   - Applied to: metrics table
+   - Copies entire metric record to metrics_backup table
 
 ### Key Design Decisions
 
-- **INET Type**: Native PostgresSQL IP address storage for validation and performance
+- **INET Type**: Native PostgreSQL IP address storage for validation and performance
 - **UUID Primary Keys**: Distributed system compatibility
-- **Soft Delete**: Devices marked as deleted, not physically removed
+- **Soft Delete**: Devices marked as deleted (is_deleted=true), not physically removed
 - **Credential Arrays**: Multiple credentials per discovery profile for brute-force testing
 - **Normalized Design**: Credential profiles reused across discovery and devices
 - **Automatic Timestamps**: Triggers for updated_at columns
+- **Metrics Backup**: Automatic backup via trigger before deletion
+- **Port/Protocol Storage**: Stored in credential_profiles, not devices (normalization)
 
 ## 🔧 PostgresSQL INET Type Handling
 
@@ -837,19 +967,24 @@ NMSLite integrates with **GoEngine** (external Go binary) for SSH/WinRM device c
 
 ### Timeout Hierarchy
 
-**Discovery (3 Levels):**
-1. **Vert.x Batch Timeout**: 300s (entire batch operation) - `discovery.blocking.timeout.goengine`
-2. **GoEngine Per-Device**: 60s (per IP address) - `discovery.goengine.timeout.seconds`
-3. **GoEngine Per-Credential**: 20s (per credential attempt) - `discovery.goengine.connection.timeout.seconds`
+**Discovery (4 Levels):**
+1. **Event Bus**: 300s (5 min) - HTTP request to event bus communication - `discovery.eventbus.timeout.seconds`
+2. **Vert.x Batch**: 300s (5 min) - Overall batch operation - `discovery.blocking.timeout.goengine`
+3. **GoEngine Per-Device**: 60s - Per IP address - `discovery.goengine.timeout.seconds`
+4. **GoEngine Per-Credential**: 20s - Per credential attempt - `discovery.goengine.connection.timeout.seconds`
 
-**Polling/Metrics (3 Levels):**
-1. **Vert.x Batch Timeout**: 300s (entire batch operation) - `polling.blocking.timeout.goengine`
-2. **GoEngine Per-Device**: 60s (per device metrics collection) - `device.defaults.timeout.seconds` (from database)
-3. **GoEngine Connection**: 20s (SSH/WinRM connection timeout) - `polling.connection.timeout.seconds`
+**Availability (3 Levels):**
+1. **Vert.x Worker Pool**: 600s (10 min) - Worker pool timeout - `availability.worker.pool.timeout.seconds`
+2. **fping Batch**: 180s (3 min) - Batch operation - `tools.fping.batch.blocking.timeout.seconds`
+3. **fping Per-IP**: 5s - Per IP address - `tools.fping.timeout.seconds`
+4. **Port Check Batch**: 10s - Batch operation - `tools.port.check.batch.blocking.timeout.seconds`
+5. **Port Check Per-Socket**: 5s - Per socket - `tools.port.check.timeout.seconds`
 
-**Network Connectivity (2 Levels):**
-- **fping**: 5s per-IP, 180s batch timeout
-- **Port Check**: 5s per-socket, 10s batch timeout
+**Polling/Metrics (4 Levels):**
+1. **Vert.x Worker Pool**: 600s (10 min) - Worker pool timeout - `polling.worker.pool.timeout.seconds`
+2. **Vert.x Batch**: 300s (5 min) - Overall batch operation - `polling.blocking.timeout.goengine`
+3. **GoEngine Per-Device**: 60s - Per device metrics collection - `device.defaults.timeout.seconds` (from database)
+4. **GoEngine Connection**: 20s - SSH/WinRM connection - `polling.connection.timeout.seconds`
 
 ### Platform Support
 
@@ -882,32 +1017,39 @@ GoEngine configuration managed via:
 
 ### Event-Driven Architecture
 - **Vert.x 5.0.4**: Modern reactive framework with async/await patterns
+- **4-Verticle Architecture**: ServerVerticle, AvailabilityVerticle, PollingMetricsVerticle, DiscoveryVerticle
 - **Event Bus**: All inter-verticle communication via event bus
 - **ProxyGen**: Type-safe service proxies eliminate manual message handling
 - **Non-Blocking I/O**: All database and external process operations are non-blocking
+- **Blocked Thread Checker**: Configurable monitoring of event loop and worker threads
 
 ### Authentication & Security
+- **HTTPS Only**: All communication encrypted via TLS/SSL (port 8443)
 - **JWT Authentication**: HS256 algorithm with 24-hour token expiry
 - **AuthenticationMiddleware**: Automatic token validation on all protected routes
 - **Password Encryption**: Secure password hashing for user credentials
 - **Credential Encryption**: Encrypted storage of device credentials
+- **Keystore Security**: SSL certificates managed via Java KeyStore
 
 ### Discovery Features
-- **Multiple Credentials**: Sequential credential testing per IP
-- **Batch Processing**: Configurable batch sizes for network efficiency
+- **Multiple Credentials**: Sequential credential testing per IP (credential array support)
+- **Batch Processing**: Configurable batch sizes for network efficiency (default: 100)
 - **Duplicate Prevention**: IP address uniqueness constraint
-- **Comprehensive Timeouts**: 3-level timeout hierarchy (Vert.x → Device → Credential)
+- **Comprehensive Timeouts**: 4-level timeout hierarchy (Event Bus → Vert.x → Device → Credential)
 - **Backpressure Handling**: Queue-based batch processor prevents memory overflow
 - **Real-time Results**: Immediate feedback on discovery success/failure
+- **Automatic Provisioning**: Devices automatically provisioned upon successful discovery
 
-### Monitoring Features
-- **4-Phase Polling Cycle**: Batch → Retry → Log → Auto-Disable
-- **In-Memory Cache**: Fast device lookup without database queries
+### Monitoring Features (Dual-Cycle Architecture)
+- **Availability Cycle**: 10-second cycle with fping + port checks (AvailabilityVerticle)
+- **Metrics Cycle**: 60-second cycle with GoEngine SSH/WinRM (PollingMetricsVerticle)
+- **Shared Availability Cache**: AvailabilityVerticle populates, PollingMetricsVerticle reads
+- **In-Memory Device Cache**: Fast device lookup without database queries
 - **Aligned Scheduling**: Predictable polling based on device intervals
-- **Consecutive Failure Tracking**: Auto-disable after configurable threshold
-- **Availability Tracking**: Real-time availability percentages
+- **Consecutive Failure Tracking**: Auto-disable after configurable threshold (default: 5)
+- **Availability Statistics**: Real-time availability percentages and status tracking
 - **Historical Metrics**: Complete time-series data for trending
-- **Failure Logging**: Persistent logging of failed devices
+- **Metrics Backup**: Automatic backup via trigger before deletion
 
 ### Database Optimization
 - **PostgreSQL INET Type**: Native IP address storage with validation
@@ -915,18 +1057,27 @@ GoEngine configuration managed via:
 - **Prepared Statements**: SQL injection prevention
 - **Indexed Queries**: Optimized for common query patterns
 - **Soft Delete**: Preserve historical data while hiding deleted devices
+- **Automatic Triggers**: updated_at timestamps and metrics backup
+- **Normalized Design**: Credential profiles reused across discovery and devices
 
 ### Error Handling
 - **Comprehensive Exception Handling**: Centralized error handling via `ExceptionUtil`
 - **Graceful Degradation**: Failed devices don't block successful ones
 - **Detailed Logging**: SLF4J with Logback for structured logging
 - **Timeout Management**: Multiple timeout levels prevent hanging operations
+- **Worker Pool Isolation**: Separate worker pools for availability and polling
 
 ### Configuration Management
 - **HOCON Format**: Human-friendly configuration syntax
 - **Hierarchical Config**: Nested configuration for different components
 - **Environment Flexibility**: Easy configuration changes without code modification
 - **Sensible Defaults**: Production-ready default values
+- **Centralized Access**: Bootstrap.getConfig() for global configuration access
+
+### API Documentation
+- **Swagger UI**: Interactive API documentation at `/swagger-ui`
+- **OpenAPI Specification**: Complete API specification in `openapi.yaml`
+- **Request/Response Examples**: Comprehensive examples for all endpoints
 
 ## 🚀 Production Deployment
 
@@ -941,7 +1092,7 @@ RUN apt-get update && apt-get install -y fping && rm -rf /var/lib/apt/lists/*
 # Copy application
 COPY target/NMSLite-3.0-SNAPSHOT-fat.jar /app/nmslite.jar
 COPY goengine /app/goengine
-COPY application.conf /app/application.conf
+COPY keystore.jks /app/keystore.jks
 
 # Set permissions
 RUN chmod +x /app/goengine/goengine
@@ -951,14 +1102,14 @@ RUN mkdir -p /app/logs
 
 WORKDIR /app
 
-EXPOSE 8080
+EXPOSE 8443
 
 CMD ["java", "-jar", "nmslite.jar"]
 ```
 
 ### Production Configuration
 
-For production deployment, edit `application.conf` with production values:
+For production deployment, edit `src/main/resources/application.conf` with production values:
 
 ```hocon
 database {
@@ -971,7 +1122,13 @@ database {
 }
 
 server {
-  http.port = 8080
+  https {
+    port = 8443
+    keystore {
+      path = "keystore.jks"
+      password = "your_secure_keystore_password"
+    }
+  }
 }
 
 logging {
@@ -979,7 +1136,28 @@ logging {
   level = "INFO"
   file.path = "/var/log/nmslite/nmslite.log"
 }
+
+# Production polling intervals
+device {
+  defaults {
+    polling.interval.seconds = 300  # 5 minutes for production
+    timeout.seconds = 60
+  }
+}
 ```
+
+### SSL Certificate Generation
+
+Generate a self-signed certificate for development/testing:
+
+```bash
+keytool -genkeypair -alias nmslite -keyalg RSA -keysize 2048 \
+  -storetype JKS -keystore keystore.jks -validity 3650 \
+  -dname "CN=localhost, OU=NMSLite, O=Motadata, L=City, ST=State, C=US" \
+  -storepass motadataadmin -keypass motadataadmin
+```
+
+For production, use a certificate from a trusted Certificate Authority (CA).
 
 ## 🔧 Development
 
@@ -1085,13 +1263,28 @@ NMSLite follows strict coding standards for maintainability:
 
 NMSLite provides **enterprise-grade network monitoring** in a lightweight, event-driven package:
 
-✅ **Modern Architecture** - Vert.x 5.0.4 with ProxyGen service layer
-✅ **Secure** - JWT authentication on all endpoints
-✅ **Scalable** - Event-driven, non-blocking I/O
-✅ **Efficient** - Smart batching and backpressure handling
-✅ **Reliable** - 4-phase polling with auto-disable
-✅ **Flexible** - Multiple credentials, configurable timeouts
-✅ **Observable** - Comprehensive logging and metrics
-✅ **Production-Ready** - Docker support, HOCON config
+✅ **Modern Architecture** - Vert.x 5.0.4 with 4-verticle architecture and ProxyGen service layer
+✅ **Secure** - HTTPS-only with JWT authentication and encrypted credentials
+✅ **Dual-Cycle Monitoring** - Separate availability (10s) and metrics (60s) cycles
+✅ **Scalable** - Event-driven, non-blocking I/O with worker pool isolation
+✅ **Efficient** - Smart batching, shared caching, and backpressure handling
+✅ **Reliable** - Auto-disable for failed devices, metrics backup via triggers
+✅ **Flexible** - Multiple credentials, configurable timeouts, automatic provisioning
+✅ **Observable** - Comprehensive logging, Swagger UI, and real-time statistics
+✅ **Production-Ready** - Docker support, HOCON config, blocked thread monitoring
 
 **Perfect for monitoring Linux and Windows servers in enterprise environments!** 🚀
+
+---
+
+## 📞 Support & Documentation
+
+- **Swagger UI**: `https://localhost:8443/swagger-ui` - Interactive API documentation
+- **Logs**: `logs/nmslite.log` - Application logs
+- **GoEngine Logs**: `logs/goengine.log` - GoEngine process logs
+- **Configuration**: `src/main/resources/application.conf` - All settings
+- **Database Schema**: `database/schema.sql` - Complete database structure
+
+---
+
+**Built with ❤️ using Vert.x 5.0.4 and PostgreSQL**
