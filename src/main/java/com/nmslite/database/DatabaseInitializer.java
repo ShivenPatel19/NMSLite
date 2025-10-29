@@ -160,7 +160,7 @@ public class DatabaseInitializer {
             var pool = PgBuilder.pool()
                     .with(poolOptions)
                     .connectingTo(connectOptions)
-                    .using(Bootstrap.getVertxInstance())
+                    .using(Bootstrap.getVertx())
                     .build();
 
             // Test database connection
@@ -238,7 +238,7 @@ public class DatabaseInitializer {
         try
         {
             // Create service binder
-            var serviceBinder = new ServiceBinder(Bootstrap.getVertxInstance());
+            var serviceBinder = new ServiceBinder(Bootstrap.getVertx());
 
             // Register UserService
             serviceBinder

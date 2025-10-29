@@ -59,7 +59,7 @@ public class DatabaseMigrationService
             logger.info("Starting database migration");
 
             // Run migration on worker thread (blocking operation)
-            Bootstrap.getVertxInstance().executeBlocking(() ->
+            Bootstrap.getVertx().executeBlocking(() ->
             {
                 try
                 {

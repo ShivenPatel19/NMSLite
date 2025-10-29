@@ -26,8 +26,6 @@ import org.slf4j.Logger;
 
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-
 /**
  * NMSLite Application - Main Entry Point (Vert.x 5.0.4)
 
@@ -67,7 +65,7 @@ public class Bootstrap
      *
      * @return The Vertx instance, or null if not yet initialized
      */
-    public static Vertx getVertxInstance()
+    public static Vertx getVertx()
     {
             return vertx;
     }
@@ -466,6 +464,11 @@ public class Bootstrap
     /**
      * Cleans up all deployed verticles, database resources, and closes Vertx instance.
      * Called either from shutdown hook (normal shutdown) or startup failure handler (with Runtime.halt()).
+
+     * IMPORTANT: Cleanup order is critical to prevent race conditions:
+     * 1. Undeploy verticles FIRST (stops worker threads and timers)
+     * 2. Close database pool SECOND (after all DB operations are complete)
+     * 3. Close Vertx instance LAST
      *
      * @return Future that completes when cleanup is done
      */
@@ -475,40 +478,38 @@ public class Bootstrap
         {
             logger.info("Starting cleanup");
 
-            var cleanupFutures = new ArrayList<Future<Void>>();
+            // Step 1: Undeploy all verticles FIRST (in REVERSE order)
+            // This stops all worker threads, timers, and prevents new DB operations
+            Future<Void> undeployFuture = Future.succeededFuture();
 
-            // Cleanup database resources
-            if (databaseInitializer != null)
-            {
-                cleanupFutures.add(databaseInitializer.cleanup());
-            }
-
-            // Undeploy all verticles (in REVERSE order)
             if (verticleDeployer != null)
             {
-                cleanupFutures.add(verticleDeployer.undeployAll());
+                undeployFuture = verticleDeployer.undeployAll();
             }
 
-            // Wait for all cleanup operations to complete, then close Vertx
-            return Future.join(cleanupFutures)
-                .compose(result ->
+            // Step 2: Close database pool AFTER verticles are undeployed
+            // This ensures no worker threads try to access closed pool
+            return undeployFuture
+                .compose(v ->
                 {
-                    if (result.succeeded())
+                    if (databaseInitializer != null)
                     {
-                        logger.debug("All cleanup operations completed successfully");
+                        return databaseInitializer.cleanup();
                     }
                     else
                     {
-                        logger.error("Some cleanup operations failed: {}", result.cause().getMessage());
+                        return Future.succeededFuture();
                     }
-
-                    // Close Vertx instance
+                })
+                .compose(v ->
+                {
+                    // Step 3: Close Vertx instance LAST
                     if (vertx != null)
                     {
                         logger.info("Closing Vertx instance");
 
                         return vertx.close()
-                            .onSuccess(v -> logger.info("Vertx instance closed successfully"))
+                            .onSuccess(result -> logger.info("Vertx instance closed successfully"))
                             .onFailure(cause -> logger.error("Failed to close Vertx instance: {}", cause.getMessage()));
                     }
                     else
@@ -517,7 +518,8 @@ public class Bootstrap
 
                         return Future.succeededFuture();
                     }
-                });
+                })
+                .onFailure(cause -> logger.error("Cleanup failed: {}", cause.getMessage()));
         }
         catch (Exception exception)
         {

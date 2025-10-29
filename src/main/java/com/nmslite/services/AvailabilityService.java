@@ -7,6 +7,8 @@ import io.vertx.codegen.annotations.VertxGen;
 
 import io.vertx.core.Future;
 
+import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
 
 import io.vertx.serviceproxy.ServiceProxyBuilder;
@@ -37,10 +39,17 @@ public interface AvailabilityService
      */
     static AvailabilityService createProxy()
     {
-        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
+        return new ServiceProxyBuilder(Bootstrap.getVertx())
             .setAddress(SERVICE_ADDRESS)
             .build(AvailabilityService.class);
     }
+
+    /**
+     * Get all availability status records (for all devices)
+     *
+     * @return Future containing JsonArray of all availability records
+     */
+    Future<JsonArray> availabilityGetAll();
 
     /**
      * Get current availability status for specific device (device must be active, non-deleted)
@@ -51,13 +60,14 @@ public interface AvailabilityService
     Future<JsonObject> availabilityGetByDevice(String deviceId);
 
     /**
-     * Update device status based on latest check (used by PollingMetricsVerticle)
+     * Update device availability status (used by AvailabilityVerticle)
+     * Updates current_status and last check timestamps
      *
-     * @param deviceId Device ID (must be active, non-deleted)
-     * @param status New status ("UP" or "DOWN")
-     * @return Future containing JsonObject with status update result
+     * @param deviceId Device ID
+     * @param status New status ("up" or "down")
+     * @return Future containing JsonObject with update result
      */
-    Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status);
+    Future<JsonObject> availabilityUpdate(String deviceId, String status);
 
     /**
      * Reset availability status for specific device (when device is soft deleted)

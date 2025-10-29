@@ -8,6 +8,8 @@ import com.nmslite.services.AvailabilityService;
 
 import io.vertx.core.Future;
 
+import io.vertx.core.json.JsonArray;
+
 import io.vertx.core.json.JsonObject;
 
 import io.vertx.sqlclient.Tuple;
@@ -50,6 +52,45 @@ public class AvailabilityServiceImpl implements AvailabilityService
     }
 
     /**
+     * Get all availability status records
+     *
+     * @return Future containing JsonArray of all availability records
+     */
+    @Override
+    public Future<JsonArray> availabilityGetAll()
+    {
+        try
+        {
+            var sql = """
+                    SELECT device_id, current_status
+                    FROM device_availability
+                    ORDER BY device_id
+                    """;
+
+            return dbHelper.executeQuery(sql)
+                    .map(rows ->
+                    {
+                        var results = new JsonArray();
+
+                        for (var row : rows)
+                        {
+                            results.add(new JsonObject()
+                                    .put("device_id", row.getUUID("device_id").toString())
+                                    .put("status", row.getString("current_status")));
+                        }
+
+                        return results;
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in availabilityGetAll service: {}", exception.getMessage());
+
+            return Future.failedFuture(exception);
+        }
+    }
+
+    /**
      * Get device availability by device ID
      *
      * @param deviceId Device ID
@@ -64,7 +105,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
                     SELECT da.device_id, da.total_checks, da.successful_checks, da.failed_checks,
                            da.availability_percent, da.last_check_time, da.last_success_time, da.last_failure_time,
                            da.current_status, da.updated_at,
-                           d.device_name, d.ip_address::text as ip_address, d.device_type, d.is_monitoring_enabled
+                           d.device_name, d.ip_address::text as ip_address, d.device_type, d.is_provisioned
                     FROM device_availability da
                     JOIN devices d ON da.device_id = d.device_id
                     WHERE da.device_id = $1 AND d.is_deleted = false
@@ -94,7 +135,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
                                 .put("device_name", row.getString("device_name"))
                                 .put("ip_address", ipAddr)
                                 .put("device_type", row.getString("device_type"))
-                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
+                                .put("is_provisioned", row.getBoolean("is_provisioned"))
                                 .put("total_checks", row.getInteger("total_checks"))
                                 .put("successful_checks", row.getInteger("successful_checks"))
                                 .put("failed_checks", row.getInteger("failed_checks"))
@@ -119,14 +160,15 @@ public class AvailabilityServiceImpl implements AvailabilityService
     }
 
     /**
-     * Update device availability status (used by PollingMetricsVerticle)
+     * Update device availability status (used by AvailabilityVerticle)
+     * Updates current_status and last check timestamps
      *
      * @param deviceId Device ID
      * @param status Device status (up/down)
-     * @return Future containing JsonObject with status update result
+     * @return Future containing JsonObject with update result
      */
     @Override
-    public Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status)
+    public Future<JsonObject> availabilityUpdate(String deviceId, String status)
     {
         try
         {

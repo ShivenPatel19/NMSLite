@@ -152,6 +152,76 @@ public class DeviceServiceImpl implements DeviceService
     }
 
     /**
+     * List devices by credential profile ID
+     *
+     * @param credentialProfileId Credential profile ID
+     * @return Future containing JsonArray of devices
+     */
+    @Override
+    public Future<JsonArray> deviceListByCredentialProfile(String credentialProfileId)
+    {
+        try
+        {
+            var sql = """
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type,
+                           d.credential_profile_id, cp.username, cp.password_encrypted, cp.profile_name as credential_profile_name, cp.port, cp.protocol,
+                           d.polling_interval_seconds, d.timeout_seconds, d.host_name,
+                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at
+                    FROM devices d
+                    JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
+                    WHERE d.credential_profile_id = $1 AND d.is_deleted = false
+                    ORDER BY d.device_name
+                    """;
+
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(credentialProfileId)))
+                    .map(rows ->
+                    {
+                        var devices = new JsonArray();
+
+                        for (var row : rows)
+                        {
+                            // Removing CIDR notation
+                            var ipAddr = row.getString("ip_address");
+
+                            if (ipAddr != null && ipAddr.contains("/"))
+                            {
+                                ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
+                            }
+
+                            var device = new JsonObject()
+                                    .put("device_id", row.getUUID("device_id").toString())
+                                    .put("device_name", row.getString("device_name"))
+                                    .put("ip_address", ipAddr)
+                                    .put("device_type", row.getString("device_type"))
+                                    .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                    .put("credential_profile_name", row.getString("credential_profile_name"))
+                                    .put("username", row.getString("username"))
+                                    .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
+                                    .put("polling_interval_seconds", row.getLong("polling_interval_seconds"))
+                                    .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                    .put("host_name", row.getString("host_name"))
+                                    .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                    .put("is_deleted", row.getBoolean("is_deleted"))
+                                    .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
+                                    .put("created_at", row.getLocalDateTime("created_at").toString())
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null);
+
+                            devices.add(device);
+                        }
+
+                        return devices;
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceListByCredentialProfile service: {}", exception.getMessage());
+
+            return Future.failedFuture(exception);
+        }
+    }
+
+    /**
      * Delete device (soft delete)
      *
      * @param deviceId Device ID
@@ -166,7 +236,7 @@ public class DeviceServiceImpl implements DeviceService
                     UPDATE devices
                     SET is_deleted = true,
                         deleted_at = CURRENT_TIMESTAMP,
-                        is_monitoring_enabled = false
+                        is_provisioned = false
                     WHERE device_id = $1 AND is_deleted = false
                     RETURNING device_id, device_name
                     """;

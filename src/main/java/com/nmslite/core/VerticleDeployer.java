@@ -2,6 +2,8 @@ package com.nmslite.core;
 
 import com.nmslite.Bootstrap;
 
+import com.nmslite.verticles.AvailabilityVerticle;
+
 import com.nmslite.verticles.DiscoveryVerticle;
 
 import com.nmslite.verticles.PollingMetricsVerticle;
@@ -67,23 +69,31 @@ public class VerticleDeployer
 
      * Verticle deployment order:
      * 1. ServerVerticle - HTTP API server
-     * 2. PollingMetricsVerticle - Device monitoring
-     * 3. DiscoveryVerticle - Device discovery
+     * 2. AvailabilityVerticle - Device availability monitoring (10s cycle) - MUST deploy before PollingMetricsVerticle
+     * 3. PollingMetricsVerticle - Device metrics collection (60s cycle) - Depends on AvailabilityVerticle's shared cache
+     * 4. DiscoveryVerticle - Device discovery
+
+     * IMPORTANT: AvailabilityVerticle MUST be deployed BEFORE PollingMetricsVerticle because:
+     * - AvailabilityVerticle creates and populates the shared LocalMap "availability-cache"
+     * - PollingMetricsVerticle reads from this cache to check device availability before polling
+     * - If PollingMetricsVerticle deploys first, it will create an empty cache
 
      * Note: All verticles access configuration via Bootstrap.getConfig() directly.
 
      * To add a new verticle: Add the verticle instance to the list
      * To remove a verticle: Remove the verticle from the list
-     * To reorder: Change the order of verticles in the list
+     * To reorder: Change the order of verticles in the list (respect dependencies!)
      */
     public VerticleDeployer()
     {
         this.deployedVerticleIds = new ArrayList<>();
 
         // Define all verticles to deploy in order
+        // CRITICAL: AvailabilityVerticle MUST come before PollingMetricsVerticle (shared cache dependency)
         this.verticles = List.of(
             new ServerVerticle(),
-            new PollingMetricsVerticle(),
+            new AvailabilityVerticle(),        // Creates "availability-cache" LocalMap
+            new PollingMetricsVerticle(),      // Reads from "availability-cache" LocalMap
             new DiscoveryVerticle()
         );
     }
@@ -156,7 +166,7 @@ public class VerticleDeployer
     {
         try
         {
-            var vertx = Bootstrap.getVertxInstance();
+            var vertx = Bootstrap.getVertx();
 
             return vertx.deployVerticle(verticle)
                 .onSuccess(deploymentId ->
@@ -261,7 +271,7 @@ public class VerticleDeployer
         {
             logger.debug("Undeploying verticle: {}", deploymentId);
 
-            var vertx = Bootstrap.getVertxInstance();
+            var vertx = Bootstrap.getVertx();
 
             return vertx.undeploy(deploymentId)
                     .onSuccess(v -> logger.debug("Verticle undeployed: {}", deploymentId))

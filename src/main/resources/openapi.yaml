@@ -17,8 +17,8 @@ info:
   version: 2.0.0
 
 servers:
-  - url: http://localhost:8080
-    description: Local development server
+  - url: https://localhost:8443
+    description: Local development server (HTTPS only)
 
 tags:
   - name: Authentication
@@ -69,8 +69,12 @@ paths:
               properties:
                 username:
                   type: string
+                  description: Username for authentication
+                  example: "motadataadmin"
                 password:
                   type: string
+                  description: Password for authentication
+                  example: "motadataadmin"
       responses:
         '200':
           description: Login successful
@@ -79,16 +83,52 @@ paths:
               schema:
                 type: object
                 properties:
-                  success:
+                  authenticated:
                     type: boolean
-                  token:
+                    description: Whether authentication was successful
+                    example: true
+                  user_id:
                     type: string
-                  user:
+                    format: uuid
+                    description: User ID
+                    example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                  username:
+                    type: string
+                    description: Username
+                    example: "motadataadmin"
+                  is_active:
+                    type: boolean
+                    description: Whether the user account is active
+                    example: true
+                  jwt_token:
+                    type: string
+                    description: JWT token for authentication
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  token_type:
+                    type: string
+                    description: Token type (always "Bearer")
+                    example: "Bearer"
+                  expires_in_hours:
+                    type: integer
+                    description: Token expiry time in hours
+                    example: 24
+                  message:
+                    type: string
+                    description: Authentication result message
+                    example: "Authentication successful - JWT token generated"
         '401':
           description: Invalid credentials
           content:
             application/json:
               schema:
+                type: object
+                properties:
+                  authenticated:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: "Invalid username or password"
 
   /api/users:
     get:
@@ -110,18 +150,26 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  users:
-                    type: array
-                    items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    user_id:
+                      type: string
+                      format: uuid
+                    username:
+                      type: string
+                    is_active:
+                      type: boolean
         '401':
           description: Unauthorized
           content:
             application/json:
               schema:
+                type: object
+                properties:
+                  message:
+                    type: string
 
     post:
       tags:
@@ -165,12 +213,26 @@ paths:
                 properties:
                   success:
                     type: boolean
-                  user:
+                    example: true
+                  user_id:
+                    type: string
+                    format: uuid
+                  username:
+                    type: string
+                  is_active:
+                    type: boolean
+                  message:
+                    type: string
+                    example: "User created successfully"
         '400':
           description: Invalid input
           content:
             application/json:
               schema:
+                type: object
+                properties:
+                  message:
+                    type: string
 
   /api/users/{id}:
     put:
@@ -220,13 +282,26 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
+                  user_id:
+                    type: string
+                    format: uuid
+                  username:
+                    type: string
+                  is_active:
+                    type: boolean
                   message:
                     type: string
+                    example: "User updated successfully"
         '404':
           description: User not found
           content:
             application/json:
               schema:
+                type: object
+                properties:
+                  message:
+                    type: string
 
     delete:
       tags:
@@ -251,13 +326,24 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
+                  user_id:
+                    type: string
+                    format: uuid
+                  username:
+                    type: string
                   message:
                     type: string
+                    example: "User deleted successfully"
         '404':
           description: User not found
           content:
             application/json:
               schema:
+                type: object
+                properties:
+                  message:
+                    type: string
 
   /api/credentials:
     get:
@@ -294,6 +380,8 @@ paths:
                 - profile_name
                 - username
                 - password
+                - port
+                - protocol
               properties:
                 profile_name:
                   type: string
@@ -310,6 +398,17 @@ paths:
                   description: Password for device authentication
                   maxLength: 500
                   example: "SecurePassword123"
+                port:
+                  type: integer
+                  description: Port number (1-65535)
+                  minimum: 1
+                  maximum: 65535
+                  example: 22
+                protocol:
+                  type: string
+                  description: Protocol to use (e.g., ssh, winrm)
+                  maxLength: 50
+                  example: "ssh"
       responses:
         '200':
           description: Credential created successfully
@@ -320,7 +419,42 @@ paths:
                 properties:
                   success:
                     type: boolean
-                  credential:
+                    example: true
+                  credential_profile_id:
+                    type: string
+                    format: uuid
+                    example: "04ecd98c-ded2-44db-b269-00d4e88bf956"
+                  profile_name:
+                    type: string
+                    example: "SSH Admin Credentials"
+                  username:
+                    type: string
+                    example: "admin"
+                  port:
+                    type: integer
+                    example: 22
+                  protocol:
+                    type: string
+                    example: "ssh"
+                  created_at:
+                    type: string
+                    format: date-time
+                  message:
+                    type: string
+                    example: "Credential profile created successfully"
+        '400':
+          description: Invalid input or duplicate profile name
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Profile name already exists"
 
   /api/credentials/{id}:
     put:
@@ -348,7 +482,7 @@ paths:
                   type: string
                   description: Unique name for the credential profile
                   maxLength: 100
-                  example: "SSH Admin Credentials"
+                  example: "SSH Admin Credentials Updated"
                 username:
                   type: string
                   description: Username for device authentication
@@ -359,6 +493,17 @@ paths:
                   description: Password for device authentication
                   maxLength: 500
                   example: "NewSecurePassword123"
+                port:
+                  type: integer
+                  description: Port number (1-65535)
+                  minimum: 1
+                  maximum: 65535
+                  example: 2222
+                protocol:
+                  type: string
+                  description: Protocol to use (e.g., ssh, winrm)
+                  maxLength: 50
+                  example: "ssh"
       responses:
         '200':
           description: Credential updated successfully
@@ -369,14 +514,29 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
                   message:
                     type: string
+                    example: "Credential profile updated successfully"
+        '404':
+          description: Credential not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Credential profile not found"
 
     delete:
       tags:
         - Credentials
       summary: Delete credential profile
-      description: Delete a credential profile
+      description: Delete a credential profile (only if not in use by devices or discovery profiles)
       parameters:
         - name: id
           in: path
@@ -395,6 +555,30 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
+                  credential_profile_id:
+                    type: string
+                    format: uuid
+                  message:
+                    type: string
+                    example: "Credential profile deleted successfully"
+        '400':
+          description: Credential in use
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Cannot delete credential profile - it is currently in use by devices or discovery profiles"
+        '404':
+          description: Credential not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
                   message:
                     type: string
 
@@ -404,7 +588,7 @@ paths:
       tags:
         - Discovery Profiles
       summary: Get all discovery profiles
-      description: Retrieve list of all discovery profiles
+      description: Retrieve list of all discovery profiles with device type and credential information
       responses:
         '200':
           description: Discovery profiles retrieved successfully
@@ -415,15 +599,44 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
                   discovery_profiles:
                     type: array
                     items:
+                      type: object
+                      properties:
+                        profile_id:
+                          type: string
+                          format: uuid
+                        discovery_name:
+                          type: string
+                        ip_address:
+                          type: string
+                        is_range:
+                          type: boolean
+                        credential_profile_ids:
+                          type: array
+                          items:
+                            type: string
+                            format: uuid
+                        credential_count:
+                          type: integer
+                        created_at:
+                          type: string
+                          format: date-time
+                        updated_at:
+                          type: string
+                          format: date-time
+                        device_type_name:
+                          type: string
+                        default_port:
+                          type: integer
 
     post:
       tags:
         - Discovery Profiles
       summary: Create discovery profile
-      description: Create a new discovery profile for device discovery
+      description: Create a new discovery profile for device discovery. Port and protocol are now stored in credential profiles.
       requestBody:
         required: true
         content:
@@ -435,7 +648,6 @@ paths:
                 - ip_address
                 - device_type_id
                 - credential_profile_ids
-                - protocol
               properties:
                 discovery_name:
                   type: string
@@ -465,17 +677,6 @@ paths:
                     type: string
                     format: uuid
                   example: ["04ecd98c-ded2-44db-b269-00d4e88bf956", "23521ed8-cfe2-458a-9a57-b4c17e3ff091"]
-                protocol:
-                  type: string
-                  description: Protocol to use for discovery
-                  maxLength: 50
-                  example: "ssh"
-                port:
-                  type: integer
-                  description: Port number (1-65535)
-                  minimum: 1
-                  maximum: 65535
-                  example: 22
       responses:
         '200':
           description: Discovery profile created successfully
@@ -486,14 +687,46 @@ paths:
                 properties:
                   success:
                     type: boolean
-                  profile:
+                    example: true
+                  profile_id:
+                    type: string
+                    format: uuid
+                    example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                  discovery_name:
+                    type: string
+                    example: "Office Network Discovery"
+                  ip_address:
+                    type: string
+                    example: "192.168.1.100"
+                  is_range:
+                    type: boolean
+                    example: false
+                  created_at:
+                    type: string
+                    format: date-time
+                  message:
+                    type: string
+                    example: "Discovery profile created successfully"
+        '400':
+          description: Invalid input or duplicate discovery name
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Discovery name already exists"
 
   /api/discovery-profiles/{id}:
     delete:
       tags:
         - Discovery Profiles
       summary: Delete discovery profile
-      description: Delete a discovery profile
+      description: Delete a discovery profile (hard delete)
       parameters:
         - name: id
           in: path
@@ -512,6 +745,20 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
+                  profile_id:
+                    type: string
+                    format: uuid
+                  message:
+                    type: string
+                    example: "Discovery profile deleted successfully"
+        '404':
+          description: Discovery profile not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
                   message:
                     type: string
 
@@ -641,64 +888,142 @@ paths:
       tags:
         - Devices
       summary: Get discovered devices
-      description: Get all devices that are discovered but not yet provisioned
+      description: Get all devices that are discovered but not yet provisioned (is_provisioned = false)
       responses:
         '200':
           description: Discovered devices retrieved successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  devices:
-                    type: array
-                    items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    device_id:
+                      type: string
+                      format: uuid
+                    device_name:
+                      type: string
+                    ip_address:
+                      type: string
+                    device_type:
+                      type: string
+                    port:
+                      type: integer
+                    protocol:
+                      type: string
+                    credential_profile_id:
+                      type: string
+                      format: uuid
+                    username:
+                      type: string
+                    password_encrypted:
+                      type: string
+                    credential_profile_name:
+                      type: string
+                    polling_interval_seconds:
+                      type: integer
+                    timeout_seconds:
+                      type: integer
+                    host_name:
+                      type: string
+                    is_provisioned:
+                      type: boolean
+                      example: false
+                    is_deleted:
+                      type: boolean
+                      example: false
+                    deleted_at:
+                      type: string
+                      format: date-time
+                      nullable: true
+                    created_at:
+                      type: string
+                      format: date-time
+                    updated_at:
+                      type: string
+                      format: date-time
+                      nullable: true
 
   /api/devices/provisioned:
     get:
       tags:
         - Devices
       summary: Get provisioned devices
-      description: Get all devices that are provisioned
+      description: Get all devices that are provisioned (is_provisioned = true)
       responses:
         '200':
           description: Provisioned devices retrieved successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  devices:
-                    type: array
-                    items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    device_id:
+                      type: string
+                      format: uuid
+                    device_name:
+                      type: string
+                    ip_address:
+                      type: string
+                    device_type:
+                      type: string
+                    port:
+                      type: integer
+                    protocol:
+                      type: string
+                    credential_profile_id:
+                      type: string
+                      format: uuid
+                    username:
+                      type: string
+                    password_encrypted:
+                      type: string
+                    credential_profile_name:
+                      type: string
+                    polling_interval_seconds:
+                      type: integer
+                    timeout_seconds:
+                      type: integer
+                    host_name:
+                      type: string
+                    is_provisioned:
+                      type: boolean
+                      example: true
+                    is_deleted:
+                      type: boolean
+                      example: false
+                    deleted_at:
+                      type: string
+                      format: date-time
+                      nullable: true
+                    created_at:
+                      type: string
+                      format: date-time
+                    updated_at:
+                      type: string
+                      format: date-time
+                      nullable: true
 
-  /api/devices/provision:
+  /api/devices/{id}/provisioning/enable:
     post:
       tags:
         - Devices
-      summary: Provision devices
-      description: Provision devices and enable monitoring (bulk operation)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - device_ids
-              properties:
-                device_ids:
-                  type: array
-                  items:
-                    type: string
-                    format: uuid
+      summary: Enable device provisioning
+      description: Enable provisioning for a specific device (sets is_provisioned = true)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
-          description: Devices provisioned successfully
+          description: Provisioning enabled successfully
           content:
             application/json:
               schema:
@@ -706,7 +1031,62 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
                   message:
+                    type: string
+                    example: "Device provisioning enabled successfully"
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+
+  /api/devices/{id}/provisioning/disable:
+    post:
+      tags:
+        - Devices
+      summary: Disable device provisioning
+      description: Disable provisioning for a specific device (sets is_provisioned = false)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Device ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Provisioning disabled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Device provisioning disabled successfully"
+        '404':
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
                     type: string
 
   /api/devices/{id}/config:
@@ -714,7 +1094,7 @@ paths:
       tags:
         - Devices
       summary: Update device configuration
-      description: Update device name, port, and monitoring configuration
+      description: Update device name, polling interval, and timeout. Port and protocol are now stored in credential profiles.
       parameters:
         - name: id
           in: path
@@ -734,13 +1114,8 @@ paths:
                 device_name:
                   type: string
                   description: Name of the device
+                  maxLength: 100
                   example: "Core Router 1"
-                port:
-                  type: integer
-                  description: Port number (1-65535)
-                  minimum: 1
-                  maximum: 65535
-                  example: 22
                 polling_interval_seconds:
                   type: integer
                   description: Polling interval in seconds (60-86400)
@@ -749,31 +1124,10 @@ paths:
                   example: 300
                 timeout_seconds:
                   type: integer
-                  description: Timeout in seconds (0-600)
-                  minimum: 0
+                  description: Timeout in seconds (1-600)
+                  minimum: 1
                   maximum: 600
                   example: 30
-                alert_threshold_cpu:
-                  type: number
-                  format: float
-                  description: CPU usage alert threshold percentage (0-100)
-                  minimum: 0
-                  maximum: 100
-                  example: 80.0
-                alert_threshold_memory:
-                  type: number
-                  format: float
-                  description: Memory usage alert threshold percentage (0-100)
-                  minimum: 0
-                  maximum: 100
-                  example: 85.0
-                alert_threshold_disk:
-                  type: number
-                  format: float
-                  description: Disk usage alert threshold percentage (0-100)
-                  minimum: 0
-                  maximum: 100
-                  example: 90.0
       responses:
         '200':
           description: Device configuration updated successfully
@@ -784,26 +1138,23 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
+                  device_id:
+                    type: string
+                    format: uuid
+                  device_name:
+                    type: string
+                  polling_interval_seconds:
+                    type: integer
+                  timeout_seconds:
+                    type: integer
+                  is_provisioned:
+                    type: boolean
                   message:
                     type: string
-
-  /api/devices/{id}/monitoring/enable:
-    post:
-      tags:
-        - Devices
-      summary: Enable device monitoring
-      description: Enable monitoring for a specific device
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: Device ID
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: Monitoring enabled successfully
+                    example: "Device configuration updated successfully"
+        '400':
+          description: Invalid input or no fields provided
           content:
             application/json:
               schema:
@@ -811,26 +1162,12 @@ paths:
                 properties:
                   success:
                     type: boolean
-                  message:
+                    example: false
+                  error:
                     type: string
-
-  /api/devices/{id}/monitoring/disable:
-    post:
-      tags:
-        - Devices
-      summary: Disable device monitoring
-      description: Disable monitoring for a specific device
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: Device ID
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: Monitoring disabled successfully
+                    example: "No updatable fields provided"
+        '404':
+          description: Device not found
           content:
             application/json:
               schema:
@@ -838,15 +1175,19 @@ paths:
                 properties:
                   success:
                     type: boolean
-                  message:
+                    example: false
+                  error:
                     type: string
+                    example: "Device not found"
+
+
 
   /api/devices/{id}:
     delete:
       tags:
         - Devices
       summary: Soft delete device
-      description: Mark a device as deleted (soft delete)
+      description: Mark a device as deleted (soft delete) and disable monitoring
       parameters:
         - name: id
           in: path
@@ -865,6 +1206,22 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
+                  device_id:
+                    type: string
+                    format: uuid
+                  device_name:
+                    type: string
+                  message:
+                    type: string
+                    example: "Device deleted successfully"
+        '404':
+          description: Device not found or already deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
                   message:
                     type: string
 
@@ -873,7 +1230,7 @@ paths:
       tags:
         - Devices
       summary: Restore deleted device
-      description: Restore a soft-deleted device
+      description: Restore a soft-deleted device (monitoring remains disabled, use provisioning endpoint to enable)
       parameters:
         - name: id
           in: path
@@ -892,6 +1249,22 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
+                  device_id:
+                    type: string
+                    format: uuid
+                  device_name:
+                    type: string
+                  message:
+                    type: string
+                    example: "Device restored successfully"
+        '404':
+          description: Device not found or not deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
                   message:
                     type: string
 
@@ -900,7 +1273,7 @@ paths:
       tags:
         - Devices
       summary: Get all device types
-      description: Retrieve list of all available device types
+      description: Retrieve list of all available device types (only active types)
       responses:
         '200':
           description: Device types retrieved successfully
@@ -911,16 +1284,31 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
                   device_types:
                     type: array
                     items:
+                      type: object
+                      properties:
+                        device_type_id:
+                          type: string
+                          format: uuid
+                        device_type_name:
+                          type: string
+                        default_port:
+                          type: integer
+                        is_active:
+                          type: boolean
+                        created_at:
+                          type: string
+                          format: date-time
 
   /api/metrics/{deviceId}:
     get:
       tags:
         - Metrics
       summary: Get device metrics
-      description: Retrieve all metrics for a specific device
+      description: Retrieve all metrics for a specific device ordered by timestamp DESC (latest first)
       parameters:
         - name: deviceId
           in: path
@@ -935,18 +1323,64 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  metrics:
-                    type: array
-                    items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    metric_id:
+                      type: string
+                      format: uuid
+                    device_id:
+                      type: string
+                      format: uuid
+                    device_name:
+                      type: string
+                    ip_address:
+                      type: string
+                    device_type:
+                      type: string
+                    timestamp:
+                      type: string
+                      format: date-time
+                    cpu_usage_percent:
+                      type: number
+                      format: decimal
+                    memory_usage_percent:
+                      type: number
+                      format: decimal
+                    memory_total_bytes:
+                      type: integer
+                      format: int64
+                    memory_used_bytes:
+                      type: integer
+                      format: int64
+                    memory_free_bytes:
+                      type: integer
+                      format: int64
+                    disk_usage_percent:
+                      type: number
+                      format: decimal
+                    disk_total_bytes:
+                      type: integer
+                      format: int64
+                    disk_used_bytes:
+                      type: integer
+                      format: int64
+                    disk_free_bytes:
+                      type: integer
+                      format: int64
         '404':
           description: Device not found
           content:
             application/json:
               schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
 
   /api/availability/{deviceId}:
     get:
@@ -970,13 +1404,56 @@ paths:
               schema:
                 type: object
                 properties:
-                  success:
+                  found:
                     type: boolean
-                  availability:
-                    type: array
-                    items:
+                    example: true
+                  device_id:
+                    type: string
+                    format: uuid
+                  device_name:
+                    type: string
+                  ip_address:
+                    type: string
+                  device_type:
+                    type: string
+                  is_provisioned:
+                    type: boolean
+                    description: Whether device is provisioned (monitoring enabled)
+                  total_checks:
+                    type: integer
+                  successful_checks:
+                    type: integer
+                  failed_checks:
+                    type: integer
+                  availability_percent:
+                    type: number
+                    format: decimal
+                  last_check_time:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  last_success_time:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  last_failure_time:
+                    type: string
+                    format: date-time
+                    nullable: true
+                  current_status:
+                    type: string
+                    enum: [up, down, unknown]
+                  updated_at:
+                    type: string
+                    format: date-time
+                    nullable: true
         '404':
           description: Device not found
           content:
             application/json:
               schema:
+                type: object
+                properties:
+                  found:
+                    type: boolean
+                    example: false

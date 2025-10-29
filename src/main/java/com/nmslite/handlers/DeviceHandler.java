@@ -54,7 +54,7 @@ public class DeviceHandler
      */
     public DeviceHandler(DeviceService deviceService, DeviceTypeService deviceTypeService)
     {
-        this.vertx = Bootstrap.getVertxInstance();
+        this.vertx = Bootstrap.getVertx();
 
         this.deviceService = deviceService;
 

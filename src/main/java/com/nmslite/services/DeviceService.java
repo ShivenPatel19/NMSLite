@@ -41,7 +41,7 @@ public interface DeviceService
      */
     static DeviceService createProxy()
     {
-        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
+        return new ServiceProxyBuilder(Bootstrap.getVertx())
                 .setAddress(SERVICE_ADDRESS)
                 .build(DeviceService.class);
     }
@@ -54,6 +54,15 @@ public interface DeviceService
      * @return Future containing JsonArray of devices
      */
     Future<JsonArray> deviceListByProvisioned(boolean isProvisioned);
+
+    /**
+     * List devices by credential profile ID
+     * FILTER: credential_profile_id = <param>, is_deleted = false
+     *
+     * @param credentialProfileId Credential profile ID
+     * @return Future containing JsonArray of devices
+     */
+    Future<JsonArray> deviceListByCredentialProfile(String credentialProfileId);
 
 
 

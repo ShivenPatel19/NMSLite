@@ -14,21 +14,15 @@ package com.nmslite.verticles;
 
 import com.nmslite.Bootstrap;
 
-import com.nmslite.core.NetworkConnectivity;
-
-import com.nmslite.models.PollingDevice;
-
-import com.nmslite.models.PollingResult;
+import com.nmslite.models.DevicePolling;
 
 import com.nmslite.services.DeviceService;
 
 import com.nmslite.services.MetricsService;
 
-import com.nmslite.services.AvailabilityService;
-
 import com.nmslite.utils.PasswordUtil;
 
-import com.nmslite.core.QueueBatchProcessor;
+import com.nmslite.core.ParallelBatchProcessor;
 
 import io.vertx.core.AbstractVerticle;
 
@@ -39,6 +33,10 @@ import io.vertx.core.Promise;
 import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.json.JsonObject;
+
+import io.vertx.core.WorkerExecutor;
+
+import io.vertx.core.shareddata.LocalMap;
 
 import org.slf4j.Logger;
 
@@ -53,8 +51,6 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import java.util.stream.Collectors;
-
-import static java.util.stream.Collectors.toMap;
 
 /**
  * PollingMetricsVerticle - Continuous Device Monitoring
@@ -86,16 +82,24 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     private int maxCyclesSkipped;            // Auto-disable threshold
 
-    // Service proxies
     private DeviceService deviceService;
 
     private MetricsService metricsService;
 
-    private AvailabilityService availabilityService;
+    // Worker pool for blocking operations (GoEngine only - fping/port check done by AvailabilityVerticle)
+    private WorkerExecutor pollingWorkerPool;
+
+    // Shared availability cache name (same as AvailabilityVerticle)
+    private static final String AVAILABILITY_CACHE_NAME = "availability-cache";
+
+    // Shared availability cache (read-only access from AvailabilityVerticle)
+    // Key: device_id, Value: JsonObject with fields: device_id, address, port, status
+    // Note: LocalMap only supports immutable types (String, JsonObject, etc.), not custom POJOs
+    private LocalMap<String, JsonObject> availabilityCache;
 
     // In-memory device cache
-    // Key: device_id, Value: PollingDevice (persistent data + runtime state)
-    private HashMap<String, PollingDevice> deviceCache;
+    // Key: device_id, Value: DevicePolling (persistent data + runtime state)
+    private HashMap<String, DevicePolling> deviceCache;
 
     /**
      * Start the verticle: load configuration, initialize service proxies, load devices into cache, and start polling.
@@ -140,7 +144,38 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     .getJsonObject("timeout", new JsonObject())
                     .getInteger("seconds", 10);
 
+            int workerPoolSize = pollingConfig.getJsonObject("worker", new JsonObject())
+                    .getJsonObject("pool", new JsonObject())
+                    .getInteger("size", 10);
+
+            int workerPoolTimeoutSeconds = pollingConfig.getJsonObject("worker", new JsonObject())
+                    .getJsonObject("pool", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("seconds", 300);
+
             initializeServiceProxies();
+
+            // Create dedicated worker pool for polling operations
+            pollingWorkerPool = vertx.createSharedWorkerExecutor(
+                    "polling-worker-pool",
+                    workerPoolSize,
+                    workerPoolTimeoutSeconds,
+                    TimeUnit.SECONDS);
+
+            logger.info("Polling worker pool created: {} workers, {}s timeout", workerPoolSize, workerPoolTimeoutSeconds);
+
+            // Access shared availability cache (populated by AvailabilityVerticle)
+            // Note: AvailabilityVerticle MUST be deployed BEFORE this verticle (see VerticleDeployer)
+            availabilityCache = vertx.sharedData().getLocalMap(AVAILABILITY_CACHE_NAME);
+
+            if (availabilityCache.isEmpty())
+            {
+                logger.warn("Availability cache is empty - AvailabilityVerticle may not have started yet or no devices are provisioned");
+            }
+            else
+            {
+                logger.info("Accessing shared availability cache: {} devices", availabilityCache.size());
+            }
 
             // Initialize CACHE (in-memory device store for fast lookups)
             deviceCache = new HashMap<>();
@@ -185,8 +220,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
             this.deviceService = DeviceService.createProxy();
 
             this.metricsService = MetricsService.createProxy();
-
-            this.availabilityService = AvailabilityService.createProxy();
         }
         catch (Exception exception)
         {
@@ -235,7 +268,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                                 }
                                 else
                                 {
-                                    logger.error("Failed to create PollingDevice from JSON for device {}", deviceData.getString("device_name"));
+                                    logger.error("Failed to create DevicePolling from JSON for device {}", deviceData.getString("device_name"));
                                 }
                             }
                             catch (Exception exception)
@@ -266,18 +299,18 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Create PollingDevice from database JSON.
+     * Create DevicePolling from database JSON.
 
-     * Maps database fields to PollingDevice model and computes runtime state.
+     * Maps database fields to DevicePolling model and computes runtime state.
      *
      * @param deviceData JSON from database query
-     * @return PollingDevice instance
+     * @return DevicePolling instance
      */
-    private PollingDevice createPollingDeviceFromJson(JsonObject deviceData)
+    private DevicePolling createPollingDeviceFromJson(JsonObject deviceData)
     {
         try
         {
-            var pd = new PollingDevice();
+            var pd = new DevicePolling();
 
             // Identity
             pd.deviceId = deviceData.getString("device_id");
@@ -430,6 +463,16 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                 onDeviceRestored(deviceId);
             });
+
+            // Credential profile updated - UPDATE port for all devices using this profile
+            vertx.eventBus().consumer("credential.profile.updated", msg ->
+            {
+                var data = (JsonObject) msg.body();
+
+                var profileId = data.getString("credential_profile_id");
+
+                onCredentialProfileUpdated(profileId);
+            });
         }
         catch (Exception exception)
         {
@@ -467,7 +510,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                             }
                             else
                             {
-                                logger.error("Failed to create PollingDevice from JSON for device {}", deviceId);
+                                logger.error("Failed to create DevicePolling from JSON for device {}", deviceId);
                             }
                         }
                         catch (Exception exception)
@@ -540,7 +583,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                             }
                             else
                             {
-                                logger.error("Failed to create PollingDevice from JSON for device {}", deviceId);
+                                logger.error("Failed to create DevicePolling from JSON for device {}", deviceId);
                             }
                         }
                         catch (Exception exception)
@@ -585,12 +628,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 .onFailure(cause ->
                     logger.error("Failed to delete metrics for device {}: {}", deviceId, cause.getMessage()));
 
-            // Step 3: Reset availability to 0% and unknown (keep row for future polling)
-            availabilityService.availabilityResetDevice(deviceId)
-                .onSuccess(result ->
-                    logger.info("Reset availability to 0%/unknown for device: {}", deviceId))
-                .onFailure(cause ->
-                    logger.error("Failed to reset availability for device {}: {}", deviceId, cause.getMessage()));
+            // Note: Availability continues to be tracked by AvailabilityVerticle (10s cycle)
+            // No need to reset availability here
         }
         catch (Exception exception)
         {
@@ -636,7 +675,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         }
                         else
                         {
-                            logger.error("Failed to create PollingDevice from JSON for restored device {}", deviceId);
+                            logger.error("Failed to create DevicePolling from JSON for restored device {}", deviceId);
                         }
                     }
                     catch (Exception exception)
@@ -650,6 +689,60 @@ public class PollingMetricsVerticle extends AbstractVerticle
         catch (Exception exception)
         {
             logger.error("Error in onDeviceRestored: {}", exception.getMessage());
+        }
+    }
+
+    /**
+     * Handle credential profile updated event.
+     * Reload all devices using this credential profile to get updated port.
+     *
+     * @param profileId Credential profile ID
+     */
+    private void onCredentialProfileUpdated(String profileId)
+    {
+        try
+        {
+            logger.info("Credential profile updated: {}", profileId);
+
+            // Find all devices using this credential profile and reload their data
+            deviceService.deviceListByCredentialProfile(profileId)
+                    .onSuccess(devices ->
+                    {
+                        for (int i = 0; i < devices.size(); i++)
+                        {
+                            var deviceData = devices.getJsonObject(i);
+
+                            var deviceId = deviceData.getString("device_id");
+
+                            // Only update if device is in cache (provisioned)
+                            if (deviceCache.containsKey(deviceId))
+                            {
+                                var pd = createPollingDeviceFromJson(deviceData);
+
+                                if (pd != null)
+                                {
+                                    // Preserve runtime state
+                                    var oldPd = deviceCache.get(deviceId);
+
+                                    pd.nextScheduledAt = oldPd.nextScheduledAt;
+
+                                    pd.consecutiveFailures = oldPd.consecutiveFailures;
+
+                                    deviceCache.put(deviceId, pd);
+
+                                    logger.debug("Updated device {} with new port: {}", deviceId, pd.port);
+                                }
+                            }
+                        }
+
+                        logger.info("Updated {} devices for credential profile {}", devices.size(), profileId);
+                    })
+                    .onFailure(cause ->
+                            logger.error("Failed to reload devices for credential profile {}: {}", profileId, cause.getMessage()));
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in onCredentialProfileUpdated: {}", exception.getMessage());
         }
     }
 
@@ -751,7 +844,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * @param dueDevices List of devices due for polling
      * @return Future<Void> - completes when all devices are processed and availability updated
      */
-    private Future<Void> executeBatchProcessing(List<PollingDevice> dueDevices)
+    private Future<Void> executeBatchProcessing(List<DevicePolling> dueDevices)
     {
         var promise = Promise.<Void>promise();
 
@@ -759,27 +852,31 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             logger.debug("Phase 1: Batch processing {} devices", dueDevices.size());
 
-            // Use QueueBatchProcessor for sequential batch processing
-            var processor = new PollingBatchProcessor(dueDevices);
+            // Use ParallelBatchProcessor with completion tracking
+            // Each batch processes its results IMMEDIATELY when it completes (no waiting for other batches)
+            // Completion handler triggers Phase 2 when ALL batches done
+            var processor = new PollingBatchProcessor(dueDevices, batchSize, pollingWorkerPool);
 
-            var batchPromise = Promise.<JsonArray>promise();
+            processor.processAllBatchesWithCompletion(v ->
+            {
+                // ✅ This runs when ALL batches complete
+                // ✅ Each batch already stored metrics immediately upon completion
+                // ✅ Now trigger Phase 2 (auto-disable)
 
-            processor.processNext(batchPromise);
+                var failedDevices = processor.getFailedDevices();
 
-            batchPromise.future()
-                .onSuccess(results ->
-                {
-                    var failedDevices = processor.getFailedDevices();
-
-                    logger.info("Phase 1 completed: {}/{} devices processed successfully, {} failed",
+                logger.info("Phase 1 completed: {}/{} devices processed successfully, {} failed",
                         dueDevices.size() - failedDevices.size(), dueDevices.size(), failedDevices.size());
 
-                    // Update availability for ALL devices immediately (both successful and failed)
-                    updateAvailabilityForAllDevices(dueDevices);
+                // Note: Availability updates are now handled by AvailabilityVerticle (10s cycle)
+                // PollingMetricsVerticle only focuses on metrics collection
 
-                    promise.complete();
-                })
-                .onFailure(promise::fail);
+                promise.complete();
+            })
+            .onFailure(promise::fail);
+
+            // Method returns immediately after submitting all batches
+            logger.debug("All batches submitted, processing in background");
         }
         catch (Exception exception)
         {
@@ -792,85 +889,72 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Process a single batch of devices (OPTIMIZED - in-place processing)
-
-     * Optimizations:
-     * 1. Process devices in-place using PollingResult enum for state tracking
-     * 2. Single device map created once and reused (not recreated)
-     * 3. No intermediate JsonArrays or Lists - direct device object manipulation
-     * 4. Collect failures at the end in one pass using filter
-     * 5. Clear state machine: NOT_PROCESSED → CONNECTIVITY_FAILED/SUCCESS/GOENGINE_FAILED
+     * Process a single batch of devices (OPTIMIZED - uses availability cache)
 
      * Flow:
-     * 1. Reset all devices to NOT_PROCESSED state
-     * 2. Perform connectivity checks (fping + port)
-     * 3. Mark unreachable devices as CONNECTIVITY_FAILED
-     * 4. Execute GoEngine for reachable devices
-     * 5. Mark GoEngine results as SUCCESS or GOENGINE_FAILED
-     * 6. Return all failed devices in one pass
+     * 1. Check device status in availability cache (populated by AvailabilityVerticle)
+     * 2. If status = "up" → execute GoEngine
+     * 3. If status = "down" or "unknown" → increment failure count, skip GoEngine
+     * 4. Update device state based on GoEngine results (reset failures + advance schedule on success)
+     * 5. Return all failed devices in one pass
      */
-    private Future<List<PollingDevice>> processSingleBatch(List<PollingDevice> batch)
+    private Future<List<DevicePolling>> processSingleBatch(List<DevicePolling> batch)
     {
         try
         {
-            // Reset polling results for all devices in batch
-            batch.forEach(PollingDevice::resetPollingResult);
+            // Track failed devices locally
+            var failedDevices = new ArrayList<DevicePolling>();
 
-            // Create device map ONCE for O(1) lookups throughout the method
-            var deviceMap = batch.stream().collect(toMap(d -> d.deviceId, d -> d));
+            // Separate devices into "up" and "down" based on availability cache
+            var upDevices = new JsonArray();
 
-            // Step 1: Perform connectivity checks (fping + port check)
-            return performConnectivityChecksForPolling(batch)
-            .compose(connectivityResults ->
+            for (var pd : batch)
             {
-                var reachableDevices = connectivityResults.getJsonArray("reachable");
+                // Check availability status from shared cache (stored as JsonObject)
+                var availabilityJson = availabilityCache.get(pd.deviceId);
 
-                var unreachableDevices = connectivityResults.getJsonArray("unreachable");
+                String status = availabilityJson != null ? availabilityJson.getString("status") : "unknown";
 
-                var reachableCount = reachableDevices.size();
-
-                var unreachableCount = unreachableDevices.size();
-
-                var batchSize = batch.size();
-
-                logger.info("Connectivity check: {}/{} devices reachable, {}/{} unreachable",
-                    reachableCount, batchSize, unreachableCount, batchSize);
-
-                // Step 2: Mark unreachable devices as CONNECTIVITY_FAILED
-                // Availability will be updated centrally after final result is determined
-                for (var i = 0; i < unreachableDevices.size(); i++)
+                if ("up".equals(status))
                 {
-                    var deviceId = unreachableDevices.getString(i);
-
-                    var pd = deviceMap.get(deviceId);
-
-                    if (pd != null)
-                    {
-                        pd.pollingResult = PollingResult.CONNECTIVITY_FAILED;
-
-                        pd.incrementFailures();
-                    }
+                    // Device is up - add to GoEngine execution list
+                    upDevices.add(pd.deviceId);
                 }
-
-                // Step 3: Execute GoEngine for reachable devices
-                if (reachableDevices.isEmpty())
+                else
                 {
-                    logger.debug("No reachable devices in batch, skipping GoEngine");
+                    // Device is down or unknown - increment failure count, skip GoEngine
+                    pd.incrementFailures();
 
-                    return Future.succeededFuture(
-                        batch.stream().filter(PollingDevice::hasFailed).toList()
-                    );
+                    failedDevices.add(pd);
+
+                    logger.debug("Device {} is {} (from availability cache), skipping GoEngine",
+                            pd.deviceId, status);
                 }
+            }
 
-                return executeGoEngineForReachableDevices(batch, reachableDevices)
+            logger.info("Availability check: {}/{} devices up, {}/{} down/unknown",
+                    upDevices.size(), batch.size(), failedDevices.size(), batch.size());
+
+            // Execute GoEngine for devices that are "up"
+            if (upDevices.isEmpty())
+            {
+                logger.debug("No devices are up in batch, skipping GoEngine");
+
+                return Future.succeededFuture(failedDevices);
+            }
+
+            return executeGoEngineForReachableDevices(batch, upDevices)
                     .map(metricsResults ->
                     {
-                        // Step 4: Process GoEngine results and mark device states
-                        for (var i = 0; i < reachableDevices.size(); i++)
+                        // Process GoEngine results and update device state
+                        for (var i = 0; i < upDevices.size(); i++)
                         {
-                            var deviceId = reachableDevices.getString(i);
+                            var deviceId = upDevices.getString(i);
 
-                            var pd = deviceMap.get(deviceId);
+                            var pd = batch.stream()
+                                    .filter(d -> d.deviceId.equals(deviceId))
+                                    .findFirst()
+                                    .orElse(null);
 
                             if (pd != null)
                             {
@@ -878,25 +962,22 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                                 if (success)
                                 {
-                                    pd.pollingResult = PollingResult.SUCCESS;
-
                                     pd.resetFailures();
 
                                     pd.advanceSchedule();
                                 }
                                 else
                                 {
-                                    pd.pollingResult = PollingResult.GOENGINE_FAILED;
-
                                     pd.incrementFailures();
+
+                                    failedDevices.add(pd);
                                 }
                             }
                         }
 
-                        // Return all failed devices in one pass (CONNECTIVITY_FAILED + GOENGINE_FAILED)
-                        return batch.stream().filter(PollingDevice::hasFailed).toList();
+                        // Return all failed devices (availability failures + GoEngine failures)
+                        return failedDevices;
                     });
-            });
         }
         catch (Exception exception)
         {
@@ -916,7 +997,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * @param reachableDeviceIds JsonArray of device IDs that passed connectivity checks
      * @return Future<Map<String, Boolean>> - Map of device_id -> success status
      */
-    private Future<Map<String, Boolean>> executeGoEngineForReachableDevices(List<PollingDevice> allDevices, JsonArray reachableDeviceIds)
+    private Future<Map<String, Boolean>> executeGoEngineForReachableDevices(List<DevicePolling> allDevices, JsonArray reachableDeviceIds)
     {
         var promise = Promise.<Map<String, Boolean>>promise();
 
@@ -965,14 +1046,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * @param devices List of devices to poll
      * @return Map of device_id -> success status
      */
-    private Map<String, Boolean> pollDeviceMetricsBatch(List<PollingDevice> devices)
+    private Map<String, Boolean> pollDeviceMetricsBatch(List<DevicePolling> devices)
     {
         Map<String, Boolean> results = new HashMap<>();
 
         var deviceCount = devices.size();
 
         // Initialize all devices as failed (will be updated on success)
-        for (PollingDevice pd : devices)
+        for (DevicePolling pd : devices)
         {
             results.put(pd.deviceId, false);
         }
@@ -1003,9 +1084,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
             var process = pb.start();
 
             // Create IP-to-device lookup map for O(1) access when processing GoEngine streaming results
-            // GoEngine returns results with IP address, we need to map back to PollingDevice objects
+            // GoEngine returns results with IP address, we need to map back to DevicePolling objects
             // Without this map, we'd need O(n) linear search for each result line
-            var devicesByIp = new HashMap<String, PollingDevice>();
+            var devicesByIp = new HashMap<String, DevicePolling>();
 
             for (var pd : devices)
             {
@@ -1190,7 +1271,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * then updates database (async). This ensures the device won't be polled
      * in the next cycle before the database update completes.
      */
-    private void disableDevicesSequentially(List<PollingDevice> devices, int index, Promise<Void> promise)
+    private void disableDevicesSequentially(List<DevicePolling> devices, int index, Promise<Void> promise)
     {
         try
         {
@@ -1203,7 +1284,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
             var pd = devices.get(index);
 
-            logger.warn("Auto-disabling device {} due to consecutive failures", pd.deviceName);
+            logger.warn("Auto-disabling device {} due to {} consecutive failures", pd.deviceName, maxCyclesSkipped);
 
             // Remove from cache FIRST (synchronous, immediate) to prevent race condition
             // This ensures the device won't be polled in the next cycle before DB update completes
@@ -1220,7 +1301,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("Failed to disable provisioning for device {} in database: {}", pd.deviceName, cause.getMessage());
+                    logger.error("Failed to auto-disable device {}: {}", pd.deviceName, cause.getMessage());
 
                     // Continue with next device even on failure
                     disableDevicesSequentially(devices, index + 1, promise);
@@ -1287,203 +1368,23 @@ public class PollingMetricsVerticle extends AbstractVerticle
         }
     }
 
-    /**
-     * Update device availability status
-
-     * Includes cache check to prevent race conditions in overlapping cycles.
-     * If device was removed from cache by a concurrent cycle, skip availability update.
-     */
-    private void updateDeviceAvailability(String deviceId, boolean isAvailable)
-    {
-        try
-        {
-            // Check if device is still in cache before updating availability
-            // Prevents race condition: device removed by concurrent cycle while this cycle is still processing
-            if (!deviceCache.containsKey(deviceId))
-            {
-                logger.debug("Device {} removed from cache during polling, skipping availability update", deviceId);
-
-                return;
-            }
-
-            var status = isAvailable ? "UP" : "DOWN";
-
-            availabilityService.availabilityUpdateDeviceStatus(deviceId, status)
-                .onFailure(cause ->
-                {
-                    // Device might have been deleted during polling cycle - this is expected
-                    if (cause.getMessage() != null && cause.getMessage().contains("Device not found"))
-                    {
-                        logger.debug("Device {} was deleted during polling cycle, skipping availability update", deviceId);
-                    }
-                    else
-                    {
-                        logger.error("Failed to record availability for device {}: {}", deviceId, cause.getMessage());
-                    }
-                });
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in updateDeviceAvailability: {}", exception.getMessage());
-        }
-    }
 
     /**
-     * Update availability for all devices based on their polling result
-     *
-     * @param allDevices All devices that were processed in Phase 1
-     */
-    private void updateAvailabilityForAllDevices(List<PollingDevice> allDevices)
-    {
-        try
-        {
-            // Update availability for all devices based on their polling result
-            for (var pd : allDevices)
-            {
-                // Device succeeded (PollingResult.SUCCESS) -> update availability as UP
-                // Device failed (CONNECTIVITY_FAILED or GOENGINE_FAILED) -> update availability as DOWN
-                var isUp = (pd.pollingResult == PollingResult.SUCCESS);
+     * Polling batch processor using ParallelBatchProcessor.
 
-                updateDeviceAvailability(pd.deviceId, isUp);
-            }
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in updateAvailabilityForAllDevices: {}", exception.getMessage());
-        }
-    }
-
-    /**
-     * Perform connectivity checks for polling devices (similar to DiscoveryVerticle)
-
-     * Connectivity check process (OPTIMIZED):
-     * 1. BATCH fping check for all devices (single fping process)
-     * 2. BATCH port check for devices that passed fping (parallel checks)
-     * 3. Device is considered reachable only if both checks pass
-     *
-     * @param devices List of devices to check
-     * @return Future<JsonObject> with "reachable" and "unreachable" device IDs
-     */
-    private Future<JsonObject> performConnectivityChecksForPolling(List<PollingDevice> devices)
-    {
-        // Convert devices to IP list
-        var ipList = devices.stream().map(pd -> pd.address).collect(Collectors.toList());
-
-        // Step 1: Batch fping check (single fping process for all IPs) - wrapped in executeBlocking
-        return vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList))
-            .compose(fpingResults ->
-            {
-                // Filter IPs that successfully passed fping
-                var pingAliveIps = ipList.stream().filter(ip -> fpingResults.getOrDefault(ip, false)).toList();
-
-                if (pingAliveIps.isEmpty())
-                {
-                    // All devices failed fping, no need for port check
-                    var unreachableDeviceIds = new JsonArray();
-
-                    devices.forEach(pd -> unreachableDeviceIds.add(pd.deviceId));
-
-                    var result = new JsonObject()
-                        .put("reachable", new JsonArray())
-                        .put("unreachable", unreachableDeviceIds)
-                        .put("total_checked", devices.size());
-
-                    return Future.succeededFuture(result);
-                }
-
-                // Step 2: Individual port checks for each device (devices have different ports)
-                // Batch all port checks in a single executeBlocking call
-                return vertx.executeBlocking(() ->
-                {
-                    var portCheckResults = new ArrayList<JsonObject>();
-
-                    for (var pd : devices)
-                    {
-                        // Only check port for devices that passed fping
-                        if (!fpingResults.getOrDefault(pd.address, false))
-                        {
-                            continue;
-                        }
-
-                        var portOpen = NetworkConnectivity.portCheck(pd.address, pd.port);
-
-                        portCheckResults.add(new JsonObject()
-                            .put("device_id", pd.deviceId)
-                            .put("address", pd.address)
-                            .put("port", pd.port)
-                            .put("port_open", portOpen));
-                    }
-
-                    return portCheckResults;
-                }).map(portCheckResults ->
-                    {
-                        var reachableDeviceIds = new JsonArray();
-
-                        var unreachableDeviceIds = new JsonArray();
-
-                        // Build a map for O(1) lookup instead of O(n) nested loop
-                        var portResultsMap = new HashMap<String, Boolean>();
-
-                        for (var portResult : portCheckResults)
-                        {
-                            var deviceId = portResult.getString("device_id");
-
-                            var portOpen = portResult.getBoolean("port_open", false);
-
-                            portResultsMap.put(deviceId, portOpen);
-                        }
-
-                        // Classify devices based on both fping and port check results
-                        for (var pd : devices)
-                        {
-                            var pingAlive = fpingResults.getOrDefault(pd.address, false);
-
-                            if (!pingAlive)
-                            {
-                                unreachableDeviceIds.add(pd.deviceId);
-
-                                continue;
-                            }
-
-                            // O(1) lookup instead of O(n) nested loop
-                            var portOpen = portResultsMap.getOrDefault(pd.deviceId, false);
-
-                            if (portOpen)
-                            {
-                                reachableDeviceIds.add(pd.deviceId);
-                            }
-                            else
-                            {
-                                unreachableDeviceIds.add(pd.deviceId);
-                            }
-                        }
-
-                        logger.debug("Connectivity checks: {}/{} devices reachable", reachableDeviceIds.size(), devices.size());
-
-                        return new JsonObject()
-                            .put("reachable", reachableDeviceIds)
-                            .put("unreachable", unreachableDeviceIds)
-                            .put("total_checked", devices.size());
-                    });
-            });
-    }
-
-    /**
-     * Polling batch processor using QueueBatchProcessor.
-
-     * Extends the generic QueueBatchProcessor to handle polling-specific batch processing.
-     * Processes devices in batches with fping, port check, and GoEngine metrics collection.
+     * Extends the generic ParallelBatchProcessor to handle polling-specific batch processing.
+     * Processes devices in parallel batches with fping, port check, and GoEngine metrics collection.
 
      * Features:
-     * - Sequential batch processing of devices
+     * - Parallel batch processing of devices
      * - Connectivity pre-filtering (fping + port check)
      * - GoEngine metrics collection for alive devices
      * - Fail-tolerant: continues with next batch on failure
      * - Tracks failed devices for retry phase
      */
-    private class PollingBatchProcessor extends QueueBatchProcessor<PollingDevice>
+    private class PollingBatchProcessor extends ParallelBatchProcessor<DevicePolling>
     {
-        private final List<PollingDevice> failedDevices;
+        private final List<DevicePolling> failedDevices;
 
         /**
          * Constructor for PollingBatchProcessor.
@@ -1491,16 +1392,18 @@ public class PollingMetricsVerticle extends AbstractVerticle
          * Initializes the processor with devices to poll.
          *
          * @param devices List of devices to poll in batches
+         * @param batchSize Maximum devices per batch
+         * @param workerExecutor Worker executor for parallel processing
          */
-        public PollingBatchProcessor(List<PollingDevice> devices)
+        public PollingBatchProcessor(List<DevicePolling> devices, int batchSize, WorkerExecutor workerExecutor)
         {
-            super(devices, batchSize);
+            super(devices, batchSize, workerExecutor);
 
-            this.failedDevices = new ArrayList<>();
+            this.failedDevices = Collections.synchronizedList(new ArrayList<>());
         }
 
         /**
-         * Process a batch of devices.
+         * Process a batch of devices (BLOCKING operation).
 
          * Executes the complete polling workflow for a batch:
          * 1. Batch fping connectivity check
@@ -1509,18 +1412,31 @@ public class PollingMetricsVerticle extends AbstractVerticle
          * 4. Update device schedules and failure counters
          *
          * @param batch List of devices to poll in this batch
-         * @return Future containing JsonArray of results (empty for polling)
+         * @return JsonArray of results (empty for polling)
          */
         @Override
-        protected Future<JsonArray> processBatch(List<PollingDevice> batch)
+        protected JsonArray processBatch(List<DevicePolling> batch)
         {
-            return processSingleBatch(batch)
-                .map(batchFailures ->
-                {
-                    failedDevices.addAll(batchFailures);
+            try
+            {
+                // Process batch using async method, then block and wait for result
+                // (safe in worker thread)
+                var batchFailures = processSingleBatch(batch)
+                        .toCompletionStage()
+                        .toCompletableFuture()
+                        .get();
 
-                    return new JsonArray();
-                });
+                // Add failed devices to synchronized list
+                failedDevices.addAll(batchFailures);
+
+                return new JsonArray();
+            }
+            catch (Exception exception)
+            {
+                logger.error("Error processing polling batch: {}", exception.getMessage());
+
+                return new JsonArray();
+            }
         }
 
         /**
@@ -1533,11 +1449,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
          * @param cause The exception that caused the failure
          */
         @Override
-        protected void handleBatchFailure(List<PollingDevice> batch, Throwable cause)
+        protected void handleBatchFailure(List<DevicePolling> batch, Throwable cause)
         {
             logger.warn("Batch processing failed for {} devices: {}", batch.size(), cause.getMessage());
 
-            for (PollingDevice pd : batch)
+            for (DevicePolling pd : batch)
             {
                 pd.incrementFailures();
 
@@ -1550,7 +1466,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
          *
          * @return List of failed devices
          */
-        public List<PollingDevice> getFailedDevices()
+        public List<DevicePolling> getFailedDevices()
         {
             return failedDevices;
         }
@@ -1571,13 +1487,27 @@ public class PollingMetricsVerticle extends AbstractVerticle
             if (pollingTimerId != 0)
             {
                 vertx.cancelTimer(pollingTimerId);
+
+                logger.info("Polling cycle timer cancelled");
+            }
+
+            // Close worker pool
+            if (pollingWorkerPool != null)
+            {
+                pollingWorkerPool.close();
+
+                logger.info("Polling worker pool closed");
             }
 
             // Clear cache
             if (deviceCache != null)
             {
                 deviceCache.clear();
+
+                logger.info("Device cache cleared");
             }
+
+            logger.info("PollingMetricsVerticle stopped successfully");
 
             stopPromise.complete();
         }

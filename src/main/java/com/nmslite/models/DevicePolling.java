@@ -21,7 +21,7 @@ import java.time.Instant;
  * - Updated reactively via event bus when device config changes
  * - Runtime state lost on restart (acceptable - recomputed on startup)
  */
-public class PollingDevice
+public class DevicePolling
 {
 
     // Identity
@@ -54,10 +54,8 @@ public class PollingDevice
 
     public int consecutiveFailures;      // Tracked: failure count for auto-disable
 
-    public PollingResult pollingResult;  // Transient: result of current polling cycle
-
     /**
-     * Converts the PollingDevice to GoEngine JSON format for metrics collection.
+     * Converts the DevicePolling to GoEngine JSON format for metrics collection.
 
      * GoEngine  expects:
      * {
@@ -138,23 +136,5 @@ public class PollingDevice
         return consecutiveFailures >= maxCyclesSkipped;
     }
 
-    /**
-     * Resets the polling result to NOT_PROCESSED.
-     * Should be called at the start of each polling cycle.
-     */
-    public void resetPollingResult()
-    {
-        pollingResult = PollingResult.NOT_PROCESSED;
-    }
-
-    /**
-     * Checks if the device failed during the current polling cycle.
-     *
-     * @return true if device failed (connectivity or GoEngine), false otherwise
-     */
-    public boolean hasFailed()
-    {
-        return pollingResult == PollingResult.CONNECTIVITY_FAILED || pollingResult == PollingResult.GOENGINE_FAILED;
-    }
 }
 

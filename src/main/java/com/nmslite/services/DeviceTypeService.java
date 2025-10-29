@@ -39,7 +39,7 @@ public interface DeviceTypeService
      */
     static DeviceTypeService createProxy()
     {
-        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
+        return new ServiceProxyBuilder(Bootstrap.getVertx())
             .setAddress(SERVICE_ADDRESS)
             .build(DeviceTypeService.class);
     }

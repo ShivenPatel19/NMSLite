@@ -49,7 +49,7 @@ public class JWTUtil
                 .setAlgorithm(JWT_ALGORITHM)
                 .setBuffer(JWT_SECRET));
 
-        this.jwtAuth = JWTAuth.create(Bootstrap.getVertxInstance(), config);
+        this.jwtAuth = JWTAuth.create(Bootstrap.getVertx(), config);
 
         logger.debug("JWT authentication configured with {} algorithm", JWT_ALGORITHM);
     }

@@ -1,5 +1,7 @@
 package com.nmslite.handlers;
 
+import com.nmslite.Bootstrap;
+
 import com.nmslite.services.CredentialProfileService;
 
 import com.nmslite.utils.ExceptionUtil;
@@ -124,7 +126,15 @@ public class CredentialHandler
 
             credentialProfileService.credentialUpdate(credentialId, requestBody)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    // Publish event to notify verticles about credential profile update
+                    Bootstrap.getVertx().eventBus().publish("credential.profile.updated", new JsonObject()
+                            .put("credential_profile_id", credentialId));
+
+                    logger.debug("Published credential.profile.updated event for profile: {}", credentialId);
+
+                    ResponseUtil.handleSuccess(ctx, result);
+                })
                 .onFailure(cause ->
                         ExceptionUtil.handleHttp(ctx, cause, "Failed to update credentials"));
         }

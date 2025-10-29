@@ -18,6 +18,8 @@ import io.vertx.core.Future;
 
 import io.vertx.core.Promise;
 
+import io.vertx.core.WorkerExecutor;
+
 import io.vertx.core.eventbus.Message;
 
 import io.vertx.core.json.JsonArray;
@@ -42,7 +44,7 @@ import java.util.*;
 
 import java.util.concurrent.TimeUnit;
 
-import com.nmslite.core.QueueBatchProcessor;
+import com.nmslite.core.ParallelBatchProcessor;
 
 import java.util.stream.Collectors;
 
@@ -70,6 +72,9 @@ public class DiscoveryVerticle extends AbstractVerticle
     private int discoveryBatchSize;
 
     private int blockingTimeoutGoEngine;
+
+    // Worker pool for parallel discovery
+    private WorkerExecutor discoveryWorkerPool;
 
     // Service proxies
     private DeviceService deviceService;
@@ -116,6 +121,22 @@ public class DiscoveryVerticle extends AbstractVerticle
             blockingTimeoutGoEngine = discoveryConfig.getJsonObject("blocking", new JsonObject())
                     .getJsonObject("timeout", new JsonObject())
                     .getInteger("goengine", 300);
+
+            // Create worker pool for parallel discovery
+            var workerPoolSize = discoveryConfig.getJsonObject("worker", new JsonObject())
+                    .getInteger("pool.size", 5);
+
+            var workerPoolTimeoutSeconds = discoveryConfig.getJsonObject("worker", new JsonObject())
+                    .getInteger("pool.timeout.seconds", 600);
+
+            discoveryWorkerPool = vertx.createSharedWorkerExecutor(
+                    "discovery-worker-pool",
+                    workerPoolSize,
+                    workerPoolTimeoutSeconds,
+                    TimeUnit.SECONDS);
+
+            logger.info("Discovery worker pool created: {} workers, {}s timeout",
+                    workerPoolSize, workerPoolTimeoutSeconds);
 
             initializeServiceProxies();
 
@@ -211,7 +232,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             getDiscoveryProfileWithCredentials(profileId)
                 .compose(this::parseDiscoveryTargetsForTest)
                 .compose(this::checkExistingDevicesAndFilter)
-                .compose(this::executeSequentialBatchDiscovery)
+                .compose(this::executeParallelBatchDiscovery)
                 .compose(this::processTestDiscoveryResults)
                 .onSuccess(result ->
                 {
@@ -470,8 +491,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                         // Device exists - deviceResult contains the device data directly
                         var isProvisioned = deviceResult.getBoolean("is_provisioned", false);
 
-                        var isMonitoring = deviceResult.getBoolean("is_monitoring_enabled", false);
-
                         var isDeleted = deviceResult.getBoolean("is_deleted", false);
 
                         String status;
@@ -487,32 +506,19 @@ public class DiscoveryVerticle extends AbstractVerticle
 
                             message = "Device was previously deleted. Please restore it using the restore API instead of rediscovering";
                         }
-                        else if (!isProvisioned && !isMonitoring)
+                        else if (!isProvisioned)
                         {
-                            // isProvisioned = false, isMonitored = false, isDeleted = false
+                            // isProvisioned = false, isDeleted = false - device discovered but not provisioned
                             status = "available_for_provision";
 
                             message = "Device already exists and is available for provision";
                         }
-                        else if (isProvisioned && isMonitoring)
+                        else
                         {
-                            // isProvisioned = true, isMonitored = true, isDeleted = false
+                            // isProvisioned = true, isDeleted = false - device is provisioned (monitoring enabled)
                             status = "being_monitored";
 
                             message = "Device already available and is being monitored";
-                        }
-                        else if (isProvisioned)
-                        {
-                            // isProvisioned = true, isMonitored = false, isDeleted = false
-                            status = "monitoring_disabled";
-
-                            message = "Device already available, and monitoring is disabled";
-                        }
-                        else
-                        {
-                            status = "unknown_state";
-
-                            message = "Device in unknown state";
                         }
 
                         devicePromise.complete(new JsonObject()
@@ -522,7 +528,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                             .put("message", message)
                             .put("proceed_with_discovery", proceedWithDiscovery)
                             .put("is_provisioned", isProvisioned)
-                            .put("is_monitoring_enabled", isMonitoring)
                             .put("is_deleted", isDeleted));
                     }
                     else
@@ -575,7 +580,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                                     .put("status", deviceCheck.getString("status"))
                                     .put("message", deviceCheck.getString("message"))
                                     .put("is_provisioned", deviceCheck.getBoolean("is_provisioned"))
-                                    .put("is_monitoring_enabled", deviceCheck.getBoolean("is_monitoring_enabled"))
                                     .put("is_deleted", deviceCheck.getBoolean("is_deleted", false)));
 
                                 logger.debug("IP {} already exists: {}", ip, deviceCheck.getString("message"));
@@ -608,34 +612,33 @@ public class DiscoveryVerticle extends AbstractVerticle
     }
 
     /**
-     * Executes discovery in sequential batches for network efficiency and reliability.
-     
-     * Processes new target IPs in configurable batch sizes to avoid overwhelming the
-     * network and GoEngine. Uses sequential processing to maintain system stability
-     * and provide better error handling. Each batch is processed completely before
-     * moving to the next batch. Accumulates results from all batches.
+     * Executes discovery in parallel batches for faster processing.
+
+     * Processes new target IPs in configurable batch sizes using parallel execution.
+     * Multiple batches are processed simultaneously using a worker pool to maximize
+     * throughput. Uses ParallelBatchProcessor with backpressure handling to prevent
+     * overwhelming the system. Accumulates results from all batches.
      *
      * @param profileData JsonObject containing new_targets array and profile configuration
      * @return Future<JsonObject> profile data with discovery_results array containing all batch results
-     
+
      * Input requires:
      * - new_targets: array of IP strings to discover
      * - All profile data (credentials, device_type, port, protocol)
-     
+
      * Output adds:
      * - discovery_results: array of discovery result objects from GoEngine
      * - total_processed: integer count of IPs processed
      * - batches_completed: integer count of batches processed
-     
-     * Batch processing configuration:
-     * - Default batch size: 50 IPs per batch
-     * - Sequential execution: waits for each batch to complete
-     * - Error handling: continues with next batch if one fails
-     */
-    private Future<JsonObject> executeSequentialBatchDiscovery(JsonObject profileData)
-    {
-        var promise = Promise.<JsonObject>promise();
 
+     * Batch processing configuration:
+     * - Default batch size: 100 IPs per batch
+     * - Parallel execution: multiple batches processed simultaneously
+     * - Worker pool: configurable size (default 5 workers)
+     * - Error handling: continues with remaining batches if one fails (fail-tolerant)
+     */
+    private Future<JsonObject> executeParallelBatchDiscovery(JsonObject profileData)
+    {
         try
         {
             var newTargets = profileData.getJsonArray("new_targets");
@@ -644,31 +647,36 @@ public class DiscoveryVerticle extends AbstractVerticle
             {
                 logger.debug("No new targets for discovery, skipping GoEngine execution");
 
-                promise.complete(profileData.put("discovery_results", new JsonArray()));
-
-                return promise.future();
+                return Future.succeededFuture(profileData.put("discovery_results", new JsonArray()));
             }
 
             var totalTargets = newTargets.size();
 
-            logger.info("Starting sequential batch discovery for {} targets", totalTargets);
+            logger.info("Starting parallel batch discovery for {} targets", totalTargets);
 
-            // Use QueueBatchProcessor for sequential batch discovery
-            var processor = new DiscoveryBatchProcessor(profileData, newTargets);
+            // Convert JsonArray to List<String> for ParallelBatchProcessor
+            var targetList = new ArrayList<String>();
 
-            var arrayPromise = Promise.<JsonArray>promise();
+            for (var i = 0; i < newTargets.size(); i++)
+            {
+                targetList.add(newTargets.getString(i));
+            }
 
-            processor.processNext(arrayPromise);
+            // Use ParallelBatchProcessor for parallel batch discovery
+            var processor = new DiscoveryBatchProcessor(profileData, targetList);
 
-            return arrayPromise.future().map(results -> profileData.put("discovery_results", results));
+            return processor.processAllBatches()
+                .map(results -> profileData.put("discovery_results", results))
+                .onSuccess(result ->
+                        logger.info("Parallel batch discovery completed: {} results", result.getJsonArray("discovery_results").size()))
+                .onFailure(cause ->
+                        logger.error("Parallel batch discovery failed: {}", cause.getMessage()));
         }
         catch (Exception exception)
         {
-            logger.error("Error in executeSequentialBatchDiscovery: {}", exception.getMessage());
+            logger.error("Error in executeParallelBatchDiscovery: {}", exception.getMessage());
 
-            promise.fail(exception);
-
-            return promise.future();
+            return Future.failedFuture(exception);
         }
     }
 
@@ -1307,68 +1315,78 @@ public class DiscoveryVerticle extends AbstractVerticle
     }
 
     /**
-     * Discovery batch processor using QueueBatchProcessor.
-     
-     * Extends the generic QueueBatchProcessor to handle discovery-specific batch processing.
+     * Discovery batch processor using ParallelBatchProcessor.
+
+     * Extends the generic ParallelBatchProcessor to handle discovery-specific batch processing.
      * Uses GoEngine's built-in credential iteration (tests multiple credentials per IP until one succeeds).
-     
+
      * Features:
-     * - Sequential batch processing of IP addresses
+     * - Parallel batch processing of IP addresses using worker pool
      * - GoEngine credential iteration for each IP
-     * - Fail-tolerant: continues with next batch on failure
-     * - Memory efficient: only current batch in memory
+     * - Fail-tolerant: continues with remaining batches on failure
+     * - Backpressure handling: limits concurrent batches
      */
-    private class DiscoveryBatchProcessor extends QueueBatchProcessor<String>
+    private class DiscoveryBatchProcessor extends ParallelBatchProcessor<String>
     {
         private final JsonObject profileData;
 
         /**
          * Constructor for DiscoveryBatchProcessor.
-         
+
          * Initializes the processor with profile data and target IPs.
-         * Converts JsonArray to List for QueueBatchProcessor.
+         * Uses ParallelBatchProcessor with worker pool for parallel execution.
          *
          * @param profileData JsonObject containing discovery profile configuration
-         * @param allTargetIPs JsonArray of IP addresses to discover
+         * @param allTargetIPs List of IP addresses to discover
          */
-        public DiscoveryBatchProcessor(JsonObject profileData, JsonArray allTargetIPs)
+        public DiscoveryBatchProcessor(JsonObject profileData, List<String> allTargetIPs)
         {
-            super(allTargetIPs.getList(), discoveryBatchSize);
+            super(allTargetIPs, discoveryBatchSize, discoveryWorkerPool);
 
             this.profileData = profileData;
         }
 
         /**
-         * Process a batch of IP addresses using GoEngine discovery.
-         
+         * Process a batch of IP addresses using GoEngine discovery (BLOCKING operation).
+
+         * This method is executed in a worker thread by ParallelBatchProcessor.
          * Converts the batch of IP strings to JsonArray and executes GoEngine discovery.
          * GoEngine handles credential iteration internally for each IP.
+
+         * NOTE: This is a BLOCKING operation - returns JsonArray directly, not Future.
+         * The ParallelBatchProcessor wraps this in executeBlocking() automatically.
          *
          * @param batch List of IP addresses to discover in this batch
-         * @return Future containing JsonArray of discovery results
+         * @return JsonArray of discovery results (synchronous)
          */
         @Override
-        protected Future<JsonArray> processBatch(List<String> batch)
+        protected JsonArray processBatch(List<String> batch)
         {
             try
             {
                 var ipArray = new JsonArray(batch);
 
-                return executeGoEngineDiscovery(profileData, ipArray);
+                // Execute GoEngine discovery synchronously (blocking operation)
+                // This will be wrapped in executeBlocking() by ParallelBatchProcessor
+                var future = executeGoEngineDiscovery(profileData, ipArray);
+
+                // Wait for the future to complete (blocking)
+                return future.toCompletionStage().toCompletableFuture().get();
             }
             catch (Exception exception)
             {
                 logger.error("Error in processBatch: {}", exception.getMessage());
 
-                return Future.failedFuture(exception);
+                // Return empty array on error (fail-tolerant)
+                return new JsonArray();
             }
         }
 
         /**
          * Handle batch processing failure.
-         
+
          * Logs the failed IPs for debugging. The batch processor will continue
-         * with the next batch (fail-tolerant behavior).
+         * with the remaining batches (fail-tolerant behavior).
          *
          * @param batch The batch of IPs that failed to process
          * @param cause The exception that caused the failure
@@ -1487,6 +1505,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Stop the verticle and perform any required cleanup.
+     * Closes the discovery worker pool to release resources.
      *
      * @param stopPromise completed when shutdown work is finished
      */
@@ -1496,6 +1515,13 @@ public class DiscoveryVerticle extends AbstractVerticle
         try
         {
             logger.info("Stopping DiscoveryVerticle");
+
+            if (discoveryWorkerPool != null)
+            {
+                discoveryWorkerPool.close();
+
+                logger.info("Discovery worker pool closed");
+            }
 
             stopPromise.complete();
         }

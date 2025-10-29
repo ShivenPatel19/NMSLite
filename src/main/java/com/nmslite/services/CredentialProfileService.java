@@ -37,7 +37,7 @@ public interface CredentialProfileService
      */
     static CredentialProfileService createProxy()
     {
-        return new ServiceProxyBuilder(Bootstrap.getVertxInstance())
+        return new ServiceProxyBuilder(Bootstrap.getVertx())
             .setAddress(SERVICE_ADDRESS)
             .build(CredentialProfileService.class);
     }

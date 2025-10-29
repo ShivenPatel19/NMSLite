@@ -301,7 +301,7 @@ public class DiscoveryProfileHandler
     /**
      * Test discovery from discovery profile (NEW UNIFIED API)
      * Handles both single IP and IP range based on isRange flag
-     * Creates devices for successful discoveries with is_provisioned=false, is_monitoring_enabled=false
+     * Creates devices for successful discoveries with is_provisioned=false (monitoring disabled)
      *
      * @param ctx routing context containing the HTTP request and response
      */
@@ -323,7 +323,7 @@ public class DiscoveryProfileHandler
             var deliveryOptions = new DeliveryOptions().setSendTimeout(eventBusTimeoutMs);
 
             // Execute discovery test via DiscoveryVerticle
-            Bootstrap.getVertxInstance().eventBus().request("discovery.test_profile",
+            Bootstrap.getVertx().eventBus().request("discovery.test_profile",
                 new JsonObject().put("profile_id", profileId), deliveryOptions)
                 .onSuccess(reply ->
                 {
