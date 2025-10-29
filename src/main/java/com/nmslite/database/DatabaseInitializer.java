@@ -1,4 +1,4 @@
-package com.nmslite.core;
+package com.nmslite.database;
 
 import com.nmslite.Bootstrap;
 
@@ -51,6 +51,8 @@ public class DatabaseInitializer {
 
     private static Pool pgPool;
 
+    private static DatabaseHelper databaseHelper;
+
     // Service implementations
     private UserServiceImpl userService;
 
@@ -78,7 +80,21 @@ public class DatabaseInitializer {
     }
 
     /**
-     * Initializes database connection, creates service implementations,
+     * Gets the shared DatabaseHelper instance.
+     * This method provides global access to the database helper from service implementations.
+
+     * DatabaseHelper provides generic methods for executing database queries with
+     * consistent error handling and logging, reducing boilerplate code in services.
+     *
+     * @return The DatabaseHelper instance, or null if not yet initialized
+     */
+    public static DatabaseHelper getDatabaseHelper()
+    {
+        return databaseHelper;
+    }
+
+    /**
+     * Initializes database migration, connection, creates service implementations,
      * and registers all ProxyGen services on the event bus.
      *
      * @return Future that completes when all initialization is done
@@ -88,8 +104,9 @@ public class DatabaseInitializer {
         {
             logger.info("Initializing database services");
 
-            // Setup PostgreSQL connection
-            return setupDatabaseConnection()
+            // Run database migration first, then setup connection
+            return DatabaseMigrationService.runMigration()
+                    .compose(v -> setupDatabaseConnection())
                     .compose(v -> setupAllServices())
                     .compose(v -> registerAllServiceProxies())
                     .onSuccess(v -> logger.info("Database initialization completed - all 7 services registered"))
@@ -155,6 +172,11 @@ public class DatabaseInitializer {
                         connection.close();
 
                         pgPool = pool;
+
+                        // Initialize DatabaseHelper after pool is ready
+                        databaseHelper = new DatabaseHelper();
+
+                        logger.info("DatabaseHelper initialized");
                     })
                     .onFailure(cause -> logger.error("Database connection failed: {}", cause.getMessage()))
                     .mapEmpty();

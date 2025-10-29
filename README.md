@@ -337,7 +337,6 @@ polling {
   cycle.interval.seconds = 60              # How often scheduler checks for due devices
   batch.size = 50                          # Max devices per batch
   max.cycles.skipped = 5                   # Auto-disable after N failures
-  failure.log.path = "polling_failed/metrics_polling_failed.txt"
 
   blocking.timeout.goengine = 300          # Vert.x blocking timeout (5 minutes)
   connection.timeout.seconds = 20          # SSH/WinRM connection timeout
@@ -642,18 +641,9 @@ Edit `application.conf` in the application root directory before building to cus
 6. **Success Handling**: Store metrics, update availability, advance schedule
 7. **Failure Tracking**: Track failed devices for retry
 
-**Phase 2: Retry Failed Devices**
-1. **Retry Logic**: Retry failed devices using same batch method
-2. **Success**: Reset failure counter, advance schedule
-3. **Failure**: Increment consecutive failure counter
-
-**Phase 3: Log Exhausted Failures**
-1. **Failure Logging**: Log devices that failed all retries to file
-2. **File Path**: `polling_failed/metrics_polling_failed.txt`
-
-**Phase 4: Auto-Disable**
-1. **Threshold Check**: Devices exceeding `max.cycles.skipped` (default: 5)
-2. **Auto-Disable**: Set `is_monitoring_enabled=false`
+**Phase 2: Auto-Disable**
+1. **Threshold Check**: Devices exceeding `max.cycles.skipped` (default: 5) consecutive failures
+2. **Auto-Disable**: Set `is_provisioned=false` to disable monitoring
 3. **Notification**: Log auto-disabled devices
 
 **Key Features:**
@@ -957,7 +947,7 @@ COPY application.conf /app/application.conf
 RUN chmod +x /app/goengine/goengine
 
 # Create directories
-RUN mkdir -p /app/logs /app/polling_failed
+RUN mkdir -p /app/logs
 
 WORKDIR /app
 
@@ -1064,7 +1054,6 @@ logging {
 ### Log Files
 - `logs/nmslite.log` - Main application log
 - `logs/goengine.log` - GoEngine process log
-- `polling_failed/metrics_polling_failed.txt` - Failed polling attempts log
 
 ## 🎯 Technology Stack
 

@@ -1,18 +1,16 @@
 package com.nmslite.services.impl;
 
-import com.nmslite.core.DatabaseInitializer;
+import com.nmslite.database.DatabaseInitializer;
+
+import com.nmslite.database.DatabaseHelper;
 
 import com.nmslite.services.MetricsService;
 
 import io.vertx.core.Future;
 
-import io.vertx.core.Promise;
-
 import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.json.JsonObject;
-
-import io.vertx.sqlclient.Pool;
 
 import io.vertx.sqlclient.Tuple;
 
@@ -31,7 +29,8 @@ import java.util.UUID;
  * - Metrics cleanup operations
 
  * Database Access:
- * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - Uses DatabaseInitializer.getDatabaseHelper() for database operations
+ * - DatabaseHelper provides generic query execution with consistent error handling
  * - No constructor parameters needed
  */
 public class MetricsServiceImpl implements MetricsService
@@ -39,15 +38,15 @@ public class MetricsServiceImpl implements MetricsService
 
     private static final Logger logger = LoggerFactory.getLogger(MetricsServiceImpl.class);
 
-    private final Pool pgPool;
+    private final DatabaseHelper dbHelper;
 
     /**
      * Constructor for MetricsServiceImpl.
-     * Accesses database pool via DatabaseInitializer.getPool().
+     * Accesses database helper via DatabaseInitializer.
      */
     public MetricsServiceImpl()
     {
-        this.pgPool = DatabaseInitializer.getPool();
+        this.dbHelper = DatabaseInitializer.getDatabaseHelper();
     }
 
     /**
@@ -59,8 +58,6 @@ public class MetricsServiceImpl implements MetricsService
     @Override
     public Future<JsonObject> metricsCreate(JsonObject metricsData)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var deviceId = metricsData.getString("device_id");
@@ -92,14 +89,13 @@ public class MetricsServiceImpl implements MetricsService
                              disk_usage_percent
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId), cpuUsage, memoryUsage,
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId), cpuUsage, memoryUsage,
                                     memoryTotal, memoryUsed, memoryFree, diskUsage, diskTotal, diskUsed, diskFree))
-                    .onSuccess(rows ->
+                    .map(rows ->
                     {
                         var row = rows.iterator().next();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("metric_id", row.getUUID("metric_id").toString())
                                 .put("device_id", row.getUUID("device_id").toString())
@@ -108,26 +104,24 @@ public class MetricsServiceImpl implements MetricsService
                                 .put("memory_usage_percent", row.getBigDecimal("memory_usage_percent"))
                                 .put("disk_usage_percent", row.getBigDecimal("disk_usage_percent"))
                                 .put("message", "Metrics data stored successfully");
-
-                        promise.complete(result);
                     })
-                    .onFailure(cause ->
+                    .recover(cause ->
                     {
                         logger.error("Failed to create metrics: {}", cause.getMessage());
 
                         if (cause.getMessage().contains("foreign key"))
                         {
-                            promise.fail(new Exception("Invalid device ID"));
+                            return Future.failedFuture(new Exception("Invalid device ID"));
                         }
                         else if (cause.getMessage().contains("chk_cpu_range") ||
                                  cause.getMessage().contains("chk_memory_range") ||
                                  cause.getMessage().contains("chk_disk_range"))
                         {
-                            promise.fail(new Exception("Usage percentages must be between 0 and 100"));
+                            return Future.failedFuture(new Exception("Usage percentages must be between 0 and 100"));
                         }
                         else
                         {
-                            promise.fail(cause);
+                            return Future.failedFuture(cause);
                         }
                     });
         }
@@ -135,10 +129,8 @@ public class MetricsServiceImpl implements MetricsService
         {
             logger.error("Error in metricsCreate service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -150,8 +142,6 @@ public class MetricsServiceImpl implements MetricsService
     @Override
     public Future<JsonArray> metricsGetAllByDevice(String deviceId)
     {
-        var promise = Promise.<JsonArray>promise();
-
         try
         {
             var sql = """
@@ -166,9 +156,8 @@ public class MetricsServiceImpl implements MetricsService
                     ORDER BY m.timestamp DESC
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                    .map(rows ->
                     {
                         var metrics = new JsonArray();
 
@@ -202,23 +191,15 @@ public class MetricsServiceImpl implements MetricsService
                             metrics.add(metric);
                         }
 
-                        promise.complete(metrics);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get metrics for device: {}: {}", deviceId, cause.getMessage());
-
-                        promise.fail(cause);
+                        return metrics;
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in metricsGetAllByDevice service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -230,8 +211,6 @@ public class MetricsServiceImpl implements MetricsService
     @Override
     public Future<JsonObject> metricsDeleteAllByDevice(String deviceId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -239,35 +218,24 @@ public class MetricsServiceImpl implements MetricsService
                     WHERE device_id = $1
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                    .map(rows ->
                     {
                         var deletedCount = rows.rowCount();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("device_id", deviceId)
                                 .put("deleted_count", deletedCount)
                                 .put("message", "All metrics for device deleted successfully");
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to delete metrics for device: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in metricsDeleteAllByDevice service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
 }

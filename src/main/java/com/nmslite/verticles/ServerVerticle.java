@@ -18,7 +18,11 @@ import io.vertx.core.http.HttpMethod;
 
 import io.vertx.core.http.HttpServer;
 
+import io.vertx.core.http.HttpServerOptions;
+
 import io.vertx.core.json.JsonObject;
+
+import io.vertx.core.net.JksOptions;
 
 import io.vertx.ext.web.Router;
 
@@ -31,12 +35,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * ServerVerticle - Clean HTTP API Server
+ * ServerVerticle - HTTPS API Server (Production - HTTPS Only)
 
  * Responsibilities:
- * - HTTP REST API endpoints (via handlers)
+ * - HTTPS REST API endpoints (via handlers)
  * - Service proxy initialization
  * - Router setup and middleware
+ * - SSL/TLS configuration
 
  * All business logic has been extracted to handler classes:
  * - UserHandler: User management operations
@@ -49,9 +54,7 @@ public class ServerVerticle extends AbstractVerticle
 
     private static final Logger logger = LoggerFactory.getLogger(ServerVerticle.class);
 
-    private HttpServer httpServer;
-
-    private int httpPort;
+    private HttpServer httpsServer;
 
     // Service proxies
     private UserService userService;
@@ -85,7 +88,7 @@ public class ServerVerticle extends AbstractVerticle
 
     /**
      * Starts the ServerVerticle by initializing service proxies, creating handlers,
-     * setting up the HTTP server with routing, and starting the server on configured port.
+     * setting up the HTTPS server with routing, and starting the server on configured port.
      *
      * @param startPromise Promise completed when server starts successfully
      */
@@ -94,11 +97,11 @@ public class ServerVerticle extends AbstractVerticle
     {
         try
         {
-            logger.info("Starting ServerVerticle");
+            logger.info("Starting ServerVerticle (HTTPS Only)");
 
-            httpPort = Bootstrap.getConfig().getJsonObject("server", new JsonObject())
-                .getJsonObject("http", new JsonObject())
-                .getInteger("port", 8080);
+            var serverConfig = Bootstrap.getConfig().getJsonObject("server", new JsonObject());
+
+            var httpsConfig = serverConfig.getJsonObject("https", new JsonObject());
 
             // Initialize all service proxies
             initializeServiceProxies();
@@ -106,9 +109,7 @@ public class ServerVerticle extends AbstractVerticle
             // Create handler instances
             createHandlers();
 
-            // Setup HTTP server with routing
-            httpServer = vertx.createHttpServer();
-
+            // Create router
             var router = createRouter();
 
             if (router == null)
@@ -120,25 +121,67 @@ public class ServerVerticle extends AbstractVerticle
                 return;
             }
 
-            // Start HTTP server
-            httpServer.requestHandler(router)
-                .listen(httpPort)
+            // Start HTTPS server
+            startHttpsServer(router, httpsConfig, startPromise);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in start: {}", exception.getMessage());
+
+            startPromise.fail(exception);
+        }
+    }
+
+    /**
+     * Starts HTTPS server with SSL/TLS configuration.
+     *
+     * @param router Router instance with all routes configured
+     * @param httpsConfig HTTPS configuration from application.conf
+     * @param startPromise Promise to complete when server starts
+     */
+    private void startHttpsServer(Router router, JsonObject httpsConfig, Promise<Void> startPromise)
+    {
+        try
+        {
+            var httpsPort = httpsConfig.getInteger("port", 8443);
+
+            var keystoreConfig = httpsConfig.getJsonObject("keystore", new JsonObject());
+
+            var keystorePath = keystoreConfig.getString("path", "keystore.jks");
+
+            var keystorePassword = keystoreConfig.getString("password", "motadataadmin");
+
+            // Create HTTPS server options with SSL/TLS
+            var options = new HttpServerOptions()
+                .setSsl(true)
+                .setKeyCertOptions(new JksOptions()
+                    .setPath(keystorePath)
+                    .setPassword(keystorePassword));
+
+            httpsServer = vertx.createHttpServer(options);
+
+            httpsServer.requestHandler(router)
+                .listen(httpsPort)
                 .onSuccess(server ->
                 {
-                    logger.info("HTTP Server started on port {}", httpPort);
+                    logger.info("✅ HTTPS Server started on port {} (SSL/TLS enabled)", httpsPort);
+
+                    logger.info("🔒 Keystore: {}", keystorePath);
 
                     startPromise.complete();
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("Failed to start HTTP server: {}", cause.getMessage());
+                    logger.error("Failed to start HTTPS server: {}", cause.getMessage());
+
+                    logger.error("Check keystore path and password in configuration");
 
                     startPromise.fail(cause);
                 });
         }
         catch (Exception exception)
         {
-            logger.error("Error in start: {}", exception.getMessage());
+            logger.error("Error in startHttpsServer: {}", exception.getMessage());
 
             startPromise.fail(exception);
         }
@@ -375,17 +418,14 @@ public class ServerVerticle extends AbstractVerticle
             // Device Management API (Authentication required)
             router.get("/api/devices/discovered").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getDiscoveredDevices);
 
-            // Provision devices (bulk operation - sets is_provisioned=true AND is_monitoring_enabled=true)
-            router.post("/api/devices/provision").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::provisionAndEnableMonitoring);
-
             // Get provisioned devices
             router.get("/api/devices/provisioned").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::getProvisionedDevices);
 
             router.put("/api/devices/:id/config").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::updateDeviceConfig);
 
-            router.post("/api/devices/:id/monitoring/enable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::enableMonitoring);
+            router.post("/api/devices/:id/provisioning/enable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::enableProvisioning);
 
-            router.post("/api/devices/:id/monitoring/disable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::disableMonitoring);
+            router.post("/api/devices/:id/provisioning/disable").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::disableProvisioning);
 
             router.delete("/api/devices/:id").handler(authMiddleware.requireAuthentication()).handler(deviceHandler::softDeleteDevice);
 
@@ -518,7 +558,7 @@ public class ServerVerticle extends AbstractVerticle
     }
 
     /**
-     * Stops the ServerVerticle by closing the HTTP server.
+     * Stops the ServerVerticle by closing the HTTPS server.
      *
      * @param stopPromise Promise completed when server stops successfully
      */
@@ -529,12 +569,12 @@ public class ServerVerticle extends AbstractVerticle
         {
             logger.info("🛑 Stopping ServerVerticle");
 
-            if (httpServer != null)
+            if (httpsServer != null)
             {
-                httpServer.close()
+                httpsServer.close()
                     .onComplete(result ->
                     {
-                        logger.info("✅ HTTP Server stopped");
+                        logger.info("✅ HTTPS Server stopped");
 
                         stopPromise.complete();
                     });

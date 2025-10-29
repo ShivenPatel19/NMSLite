@@ -1,5 +1,7 @@
 package com.nmslite.handlers;
 
+import com.nmslite.Bootstrap;
+
 import com.nmslite.services.DeviceService;
 
 import com.nmslite.services.DeviceTypeService;
@@ -9,6 +11,8 @@ import com.nmslite.utils.ExceptionUtil;
 import com.nmslite.utils.ValidationUtil;
 
 import com.nmslite.utils.ResponseUtil;
+
+import io.vertx.core.Vertx;
 
 import io.vertx.core.json.JsonObject;
 
@@ -26,13 +30,17 @@ import org.slf4j.LoggerFactory;
  * - Device types
  * - Device soft delete and restore
  * - Device discovery integration
+ * - Event bus publishing for device state changes
 
  * Uses DeviceService and DeviceTypeService for database operations
+ * Publishes events to PollingMetricsVerticle for cache synchronization
  */
 public class DeviceHandler
 {
 
     private static final Logger logger = LoggerFactory.getLogger(DeviceHandler.class);
+
+    private final Vertx vertx;
 
     private final DeviceService deviceService;
 
@@ -46,6 +54,8 @@ public class DeviceHandler
      */
     public DeviceHandler(DeviceService deviceService, DeviceTypeService deviceTypeService)
     {
+        this.vertx = Bootstrap.getVertxInstance();
+
         this.deviceService = deviceService;
 
         this.deviceTypeService = deviceTypeService;
@@ -115,7 +125,15 @@ public class DeviceHandler
 
             deviceService.deviceDelete(deviceId)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    // Publish event to notify PollingMetricsVerticle to remove device from cache
+                    vertx.eventBus().publish("device.deleted", new JsonObject()
+                        .put("device_id", deviceId));
+
+                    logger.debug("Published device.deleted event for device: {}", deviceId);
+
+                    ResponseUtil.handleSuccess(ctx, result);
+                })
                 .onFailure(cause ->
                         ExceptionUtil.handleHttp(ctx, cause, "Failed to delete device"));
         }
@@ -145,7 +163,15 @@ public class DeviceHandler
 
             deviceService.deviceRestore(deviceId)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    // Publish event to notify PollingMetricsVerticle to add device back to cache
+                    vertx.eventBus().publish("device.restored", new JsonObject()
+                        .put("device_id", deviceId));
+
+                    logger.debug("Published device.restored event for device: {}", deviceId);
+
+                    ResponseUtil.handleSuccess(ctx, result);
+                })
                 .onFailure(cause ->
                         ExceptionUtil.handleHttp(ctx, cause, "Failed to restore device"));
         }
@@ -158,11 +184,11 @@ public class DeviceHandler
     }
 
     /**
-     * Enable monitoring for a device.
+     * Enable provisioning for a device (sets is_provisioned = true).
      *
      * @param ctx routing context containing the HTTP request and response
      */
-    public void enableMonitoring(RoutingContext ctx)
+    public void enableProvisioning(RoutingContext ctx)
     {
         try
         {
@@ -174,26 +200,34 @@ public class DeviceHandler
                 return;
             }
 
-            deviceService.deviceEnableMonitoring(deviceId)
+            deviceService.deviceEnableProvisioning(deviceId)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    // Publish event to notify PollingMetricsVerticle to add device to cache
+                    vertx.eventBus().publish("device.provision.enabled", new JsonObject()
+                        .put("device_id", deviceId));
+
+                    logger.debug("Published device.provision.enabled event for device: {}", deviceId);
+
+                    ResponseUtil.handleSuccess(ctx, result);
+                })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to enable monitoring for device"));
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to enable provisioning for device"));
         }
         catch (Exception exception)
         {
-            logger.error("Error in enableMonitoring handler: {}", exception.getMessage());
+            logger.error("Error in enableProvisioning handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to enable monitoring for device");
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to enable provisioning for device");
         }
     }
 
     /**
-     * Disable monitoring for a device.
+     * Disable provisioning for a device (sets is_provisioned = false).
      *
      * @param ctx routing context containing the HTTP request and response
      */
-    public void disableMonitoring(RoutingContext ctx)
+    public void disableProvisioning(RoutingContext ctx)
     {
         try
         {
@@ -204,76 +238,25 @@ public class DeviceHandler
                 return;
             }
 
-            deviceService.deviceDisableMonitoring(deviceId)
+            deviceService.deviceDisableProvisioning(deviceId)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
-                .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to disable monitoring for device"));
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in disableMonitoring handler: {}", exception.getMessage());
-
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to disable monitoring for device");
-        }
-    }
-
-    /**
-     * Provision devices and enable monitoring for them.
-     *
-     * @param ctx routing context containing the HTTP request and response
-     */
-    public void provisionAndEnableMonitoring(RoutingContext ctx)
-    {
-        try
-        {
-            var body = ctx.body().asJsonObject();
-
-            if (body == null || !body.containsKey("device_ids"))
-            {
-                ExceptionUtil.handleHttp(ctx,
-                    new Exception("Request body must contain 'device_ids' array"), "Invalid request body");
-
-                return;
-            }
-
-            var deviceIds = body.getJsonArray("device_ids");
-
-            if (deviceIds == null || deviceIds.isEmpty())
-            {
-                ExceptionUtil.handleHttp(ctx,
-                    new Exception("device_ids array cannot be empty"), "Invalid request body");
-
-                return;
-            }
-
-            // Validate all device IDs are valid UUIDs
-            for (var i = 0; i < deviceIds.size(); i++)
-            {
-                var deviceId = deviceIds.getString(i);
-
-                if (!ValidationUtil.isValidUUID(deviceId))
                 {
-                    ExceptionUtil.handleHttp(ctx,
-                        new Exception("Invalid device ID at index " + i), "Invalid device ID format");
+                    // Publish event to notify PollingMetricsVerticle to remove device from cache
+                    vertx.eventBus().publish("device.provision.disabled", new JsonObject()
+                        .put("device_id", deviceId));
 
-                    return;
-                }
-            }
+                    logger.debug("Published device.provision.disabled event for device: {}", deviceId);
 
-            deviceService.deviceProvisionAndEnableMonitoring(deviceIds)
-                .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, new JsonObject()
-                            .put("results", result)
-                            .put("total", deviceIds.size())))
+                    ResponseUtil.handleSuccess(ctx, result);
+                })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to provision devices"));
+                        ExceptionUtil.handleHttp(ctx, cause, "Failed to disable provisioning for device"));
         }
         catch (Exception exception)
         {
-            logger.error("Error in provisionAndEnableMonitoring handler: {}", exception.getMessage());
+            logger.error("Error in disableProvisioning handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to provision devices");
+            ExceptionUtil.handleHttp(ctx, exception, "Failed to disable provisioning for device");
         }
     }
 
@@ -305,7 +288,19 @@ public class DeviceHandler
             // 3) Invoke service
             deviceService.deviceUpdateConfig(deviceId, body)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    // Publish event to notify PollingMetricsVerticle to update device in cache
+                    // Only publish if device is provisioned (monitoring enabled)
+                    if (result.getBoolean("is_provisioned", false))
+                    {
+                        vertx.eventBus().publish("device.config.updated", new JsonObject()
+                            .put("device_id", deviceId));
+
+                        logger.debug("Published device.config.updated event for device: {}", deviceId);
+                    }
+
+                    ResponseUtil.handleSuccess(ctx, result);
+                })
                 .onFailure(cause ->
                         ExceptionUtil.handleHttp(ctx, cause, "Failed to update device configuration"));
         }

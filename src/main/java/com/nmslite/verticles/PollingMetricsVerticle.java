@@ -48,10 +48,6 @@ import java.io.*;
 
 import java.time.Instant;
 
-import java.time.LocalDateTime;
-
-import java.time.format.DateTimeFormatter;
-
 import java.util.*;
 
 import java.util.concurrent.TimeUnit;
@@ -90,8 +86,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
     private int maxCyclesSkipped;            // Auto-disable threshold
 
-    private String failureLogPath;           // Failure log file path
-
     // Service proxies
     private DeviceService deviceService;
 
@@ -102,9 +96,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
     // In-memory device cache
     // Key: device_id, Value: PollingDevice (persistent data + runtime state)
     private HashMap<String, PollingDevice> deviceCache;
-
-    // File write synchronization lock to prevent concurrent writes to failure log
-    private final Object fileWriteLock = new Object();
 
     /**
      * Start the verticle: load configuration, initialize service proxies, load devices into cache, and start polling.
@@ -140,10 +131,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
             maxCyclesSkipped = pollingConfig.getJsonObject("max", new JsonObject())
                     .getJsonObject("cycles", new JsonObject())
                     .getInteger("skipped", 5);
-
-            failureLogPath = pollingConfig.getJsonObject("failure", new JsonObject())
-                    .getJsonObject("log", new JsonObject())
-                    .getString("path", "polling_failed/metrics_polling_failed.txt");
 
             blockingTimeoutGoEngine = pollingConfig.getJsonObject("blocking", new JsonObject())
                     .getJsonObject("timeout", new JsonObject())
@@ -211,8 +198,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Load all eligible devices from database into in-memory cache.
 
      * Queries devices where:
-     * - is_provisioned = true
-     * - is_monitoring_enabled = true
+     * - is_provisioned = true (monitoring enabled)
      * - is_deleted = false
 
      * Joins with credential_profiles to get username and password.
@@ -225,7 +211,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
         try
         {
-            deviceService.deviceListProvisionedAndMonitoringEnabled()
+            deviceService.deviceListByProvisioned(true)
                 .compose(devices ->
                 {
                     // avoid blocking event loop, if large number of devices to be cached
@@ -328,13 +314,13 @@ public class PollingMetricsVerticle extends AbstractVerticle
             // Global config (from config file, same for all devices)
             pd.connectionTimeoutSeconds = defaultConnectionTimeoutSeconds;
 
-            // Timestamps (PostgresSQL returns timestamps without 'Z', need to append it for ISO-8601)
-            var monitoringEnabledAtStr = deviceData.getString("monitoring_enabled_at");
+            // Compute aligned next poll time using created_at as anchor
+            // (created_at is when device was first created, used for aligned scheduling)
+            var createdAtStr = deviceData.getString("created_at");
 
-            pd.monitoringEnabledAt = Instant.parse(monitoringEnabledAtStr + "Z");
+            var createdAt = Instant.parse(createdAtStr + "Z");
 
-            // Compute aligned next poll time
-            pd.nextScheduledAt = computeAlignedNext(pd.monitoringEnabledAt, Instant.now(), pd.pollingIntervalSeconds);
+            pd.nextScheduledAt = computeAlignedNext(createdAt, Instant.now(), pd.pollingIntervalSeconds);
 
             // Initialize runtime state
             pd.consecutiveFailures = 0;
@@ -353,11 +339,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Compute aligned next poll time from anchor.
 
      * This ensures fixed cadence without drift:
-     * - Anchor: monitoring_enabled_at
+     * - Anchor: created_at (when device was first created)
      * - Next = anchor + ceil((now - anchor) / interval) * interval
 
      * Example:
-     * - Anchor: 10:00:00 (device monitoring enabled)
+     * - Anchor: 10:00:00 (device created)
      * - Interval: 600s (10 min)
      * - Now: 11:14:00 (current time)
      * - Elapsed: 4440s (1 hour 14 minutes)
@@ -370,7 +356,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Cycle 0    Cycle 1    Cycle 2    Cycle 3    Cycle 4    Cycle 5    Cycle 6    Cycle 7    Cycle 8
      *                                                                                 ↑ Now (11:14:00)
      *
-     * @param anchor monitoring_enabled_at timestamp
+     * @param anchor created_at timestamp (device creation time)
      * @param now Current time
      * @param intervalSeconds Polling interval
      * @return Next scheduled poll time
@@ -400,22 +386,22 @@ public class PollingMetricsVerticle extends AbstractVerticle
         try
         {
             // Cache update consumers -> to persist up-to-date device data in cache
-            vertx.eventBus().consumer("device.monitoring.enabled", msg ->
+            vertx.eventBus().consumer("device.provision.enabled", msg ->
             {
                 var data = (JsonObject) msg.body();
 
                 var deviceId = data.getString("device_id");
 
-                onDeviceMonitoringEnabled(deviceId);
+                onDeviceProvisionEnabled(deviceId);
             });
 
-            vertx.eventBus().consumer("device.monitoring.disabled", msg ->
+            vertx.eventBus().consumer("device.provision.disabled", msg ->
             {
                 var data = (JsonObject) msg.body();
 
                 var deviceId = data.getString("device_id");
 
-                onDeviceMonitoringDisabled(deviceId);
+                onDeviceProvisionDisabled(deviceId);
             });
 
             vertx.eventBus().consumer("device.config.updated", msg ->
@@ -452,7 +438,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Handle device monitoring enabled event.
+     * Handle device provision enabled event.
      * Add device to cache.
 
      * Event is only published after successful database update,
@@ -460,7 +446,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      *
      * @param deviceId Device ID to add to cache
      */
-    private void onDeviceMonitoringEnabled(String deviceId)
+    private void onDeviceProvisionEnabled(String deviceId)
     {
         try
         {
@@ -494,17 +480,17 @@ public class PollingMetricsVerticle extends AbstractVerticle
         }
         catch (Exception exception)
         {
-            logger.error("Error in onDeviceMonitoringEnabled: {}", exception.getMessage());
+            logger.error("Error in onDeviceProvisionEnabled: {}", exception.getMessage());
         }
     }
 
     /**
-     * Handle device monitoring disabled event.
+     * Handle device provision disabled event.
      * Remove device from cache.
      *
      * @param deviceId Device ID to remove from cache
      */
-    private void onDeviceMonitoringDisabled(String deviceId)
+    private void onDeviceProvisionDisabled(String deviceId)
     {
         try
         {
@@ -523,7 +509,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         }
         catch (Exception exception)
         {
-            logger.error("Error in onDeviceMonitoringDisabled: {}", exception.getMessage());
+            logger.error("Error in onDeviceProvisionDisabled: {}", exception.getMessage());
         }
     }
 
@@ -624,17 +610,17 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             logger.debug("Device restored event: {}", deviceId);
 
-            // Fetch device and add to cache only if monitoring is enabled
+            // Fetch device and add to cache only if provisioned (monitoring enabled)
             deviceService.deviceGetById(deviceId)
                 .onSuccess(deviceData ->
                 {
                     try
                     {
-                        var isMonitoringEnabled = deviceData.getBoolean("is_monitoring_enabled", false);
+                        var isProvisioned = deviceData.getBoolean("is_provisioned", false);
 
-                        if (!isMonitoringEnabled)
+                        if (!isProvisioned)
                         {
-                            logger.info("Device {} restored but monitoring not enabled, skipping cache add", deviceId);
+                            logger.info("Device {} restored but not provisioned (monitoring disabled), skipping cache add", deviceId);
 
                             return;
                         }
@@ -683,7 +669,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Execute 3-phase polling cycle:
+     * Execute 2-phase polling cycle:
 
      * Phase 1: Batch Processing
      *   - Filter devices due for polling (using aligned scheduling)
@@ -691,11 +677,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
      *   - Update device availability status immediately (both success and failure)
      *   - Track failures across all batches
 
-     * Phase 2: Log Exhausted Failures
-     *   - Log devices that reached max consecutive failures to file
-
-     * Phase 3: Auto-Disable
-     *   - Disable monitoring for devices that reached or exceeded max_cycles_skipped
+     * Phase 2: Auto-Disable
+     *   - Disable monitoring for devices that reached or exceeded max_cycles_skipped (5 consecutive failures)
      */
     private void executePollingCycle()
     {
@@ -721,13 +704,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         logger.info("New Polling cycle: {} devices due for polling (total cached: {})", dueDevices.size(), totalCachedDevices);
 
                         // Phase 1: Batch Processing (processes all due devices in batches, updates availability immediately)
-                        // Phase 2: Log Exhausted Failures (logs devices that reached max failures)
-                        // Phase 3: Auto-Disable (disables devices that reached/exceeded max failures)
+                        // Phase 2: Auto-Disable (disables devices that reached/exceeded max failures)
                         executeBatchProcessing(dueDevices)
-                                .compose(this::executeLogFailures)
                                 .compose(v ->
                                 {
-                                    // Phase 3: Auto-Disable
+                                    // Phase 2: Auto-Disable
                                     return executePhaseAutoDisable();
                                 })
                                 .onComplete(result ->
@@ -753,7 +734,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         }
     }
 
-    // ========== 3-PHASE POLLING CYCLE IMPLEMENTATION ==========
+    // ========== 2-PHASE POLLING CYCLE IMPLEMENTATION ==========
 
     /**
      * Phase 1: Batch Processing
@@ -790,7 +771,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 {
                     var failedDevices = processor.getFailedDevices();
 
-                    logger.info("Phase 1 completed: {}/{} devices processed successfully", dueDevices.size() - failedDevices.size(), dueDevices.size());
+                    logger.info("Phase 1 completed: {}/{} devices processed successfully, {} failed",
+                        dueDevices.size() - failedDevices.size(), dueDevices.size(), failedDevices.size());
 
                     // Update availability for ALL devices immediately (both successful and failed)
                     updateAvailabilityForAllDevices(dueDevices);
@@ -1159,95 +1141,10 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Phase 2: Log Exhausted Failures
+     * Phase 2: Auto-Disable
 
-     * Log devices that reached max consecutive failures (about to be auto-disabled) to file.
-     * Scans entire cache for devices where consecutiveFailures == maxCyclesSkipped (one-time logging).
-     *
-     * @param unused Unused parameter for chain compatibility
-     * @return Future<Void>
-     */
-    private Future<Void> executeLogFailures(Void unused)
-    {
-        var promise = Promise.<Void>promise();
-
-        // Scan entire cache for devices that JUST reached max failures (one-time logging)
-        // Use executeBlocking to avoid blocking event loop with cache iteration
-        vertx.executeBlocking(() ->
-                        deviceCache.values().stream()
-                            .filter(pd -> pd.consecutiveFailures == maxCyclesSkipped)
-                            .collect(Collectors.toList()))
-        .compose(devicesToLog ->
-        {
-            if (devicesToLog.isEmpty())
-            {
-                logger.info("Phase 2: No devices reached max failures threshold ({}), skipping log", maxCyclesSkipped);
-
-                return Future.succeededFuture(0);
-            }
-
-            logger.info("Phase 2: Logging {} devices that reached max failures ({}) to {}", devicesToLog.size(), maxCyclesSkipped, failureLogPath);
-
-            return vertx.executeBlocking(() ->
-            {
-                // Synchronize file writes to prevent concurrent access from multiple polling cycles
-                synchronized (fileWriteLock)
-                {
-                    try
-                    {
-                        var logFile = new File(failureLogPath);
-
-                        logFile.getParentFile().mkdirs(); // Create directory if needed
-
-                        try (var fw = new FileWriter(logFile, true);
-                             var bw = new BufferedWriter(fw);
-                             var out = new PrintWriter(bw))
-                        {
-                            // Human-readable timestamp: "2025-10-11 11:30:45"
-                            var formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
-                            var timestamp = LocalDateTime.now().format(formatter);
-
-                            for (var pd : devicesToLog)
-                            {
-                                var logEntry = String.format("%s | %s | %s | %s", timestamp, pd.deviceId, pd.deviceName, pd.address);
-
-                                out.println(logEntry);
-                            }
-                        }
-
-                        return devicesToLog.size();
-                    }
-                    catch (Exception exception)
-                    {
-                        logger.error("Error writing failure log: {}", exception.getMessage());
-
-                        return 0;
-                    }
-                }
-
-            }, false);
-        })
-        .onSuccess(count ->
-        {
-            logger.info("Phase 3 completed: {} devices logged to failure file", count);
-
-            promise.complete();
-        })
-        .onFailure(cause ->
-        {
-            logger.error("Failed to write failure log: {}", cause.getMessage());
-
-            promise.fail(cause);
-        });
-
-        return promise.future();
-    }
-
-    /**
-     * Phase 3: Auto-Disable
-
-     * Disable monitoring for devices that have exceeded max_cycles_skipped consecutive failures.
+     * Disable monitoring for devices that have reached or exceeded max_cycles_skipped (5) consecutive failures.
+     * Devices are automatically disabled to prevent continuous polling of unreachable devices.
      *
      * @return Future<Void>
      */
@@ -1264,14 +1161,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             if (devicesToDisable.isEmpty())
             {
-                logger.info("Phase 3: No devices to auto-disable");
+                logger.info("Phase 2: No devices to auto-disable");
 
                 promise.complete();
 
                 return;
             }
 
-            logger.warn("Phase 3: Auto-disabling {} devices due to {} consecutive failures", devicesToDisable.size(), maxCyclesSkipped);
+            logger.warn("Phase 2: Auto-disabling {} devices due to {} consecutive failures", devicesToDisable.size(), maxCyclesSkipped);
 
             // Disable devices sequentially
             disableDevicesSequentially(devicesToDisable, 0, promise);
@@ -1313,17 +1210,17 @@ public class PollingMetricsVerticle extends AbstractVerticle
             deviceCache.remove(pd.deviceId);
 
             // THEN update database (async, non-blocking)
-            deviceService.deviceDisableMonitoring(pd.deviceId)
+            deviceService.deviceDisableProvisioning(pd.deviceId)
                 .onSuccess(result ->
                 {
-                    logger.info("Device {} monitoring disabled successfully in database", pd.deviceName);
+                    logger.info("Device {} provisioning disabled successfully in database", pd.deviceName);
 
                     // Continue with next device
                     disableDevicesSequentially(devices, index + 1, promise);
                 })
                 .onFailure(cause ->
                 {
-                    logger.error("Failed to disable monitoring for device {} in database: {}", pd.deviceName, cause.getMessage());
+                    logger.error("Failed to disable provisioning for device {} in database: {}", pd.deviceName, cause.getMessage());
 
                     // Continue with next device even on failure
                     disableDevicesSequentially(devices, index + 1, promise);

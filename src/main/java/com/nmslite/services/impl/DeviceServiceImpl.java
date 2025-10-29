@@ -2,29 +2,23 @@ package com.nmslite.services.impl;
 
 import com.nmslite.Bootstrap;
 
-import com.nmslite.core.DatabaseInitializer;
+import com.nmslite.database.DatabaseHelper;
+
+import com.nmslite.database.DatabaseInitializer;
 
 import com.nmslite.services.DeviceService;
 
 import io.vertx.core.Future;
 
-import io.vertx.core.Promise;
-
-import io.vertx.core.Vertx;
-
 import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.json.JsonObject;
-
-import io.vertx.sqlclient.Pool;
 
 import io.vertx.sqlclient.Tuple;
 
 import org.slf4j.Logger;
 
 import org.slf4j.LoggerFactory;
-
-import java.util.ArrayList;
 
 import java.util.UUID;
 
@@ -33,13 +27,16 @@ import java.util.UUID;
 
  * Provides device management operations including:
  * - Device CRUD operations with soft delete
- * - Device monitoring management
- * - Device provisioning and discovery integration
+ * - Device provisioning (is_provisioned flag controls monitoring state)
+ * - Device discovery integration
  * - Device status and availability tracking
 
+ * NOTE: is_provisioned flag now controls monitoring - when true, monitoring is enabled; when false, monitoring is disabled
+ * NOTE: port and protocol are stored in credential_profiles table, not devices table
+
  * Database Access:
- * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
- * - Uses Bootstrap.getVertxInstance() to access Vertx for event bus publishing
+ * - Uses DatabaseHelper for database operations
+ * - No event bus publishing (handlers are responsible for that)
  * - No constructor parameters needed
  */
 public class DeviceServiceImpl implements DeviceService
@@ -47,65 +44,15 @@ public class DeviceServiceImpl implements DeviceService
 
     private static final Logger logger = LoggerFactory.getLogger(DeviceServiceImpl.class);
 
-    private final Vertx vertx;
-
-    private final Pool pgPool;
+    private final DatabaseHelper dbHelper;
 
     /**
      * Constructor for DeviceServiceImpl.
-     * Accesses database pool via DatabaseInitializer.getPool().
-     * Accesses Vertx instance via Bootstrap.getVertxInstance().
+     * Accesses database helper via DatabaseInitializer.getDatabaseHelper().
      */
     public DeviceServiceImpl()
     {
-        this.vertx = Bootstrap.getVertxInstance();
-
-        this.pgPool = DatabaseInitializer.getPool();
-    }
-
-    /**
-     * Get default CPU threshold from config
-     *
-     * @return Default CPU threshold percentage
-     */
-    private double getDefaultCpuThreshold()
-    {
-        // HOCON parses dotted keys as nested objects: alert.threshold.cpu becomes alert -> threshold -> cpu
-        return Bootstrap.getConfig().getJsonObject("device", new JsonObject())
-                .getJsonObject("defaults", new JsonObject())
-                .getJsonObject("alert", new JsonObject())
-                .getJsonObject("threshold", new JsonObject())
-                .getDouble("cpu", 80.0);
-    }
-
-    /**
-     * Get default memory threshold from config
-     *
-     * @return Default memory threshold percentage
-     */
-    private double getDefaultMemoryThreshold()
-    {
-        // HOCON parses dotted keys as nested objects: alert.threshold.memory becomes alert -> threshold -> memory
-        return Bootstrap.getConfig().getJsonObject("device", new JsonObject())
-                .getJsonObject("defaults", new JsonObject())
-                .getJsonObject("alert", new JsonObject())
-                .getJsonObject("threshold", new JsonObject())
-                .getDouble("memory", 85.0);
-    }
-
-    /**
-     * Get default disk threshold from config
-     *
-     * @return Default disk threshold percentage
-     */
-    private double getDefaultDiskThreshold()
-    {
-        // HOCON parses dotted keys as nested objects: alert.threshold.disk becomes alert -> threshold -> disk
-        return Bootstrap.getConfig().getJsonObject("device", new JsonObject())
-                .getJsonObject("defaults", new JsonObject())
-                .getJsonObject("alert", new JsonObject())
-                .getJsonObject("threshold", new JsonObject())
-                .getDouble("disk", 90.0);
+        this.dbHelper = DatabaseInitializer.getDatabaseHelper();
     }
 
     /**
@@ -150,25 +97,21 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonArray> deviceListByProvisioned(boolean isProvisioned)
     {
-        var promise = Promise.<JsonArray>promise();
-
         try
         {
             var sql = """
-                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
-                           d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds,
-                           d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type,
+                           d.credential_profile_id, cp.username, cp.password_encrypted, cp.profile_name as credential_profile_name, cp.port, cp.protocol,
+                           d.polling_interval_seconds, d.timeout_seconds, d.host_name,
+                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at
                     FROM devices d
                     JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
                     WHERE d.is_provisioned = $1 AND d.is_deleted = false
                     ORDER BY d.device_name
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(isProvisioned))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(isProvisioned))
+                    .map(rows ->
                     {
                         var devices = new JsonArray();
 
@@ -183,41 +126,29 @@ public class DeviceServiceImpl implements DeviceService
                                     .put("protocol", row.getString("protocol"))
                                     .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                     .put("username", row.getString("username"))
+                                    .put("password_encrypted", row.getString("password_encrypted"))
                                     .put("credential_profile_name", row.getString("credential_profile_name"))
-                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                     .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
                                     .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                                    .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                                    .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                                    .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
                                     .put("host_name", row.getString("host_name"))
                                     .put("is_provisioned", row.getBoolean("is_provisioned"))
                                     .put("is_deleted", row.getBoolean("is_deleted"))
                                     .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
                                     .put("created_at", row.getLocalDateTime("created_at").toString())
-                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null)
-                                    .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ? row.getLocalDateTime("monitoring_enabled_at").toString() : null);
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null);
 
                             devices.add(device);
                         }
 
-                        promise.complete(devices);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to list devices by provision status: {}", cause.getMessage());
-
-                        promise.fail(cause);
+                        return devices;
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in deviceListByProvisioned service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -229,8 +160,6 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceDelete(String deviceId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -242,49 +171,29 @@ public class DeviceServiceImpl implements DeviceService
                     RETURNING device_id, device_name
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            promise.fail(new Exception("Device not found or already deleted"));
-
-                            return;
+                            throw new RuntimeException("Device not found or already deleted");
                         }
 
                         var row = rows.iterator().next();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
                                 .put("message", "Device deleted successfully");
-
-                        promise.complete(result);
-
-                        // Publish event to notify PollingMetricsVerticle to remove device from cache
-                        // and clean up metrics/availability data
-                        vertx.eventBus().publish("device.deleted", new JsonObject()
-                                .put("device_id", deviceId));
-
-                        logger.debug("Published device.deleted event for device: {}", deviceId);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to delete device: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in deviceDelete service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -296,8 +205,6 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceRestore(String deviceId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -307,49 +214,29 @@ public class DeviceServiceImpl implements DeviceService
                     RETURNING device_id, device_name
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            promise.fail(new Exception("Device not found or not deleted"));
-
-                            return;
+                            throw new RuntimeException("Device not found or not deleted");
                         }
 
                         var row = rows.iterator().next();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
                                 .put("message", "Device restored successfully");
-
-                        promise.complete(result);
-
-                        // Publish event to notify PollingMetricsVerticle to add device back to cache
-                        // (only if monitoring is enabled)
-                        vertx.eventBus().publish("device.restored", new JsonObject()
-                                .put("device_id", deviceId));
-
-                        logger.debug("Published device.restored event for device: {}", deviceId);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to restore device: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in deviceRestore service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -361,35 +248,29 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceGetById(String deviceId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
-                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name, cp.password_encrypted,
-                           d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds,
-                           d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type,
+                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name, cp.password_encrypted, cp.port, cp.protocol,
+                           d.polling_interval_seconds, d.timeout_seconds, d.host_name,
+                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at
                     FROM devices d
                     JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
                     WHERE d.device_id = $1
                     AND d.is_deleted = false""";
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            promise.complete(new JsonObject().put("found", false));
-
-                            return;
+                            return new JsonObject().put("found", false);
                         }
 
                         var row = rows.iterator().next();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
@@ -401,12 +282,8 @@ public class DeviceServiceImpl implements DeviceService
                                 .put("username", row.getString("username"))
                                 .put("credential_profile_name", row.getString("credential_profile_name"))
                                 .put("password_encrypted", row.getString("password_encrypted"))
-                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                 .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
                                 .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                                .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                                .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                                .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
                                 .put("host_name", row.getString("host_name"))
                                 .put("is_provisioned", row.getBoolean("is_provisioned"))
                                 .put("is_deleted", row.getBoolean("is_deleted"))
@@ -414,27 +291,15 @@ public class DeviceServiceImpl implements DeviceService
                                         row.getLocalDateTime("deleted_at").toString() : null)
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                        row.getLocalDateTime("updated_at").toString() : null)
-                                .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                        row.getLocalDateTime("monitoring_enabled_at").toString() : null);
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get device by ID: {}", cause.getMessage());
-
-                        promise.fail(cause);
+                                        row.getLocalDateTime("updated_at").toString() : null);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in deviceGetById service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -447,30 +312,24 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceFindByIp(String ipAddress, boolean includeDeleted)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
-                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name,
-                           d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds,
-                           d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk, d.host_name,
-                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at, d.monitoring_enabled_at
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type,
+                           d.credential_profile_id, cp.username, cp.profile_name as credential_profile_name, cp.port, cp.protocol,
+                           d.polling_interval_seconds, d.timeout_seconds, d.host_name,
+                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at
                     FROM devices d
                     JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
                     WHERE host(d.ip_address) = $1
                     """ + (includeDeleted ? "" : " AND d.is_deleted = false");
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(ipAddress))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(ipAddress))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            promise.complete(new JsonObject().put("found", false));
-
-                            return;
+                            return new JsonObject().put("found", false);
                         }
 
                         var row = rows.iterator().next();
@@ -482,7 +341,7 @@ public class DeviceServiceImpl implements DeviceService
                             ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
                         }
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
@@ -493,12 +352,8 @@ public class DeviceServiceImpl implements DeviceService
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("username", row.getString("username"))
                                 .put("credential_profile_name", row.getString("credential_profile_name"))
-                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                 .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
                                 .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                                .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                                .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                                .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
                                 .put("host_name", row.getString("host_name"))
                                 .put("is_provisioned", row.getBoolean("is_provisioned"))
                                 .put("is_deleted", row.getBoolean("is_deleted"))
@@ -506,60 +361,43 @@ public class DeviceServiceImpl implements DeviceService
                                         row.getLocalDateTime("deleted_at").toString() : null)
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ?
-                                        row.getLocalDateTime("updated_at").toString() : null)
-                                .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                        row.getLocalDateTime("monitoring_enabled_at").toString() : null);
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to find device by IP: {}", cause.getMessage());
-
-                        promise.fail(cause);
+                                        row.getLocalDateTime("updated_at").toString() : null);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in deviceFindByIp service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
-     * Enable monitoring for a device
+     * Enable provisioning for a device (sets is_provisioned = true)
      *
      * @param deviceId Device ID
-     * @return Future containing device_id, is_monitoring_enabled, monitoring_enabled_at
+     * @return Future containing device_id and is_provisioned status
      */
     @Override
-    public Future<JsonObject> deviceEnableMonitoring(String deviceId)
+    public Future<JsonObject> deviceEnableProvisioning(String deviceId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
-            // First check if device is provisioned and current monitoring state
+            // Check if device exists and is not deleted
             var checkSql = """
-                    SELECT is_provisioned, is_deleted, is_monitoring_enabled
+                    SELECT is_provisioned, is_deleted
                     FROM devices
                     WHERE device_id = $1
                     """;
 
-            pgPool.preparedQuery(checkSql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(checkRows ->
+            return dbHelper.executePreparedQuery(checkSql, Tuple.of(UUID.fromString(deviceId)))
+                    .compose(checkRows ->
                     {
                         if (checkRows.size() == 0)
                         {
-                            promise.complete(new JsonObject()
+                            return Future.succeededFuture(new JsonObject()
                                     .put("updated", false)
                                     .put("reason", "Device not found"));
-
-                            return;
                         }
 
                         var checkRow = checkRows.iterator().next();
@@ -568,504 +406,149 @@ public class DeviceServiceImpl implements DeviceService
 
                         var isProvisioned = checkRow.getBoolean("is_provisioned");
 
-                        var isMonitoringEnabled = checkRow.getBoolean("is_monitoring_enabled");
-
                         if (isDeleted)
                         {
-                            promise.complete(new JsonObject()
+                            return Future.succeededFuture(new JsonObject()
                                     .put("updated", false)
                                     .put("reason", "Device is deleted"));
-
-                            return;
-                        }
-
-                        if (!isProvisioned)
-                        {
-                            promise.complete(new JsonObject()
-                                    .put("updated", false)
-                                    .put("reason", "Cannot enable monitoring on unprovisioned device. Please provision the device first."));
-
-                            return;
-                        }
-
-                        if (isMonitoringEnabled)
-                        {
-                            promise.complete(new JsonObject()
-                                    .put("updated", false)
-                                    .put("reason", "Monitoring is already enabled for this device"));
-
-                            return;
-                        }
-
-                        // Device is provisioned, proceed with enabling monitoring
-                        var sql = """
-                                UPDATE devices
-                                SET is_monitoring_enabled = true,
-                                    monitoring_enabled_at = COALESCE(monitoring_enabled_at, NOW())
-                                WHERE device_id = $1 AND is_deleted = false
-                                RETURNING device_id, is_monitoring_enabled, monitoring_enabled_at
-                                """;
-
-                        pgPool.preparedQuery(sql)
-                                .execute(Tuple.of(UUID.fromString(deviceId)))
-                                .onSuccess(rows ->
-                                {
-                                    if (rows.size() == 0)
-                                    {
-                                        promise.complete(new JsonObject()
-                                                .put("updated", false)
-                                                .put("reason", "Device not found or deleted"));
-
-                                        return;
-                                    }
-
-                                    var row = rows.iterator().next();
-
-                                    var result = new JsonObject()
-                                            .put("updated", true)
-                                            .put("device_id", row.getUUID("device_id").toString())
-                                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                            .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                                    row.getLocalDateTime("monitoring_enabled_at").toString() : null);
-
-                                    promise.complete(result);
-
-                                    // Publish event to notify PollingMetricsVerticle to add device to cache
-                                    vertx.eventBus().publish("device.monitoring.enabled", new JsonObject()
-                                            .put("device_id", deviceId));
-
-                                    logger.debug("Published device.monitoring.enabled event for device: {}", deviceId);
-                                })
-                                .onFailure(cause ->
-                                {
-                                    logger.error("Failed to enable monitoring for device: {}", cause.getMessage());
-
-                                    promise.fail(cause);
-                                });
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to check device provisioning status: {}", cause.getMessage());
-
-                        promise.fail(cause);
-                    });
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in deviceEnableMonitoring service: {}", exception.getMessage());
-
-            promise.fail(exception);
-        }
-
-        return promise.future();
-    }
-
-    /**
-     * Disable monitoring for a device
-     *
-     * @param deviceId Device ID
-     * @return Future containing device_id, is_monitoring_enabled, monitoring_enabled_at
-     */
-    @Override
-    public Future<JsonObject> deviceDisableMonitoring(String deviceId)
-    {
-        var promise = Promise.<JsonObject>promise();
-
-        try
-        {
-            // First check if device exists, is not deleted, and current monitoring state
-            var checkSql = """
-                    SELECT is_deleted, is_monitoring_enabled
-                    FROM devices
-                    WHERE device_id = $1
-                    """;
-
-            pgPool.preparedQuery(checkSql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(checkRows ->
-                    {
-                        if (checkRows.size() == 0)
-                        {
-                            promise.complete(new JsonObject()
-                                    .put("updated", false)
-                                    .put("reason", "Device not found"));
-
-                            return;
-                        }
-
-                        var checkRow = checkRows.iterator().next();
-
-                        var isDeleted = checkRow.getBoolean("is_deleted");
-
-                        var isMonitoringEnabled = checkRow.getBoolean("is_monitoring_enabled");
-
-                        if (isDeleted)
-                        {
-                            promise.complete(new JsonObject()
-                                    .put("updated", false)
-                                    .put("reason", "Device is deleted"));
-
-                            return;
-                        }
-
-                        if (!isMonitoringEnabled)
-                        {
-                            promise.complete(new JsonObject()
-                                    .put("updated", false)
-                                    .put("reason", "Monitoring is already disabled for this device"));
-
-                            return;
-                        }
-
-                        // Device exists, is not deleted, and monitoring is enabled - proceed with disabling
-                        var sql = """
-                                UPDATE devices
-                                SET is_monitoring_enabled = false
-                                WHERE device_id = $1 AND is_deleted = false
-                                RETURNING device_id, is_monitoring_enabled, monitoring_enabled_at
-                                """;
-
-                        pgPool.preparedQuery(sql)
-                                .execute(Tuple.of(UUID.fromString(deviceId)))
-                                .onSuccess(rows ->
-                                {
-                                    if (rows.size() == 0)
-                                    {
-                                        promise.complete(new JsonObject()
-                                                .put("updated", false)
-                                                .put("reason", "Device not found or deleted"));
-
-                                        return;
-                                    }
-
-                                    var row = rows.iterator().next();
-
-                                    var result = new JsonObject()
-                                            .put("updated", true)
-                                            .put("device_id", row.getUUID("device_id").toString())
-                                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                            .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                                    row.getLocalDateTime("monitoring_enabled_at").toString() : null);
-
-                                    promise.complete(result);
-
-                                    // Publish event to notify PollingMetricsVerticle to remove device from cache
-                                    vertx.eventBus().publish("device.monitoring.disabled", new JsonObject()
-                                            .put("device_id", deviceId));
-
-                                    logger.debug("Published device.monitoring.disabled event for device: {}", deviceId);
-                                })
-                                .onFailure(cause ->
-                                {
-                                    logger.error("Failed to disable monitoring for device: {}", cause.getMessage());
-
-                                    promise.fail(cause);
-                                });
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to check device status: {}", cause.getMessage());
-
-                        promise.fail(cause);
-                    });
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in deviceDisableMonitoring service: {}", exception.getMessage());
-
-            promise.fail(exception);
-        }
-
-        return promise.future();
-    }
-
-    /**
-     * Provision devices and enable monitoring
-     *
-     * @param deviceIds Array of device IDs to provision
-     * @return Future containing JsonArray of provision results
-     */
-    @Override
-    public Future<JsonArray> deviceProvisionAndEnableMonitoring(JsonArray deviceIds)
-    {
-        var promise = Promise.<JsonArray>promise();
-
-        try
-        {
-            var results = new JsonArray();
-
-            var futures = new ArrayList<Future<JsonObject>>();
-
-            for (var i = 0; i < deviceIds.size(); i++)
-            {
-                var deviceId = deviceIds.getString(i);
-
-                futures.add(provisionSingleDevice(deviceId));
-            }
-
-            Future.all(futures)
-                    .onSuccess(compositeFuture ->
-                    {
-                        for (Future<JsonObject> future : futures) {
-                            results.add(future.result());
-                        }
-
-                        promise.complete(results);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to provision devices: {}", cause.getMessage());
-
-                        promise.fail(cause);
-                    });
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in deviceProvisionAndEnableMonitoring service: {}", exception.getMessage());
-
-            promise.fail(exception);
-        }
-
-        return promise.future();
-    }
-
-    /**
-     * Provision a single device and enable monitoring
-     *
-     * @param deviceId Device ID to provision
-     * @return Future containing JsonObject with provision result
-     */
-    private Future<JsonObject> provisionSingleDevice(String deviceId)
-    {
-        var promise = Promise.<JsonObject>promise();
-
-        var deviceResult = new JsonObject().put("device_id", deviceId);
-
-        try
-        {
-            // Validate UUID format
-            UUID.fromString(deviceId);
-
-            // Check if device exists and is unprovisioned
-            var checkSql = """
-                    SELECT device_id, is_provisioned, is_deleted, device_name
-                    FROM devices
-                    WHERE device_id = $1
-                    """;
-
-            pgPool.preparedQuery(checkSql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(checkRows ->
-                    {
-                        if (checkRows.size() == 0)
-                        {
-                            deviceResult.put("success", false)
-                                    .put("reason", "Device not found");
-
-                            promise.complete(deviceResult);
-
-                            return;
-                        }
-
-                        var checkRow = checkRows.iterator().next();
-
-                        var isDeleted = checkRow.getBoolean("is_deleted");
-
-                        var isProvisioned = checkRow.getBoolean("is_provisioned");
-
-                        var deviceName = checkRow.getString("device_name");
-
-                        if (isDeleted)
-                        {
-                            deviceResult.put("success", false)
-                                    .put("reason", "Device is deleted")
-                                    .put("device_name", deviceName);
-
-                            promise.complete(deviceResult);
-
-                            return;
                         }
 
                         if (isProvisioned)
                         {
-                            deviceResult.put("success", false)
-                                    .put("reason", "Device is already provisioned")
-                                    .put("device_name", deviceName);
-
-                            promise.complete(deviceResult);
-
-                            return;
+                            return Future.succeededFuture(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Device is already provisioned (monitoring already enabled)"));
                         }
 
-                        // Provision and enable monitoring
-                        var updateSql = """
+                        // Set is_provisioned = true to enable monitoring
+                        var sql = """
                                 UPDATE devices
-                                SET is_provisioned = true,
-                                    is_monitoring_enabled = true,
-                                    monitoring_enabled_at = NOW()
-                                WHERE device_id = $1
-                                RETURNING device_id, device_name, is_provisioned, is_monitoring_enabled, monitoring_enabled_at
+                                SET is_provisioned = true
+                                WHERE device_id = $1 AND is_deleted = false
+                                RETURNING device_id, is_provisioned
                                 """;
 
-                        pgPool.preparedQuery(updateSql)
-                                .execute(Tuple.of(UUID.fromString(deviceId)))
-                                .onSuccess(updateRows ->
+                        return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                                .map(rows ->
                                 {
-                                    if (updateRows.size() > 0)
+                                    if (rows.size() == 0)
                                     {
-                                        var row = updateRows.iterator().next();
-
-                                        deviceResult.put("success", true)
-                                                .put("device_name", row.getString("device_name"))
-                                                .put("is_provisioned", row.getBoolean("is_provisioned"))
-                                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                                .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ?
-                                                        row.getLocalDateTime("monitoring_enabled_at").toString() : null);
-
-                                        // Initialize device availability record with "unknown" status (Important to NOTE)
-                                        var initAvailabilitySql = """
-                                                INSERT INTO device_availability (device_id, current_status)
-                                                VALUES ($1, 'unknown')
-                                                ON CONFLICT (device_id) DO NOTHING
-                                                """;
-
-                                        pgPool.preparedQuery(initAvailabilitySql)
-                                                .execute(Tuple.of(UUID.fromString(deviceId)))
-                                                .onSuccess(availRows ->
-                                                {
-                                                    // Publish event to notify PollingMetricsVerticle to add device to cache
-                                                    vertx.eventBus().publish("device.monitoring.enabled", new JsonObject()
-                                                            .put("device_id", deviceId));
-
-                                                    logger.info("Provisioned and enabled monitoring for device: {} ({})", row.getString("device_name"), deviceId);
-
-                                                    promise.complete(deviceResult);
-                                                })
-                                                .onFailure(cause ->
-                                                {
-                                                    logger.error("Failed to initialize availability for device: {}: {}", deviceId, cause.getMessage());
-
-                                                    deviceResult.put("success", false)
-                                                            .put("reason", "Failed to initialize availability: " + cause.getMessage());
-
-                                                    promise.complete(deviceResult);
-                                                });
+                                        return new JsonObject()
+                                                .put("updated", false)
+                                                .put("reason", "Device not found or deleted");
                                     }
-                                    else
-                                    {
-                                        deviceResult.put("success", false)
-                                                .put("reason", "Update failed");
 
-                                        promise.complete(deviceResult);
-                                    }
-                                })
-                                .onFailure(cause ->
-                                {
-                                    logger.error("Failed to provision device: {}: {}", deviceId, cause.getMessage());
+                                    var row = rows.iterator().next();
 
-                                    deviceResult.put("success", false)
-                                            .put("reason", "Internal error: " + cause.getMessage());
+                                    var result = new JsonObject()
+                                            .put("updated", true)
+                                            .put("device_id", row.getUUID("device_id").toString())
+                                            .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                            .put("message", "Device provisioning enabled successfully");
 
-                                    promise.complete(deviceResult);
+                                    logger.info("Device provisioning enabled: {}", deviceId);
+
+                                    return result;
                                 });
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to check device status: {}: {}", deviceId, cause.getMessage());
-
-                        deviceResult.put("success", false)
-                                .put("reason", "Internal error: " + cause.getMessage());
-
-                        promise.complete(deviceResult);
                     });
         }
         catch (Exception exception)
         {
-            deviceResult.put("success", false)
-                    .put("reason", "Invalid device ID format");
+            logger.error("Error in deviceEnableProvisioning service: {}", exception.getMessage());
 
-            promise.complete(deviceResult);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
-     * List all provisioned devices with monitoring enabled
+     * Disable provisioning for a device (sets is_provisioned = false)
      *
-     * @return Future containing JsonArray of devices
+     * @param deviceId Device ID
+     * @return Future containing device_id and is_provisioned status
      */
-    public Future<JsonArray> deviceListProvisionedAndMonitoringEnabled()
+    @Override
+    public Future<JsonObject> deviceDisableProvisioning(String deviceId)
     {
-        var promise = Promise.<JsonArray>promise();
-
         try
         {
-            var sql = """
-                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type, d.port, d.protocol,
-                           d.is_monitoring_enabled, d.polling_interval_seconds, d.timeout_seconds,
-                           d.alert_threshold_cpu, d.alert_threshold_memory, d.alert_threshold_disk,
-                           d.host_name, d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at,
-                           d.monitoring_enabled_at,
-                           cp.username, cp.password_encrypted
-                    FROM devices d
-                    JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
-                    WHERE d.is_provisioned = true AND d.is_monitoring_enabled = true AND d.is_deleted = false
-                    ORDER BY d.device_name
+            // Check if device exists and is not deleted
+            var checkSql = """
+                    SELECT is_deleted, is_provisioned
+                    FROM devices
+                    WHERE device_id = $1
                     """;
 
-            pgPool.query(sql)
-                    .execute()
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(checkSql, Tuple.of(UUID.fromString(deviceId)))
+                    .compose(checkRows ->
                     {
-                        var devices = new JsonArray();
-
-                        for (var row : rows)
+                        if (checkRows.size() == 0)
                         {
-                            var device = new JsonObject()
-                                    .put("device_id", row.getUUID("device_id").toString())
-                                    .put("device_name", row.getString("device_name"))
-                                    .put("ip_address", row.getString("ip_address"))
-                                    .put("device_type", row.getString("device_type"))
-                                    .put("port", row.getInteger("port"))
-                                    .put("protocol", row.getString("protocol"))
-                                    .put("username", row.getString("username"))
-                                    .put("password_encrypted", row.getString("password_encrypted"))  // encrypted password
-                                    .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                    .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
-                                    .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                                    .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                                    .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                                    .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
-                                    .put("host_name", row.getString("host_name"))
-                                    .put("is_provisioned", row.getBoolean("is_provisioned"))
-                                    .put("is_deleted", row.getBoolean("is_deleted"))
-                                    .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
-                                    .put("created_at", row.getLocalDateTime("created_at").toString())
-                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null)
-                                    .put("monitoring_enabled_at", row.getLocalDateTime("monitoring_enabled_at") != null ? row.getLocalDateTime("monitoring_enabled_at").toString() : null);
-
-                            devices.add(device);
+                            return Future.succeededFuture(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Device not found"));
                         }
 
-                        promise.complete(devices);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to list provisioned and monitoring-enabled devices: {}", cause.getMessage());
+                        var checkRow = checkRows.iterator().next();
 
-                        promise.fail(cause);
+                        var isDeleted = checkRow.getBoolean("is_deleted");
+
+                        var isProvisioned = checkRow.getBoolean("is_provisioned");
+
+                        if (isDeleted)
+                        {
+                            return Future.succeededFuture(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Device is deleted"));
+                        }
+
+                        if (!isProvisioned)
+                        {
+                            return Future.succeededFuture(new JsonObject()
+                                    .put("updated", false)
+                                    .put("reason", "Device is already unprovisioned (monitoring already disabled)"));
+                        }
+
+                        // Set is_provisioned = false to disable monitoring
+                        var sql = """
+                                UPDATE devices
+                                SET is_provisioned = false
+                                WHERE device_id = $1 AND is_deleted = false
+                                RETURNING device_id, is_provisioned
+                                """;
+
+                        return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                                .map(rows ->
+                                {
+                                    if (rows.size() == 0)
+                                    {
+                                        return new JsonObject()
+                                                .put("updated", false)
+                                                .put("reason", "Device not found or deleted");
+                                    }
+
+                                    var row = rows.iterator().next();
+
+                                    var result = new JsonObject()
+                                            .put("updated", true)
+                                            .put("device_id", row.getUUID("device_id").toString())
+                                            .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                            .put("message", "Device provisioning disabled successfully");
+
+                                    logger.info("Device provisioning disabled: {}", deviceId);
+
+                                    return result;
+                                });
                     });
         }
         catch (Exception exception)
         {
-            logger.error("Error in deviceListProvisionedAndMonitoringEnabled service: {}", exception.getMessage());
+            logger.error("Error in deviceDisableProvisioning service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
+
+
 
     /**
      * Create device from discovery
@@ -1076,8 +559,6 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceCreateFromDiscovery(JsonObject deviceData)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var deviceName = deviceData.getString("device_name");
@@ -1086,58 +567,64 @@ public class DeviceServiceImpl implements DeviceService
 
             var deviceType = deviceData.getString("device_type");
 
-            var port = deviceData.getInteger("port");
-
-            var protocol = deviceData.getString("protocol");
-
             var credentialProfileId = deviceData.getString("credential_profile_id");
 
             var hostName = deviceData.getString("host_name");
 
-            // Create device with discovery defaults: is_provisioned = false, is_monitoring_enabled = false -> show its only being "discovered"
+            // Create device with auto-provisioning: is_provisioned = true (monitoring enabled)
+            // Port and protocol are now stored in credential_profiles, not devices
             // device_name = host_name initially (user can change later)
             var sql = """
-                    INSERT INTO devices (device_name, ip_address, device_type, port, protocol, credential_profile_id,
-                                       timeout_seconds, is_monitoring_enabled, alert_threshold_cpu,
-                                       alert_threshold_memory, alert_threshold_disk, polling_interval_seconds,
-                                       host_name, is_provisioned)
-                    VALUES ($1, '%s'::inet, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                    RETURNING device_id, device_name, ip_address::text as ip_address, device_type, host_name, is_provisioned, is_monitoring_enabled
+                    INSERT INTO devices (device_name, ip_address, device_type, credential_profile_id,
+                                       timeout_seconds, polling_interval_seconds, host_name, is_provisioned)
+                    VALUES ($1, '%s'::inet, $2, $3, $4, $5, $6, $7)
+                    RETURNING device_id, device_name, ip_address::text as ip_address, device_type, host_name, is_provisioned
                     """.formatted(ipAddress);
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(deviceName, deviceType, port, protocol, UUID.fromString(credentialProfileId),
-                                    getDefaultTimeout(), false, // is_monitoring_enabled = false
-                                    getDefaultCpuThreshold(), getDefaultMemoryThreshold(), getDefaultDiskThreshold(),
-                                    getDefaultPollingInterval(), hostName, false)) // is_provisioned = false
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(deviceName, deviceType, UUID.fromString(credentialProfileId),
+                            getDefaultTimeout(), getDefaultPollingInterval(), hostName, true))
+                    .compose(rows ->
                     {
                         var row = rows.iterator().next();
 
+                        var deviceId = row.getUUID("device_id").toString();
+
                         var result = new JsonObject()
                                 .put("success", true)
-                                .put("device_id", row.getUUID("device_id").toString())
+                                .put("device_id", deviceId)
                                 .put("device_name", row.getString("device_name"))
                                 .put("ip_address", row.getString("ip_address"))
                                 .put("device_type", row.getString("device_type"))
                                 .put("host_name", row.getString("host_name"))
                                 .put("is_provisioned", row.getBoolean("is_provisioned"))
-                                .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
-                                .put("message", "Device created from discovery successfully");
+                                .put("message", "Device created from discovery and auto-provisioned successfully");
 
-                        promise.complete(result);
+                        // Initialize device availability record with "unknown" status
+                        var initAvailabilitySql = """
+                                INSERT INTO device_availability (device_id, current_status)
+                                VALUES ($1, 'unknown')
+                                ON CONFLICT (device_id) DO NOTHING
+                                """;
+
+                        return dbHelper.executePreparedQuery(initAvailabilitySql, Tuple.of(UUID.fromString(deviceId)))
+                                .map(availRows ->
+                                {
+                                    logger.info("Device created from discovery and auto-provisioned: {} ({})", row.getString("device_name"), deviceId);
+
+                                    return result;
+                                });
                     })
-                    .onFailure(cause ->
+                    .recover(cause ->
                     {
                         logger.error("Failed to create device from discovery: {}", cause.getMessage());
 
                         if (cause.getMessage().contains("duplicate key") || cause.getMessage().contains("unique constraint"))
                         {
-                            promise.fail(new Exception("Device with this IP address already exists"));
+                            return Future.failedFuture(new Exception("Device with this IP address already exists"));
                         }
                         else
                         {
-                            promise.fail(cause);
+                            return Future.failedFuture(cause);
                         }
                     });
         }
@@ -1145,10 +632,8 @@ public class DeviceServiceImpl implements DeviceService
         {
             logger.error("Error in deviceCreateFromDiscovery service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -1161,8 +646,6 @@ public class DeviceServiceImpl implements DeviceService
     @Override
     public Future<JsonObject> deviceUpdateConfig(String deviceId, JsonObject updateFields)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             // Basic existence and deletion check
@@ -1172,24 +655,19 @@ public class DeviceServiceImpl implements DeviceService
                     WHERE device_id = $1
                     """;
 
-            pgPool.preparedQuery(checkSql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(checkRows ->
+            return dbHelper.executePreparedQuery(checkSql, Tuple.of(UUID.fromString(deviceId)))
+                    .compose(checkRows ->
                     {
                         if (checkRows.size() == 0)
                         {
-                            promise.fail(new Exception("Device not found"));
-
-                            return;
+                            return Future.failedFuture(new Exception("Device not found"));
                         }
 
                         var checkRow = checkRows.iterator().next();
 
                         if (Boolean.TRUE.equals(checkRow.getBoolean("is_deleted")))
                         {
-                            promise.fail(new Exception("Device is deleted and cannot be updated"));
-
-                            return;
+                            return Future.failedFuture(new Exception("Device is deleted and cannot be updated"));
                         }
 
                         // Build dynamic update for allowed fields only
@@ -1206,13 +684,6 @@ public class DeviceServiceImpl implements DeviceService
                             params.add(updateFields.getString("device_name"));
                         }
 
-                        if (updateFields.containsKey("port"))
-                        {
-                            sqlBuilder.append("port = $").append(paramIndex++).append(", ");
-
-                            params.add(updateFields.getInteger("port"));
-                        }
-
                         if (updateFields.containsKey("polling_interval_seconds"))
                         {
                             sqlBuilder.append("polling_interval_seconds = $").append(paramIndex++).append(", ");
@@ -1227,32 +698,9 @@ public class DeviceServiceImpl implements DeviceService
                             params.add(updateFields.getInteger("timeout_seconds"));
                         }
 
-                        if (updateFields.containsKey("alert_threshold_cpu"))
-                        {
-                            sqlBuilder.append("alert_threshold_cpu = $").append(paramIndex++).append(", ");
-
-                            params.add(updateFields.getDouble("alert_threshold_cpu"));
-                        }
-
-                        if (updateFields.containsKey("alert_threshold_memory"))
-                        {
-                            sqlBuilder.append("alert_threshold_memory = $").append(paramIndex++).append(", ");
-
-                            params.add(updateFields.getDouble("alert_threshold_memory"));
-                        }
-
-                        if (updateFields.containsKey("alert_threshold_disk"))
-                        {
-                            sqlBuilder.append("alert_threshold_disk = $").append(paramIndex++).append(", ");
-
-                            params.add(updateFields.getDouble("alert_threshold_disk"));
-                        }
-
                         if (params.isEmpty())
                         {
-                            promise.fail(new Exception("No updatable fields provided"));
-
-                            return;
+                            return Future.failedFuture(new Exception("No updatable fields provided"));
                         }
 
                         var sqlStr = sqlBuilder.toString();
@@ -1263,51 +711,30 @@ public class DeviceServiceImpl implements DeviceService
                         }
 
                         var sql = sqlStr + " WHERE device_id = $" + paramIndex + " AND is_deleted = false" +
-                                " RETURNING device_id, device_name, port, polling_interval_seconds, timeout_seconds, " +
-                                "alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk, is_provisioned, is_monitoring_enabled";
+                                " RETURNING device_id, device_name, polling_interval_seconds, timeout_seconds, is_provisioned";
 
                         params.add(UUID.fromString(deviceId));
 
-                        pgPool.preparedQuery(sql)
-                                .execute(Tuple.from(params.getList()))
-                                .onSuccess(rows ->
+                        return dbHelper.executePreparedQuery(sql, Tuple.from(params.getList()))
+                                .map(rows ->
                                 {
                                     if (rows.size() == 0)
                                     {
-                                        promise.fail(new Exception("Device not found or already deleted"));
-
-                                        return;
+                                        throw new RuntimeException("Device not found or already deleted");
                                     }
 
                                     var row = rows.iterator().next();
 
-                                    var result = new JsonObject()
+                                    return new JsonObject()
                                             .put("success", true)
                                             .put("device_id", row.getUUID("device_id").toString())
                                             .put("device_name", row.getString("device_name"))
-                                            .put("port", row.getInteger("port"))
                                             .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
                                             .put("timeout_seconds", row.getInteger("timeout_seconds"))
-                                            .put("alert_threshold_cpu", row.getBigDecimal("alert_threshold_cpu"))
-                                            .put("alert_threshold_memory", row.getBigDecimal("alert_threshold_memory"))
-                                            .put("alert_threshold_disk", row.getBigDecimal("alert_threshold_disk"))
                                             .put("is_provisioned", row.getBoolean("is_provisioned"))
-                                            .put("is_monitoring_enabled", row.getBoolean("is_monitoring_enabled"))
                                             .put("message", "Device configuration updated successfully");
-
-                                    promise.complete(result);
-
-                                    // Publish event to notify PollingMetricsVerticle to update device in cache
-                                    // Only publish if device is monitoring enabled (otherwise not in cache)
-                                    if (row.getBoolean("is_monitoring_enabled"))
-                                    {
-                                        vertx.eventBus().publish("device.config.updated", new JsonObject()
-                                                .put("device_id", deviceId));
-
-                                        logger.debug("Published device.config.updated event for device: {}", deviceId);
-                                    }
                                 })
-                                .onFailure(cause ->
+                                .recover(cause ->
                                 {
                                     logger.error("Failed to update device configuration: {}", cause.getMessage());
 
@@ -1316,37 +743,29 @@ public class DeviceServiceImpl implements DeviceService
                                             cause.getMessage().contains("chk_memory_threshold") ||
                                             cause.getMessage().contains("chk_disk_threshold")))
                                     {
-                                        promise.fail(new Exception("Threshold values must be between 0 and 100"));
+                                        return Future.failedFuture(new Exception("Threshold values must be between 0 and 100"));
                                     }
                                     else if (cause.getMessage() != null && cause.getMessage().contains("chk_port_range"))
                                     {
-                                        promise.fail(new Exception("Port must be between 1 and 65535"));
+                                        return Future.failedFuture(new Exception("Port must be between 1 and 65535"));
                                     }
                                     else if (cause.getMessage() != null && cause.getMessage().contains("chk_timeout_range"))
                                     {
-                                        promise.fail(new Exception("Invalid timeout value"));
+                                        return Future.failedFuture(new Exception("Invalid timeout value"));
                                     }
                                     else
                                     {
-                                        promise.fail(cause);
+                                        return Future.failedFuture(cause);
                                     }
                                 });
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to check device status: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in deviceUpdateConfig service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
 }

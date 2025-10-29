@@ -244,12 +244,12 @@ CREATE TRIGGER backup_metric_on_delete
 -- DEFAULTS
 -- ==========
 
-INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('server linux', 22, true)
-INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('server windows', 5985, true)
-INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('router', 161, false)
-
--- Insert motadataadmin user (password: motadataadmin)
-INSERT INTO users (username, password_hash, is_active) VALUES ('motadataadmin', '4/9zHIYgUFS9f7gpQewwsTGu9oiHxHMYdLvmyYahtPk=', true)
-
--- Insert nmsliteadmin user  (password: nsmliteadmin)
-INSERT INTO users (username, password_hash, is_active) VALUES ('nmsliteadmin', 'rmRi57AHCCA6q/cIb5uYQfBq9RvRx3Jz7QlhSYhco/8=', false)
+--INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('server linux', 22, true)
+--INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('server windows', 5985, true)
+--INSERT INTO device_types (device_type_name, default_port, is_active) VALUES ('router', 161, false)
+--
+---- Insert motadataadmin user (password: motadataadmin)
+--INSERT INTO users (username, password_hash, is_active) VALUES ('motadataadmin', '4/9zHIYgUFS9f7gpQewwsTGu9oiHxHMYdLvmyYahtPk=', true)
+--
+---- Insert nmsliteadmin user  (password: nsmliteadmin)
+--INSERT INTO users (username, password_hash, is_active) VALUES ('nmsliteadmin', 'rmRi57AHCCA6q/cIb5uYQfBq9RvRx3Jz7QlhSYhco/8=', false)

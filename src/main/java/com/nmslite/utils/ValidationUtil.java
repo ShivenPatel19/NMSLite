@@ -520,7 +520,17 @@ public class ValidationUtil
          */
         public static boolean validateCreate(RoutingContext ctx, JsonObject credentialData)
         {
-            return validateRequiredFields(ctx, credentialData, "profile_name", "username", "password");
+            if (!validateRequiredFields(ctx, credentialData, "profile_name", "username", "password", "protocol"))
+            {
+                return false;
+            }
+
+            if (!validatePortRange(ctx, credentialData.getInteger("port")))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         /**
@@ -532,7 +542,7 @@ public class ValidationUtil
          */
         public static boolean validateUpdate(RoutingContext ctx, JsonObject requestBody)
         {
-            if (!validateUpdateFields(ctx, requestBody, "profile_name", "username", "password"))
+            if (!validateUpdateFields(ctx, requestBody, "profile_name", "username", "password", "port", "protocol"))
             {
                 return false;
             }
@@ -552,9 +562,19 @@ public class ValidationUtil
                 return false;
             }
 
+            if (!validatePortRange(ctx, requestBody.getInteger("port")))
+            {
+                return false;
+            }
+
+            if (!validateStringLength(ctx, requestBody.getString("protocol"), 50, "protocol"))
+            {
+                return false;
+            }
+
             return true;
         }
-        
+
     }
 
 
@@ -574,17 +594,12 @@ public class ValidationUtil
         public static boolean validateCreate(RoutingContext ctx, JsonObject profileData)
         {
             if (!validateRequiredFields(ctx, profileData,
-                "discovery_name", "ip_address", "device_type_id", "credential_profile_ids", "protocol"))
+                "discovery_name", "ip_address", "device_type_id", "credential_profile_ids"))
             {
                 return false;
             }
 
             if (!validateCredentialProfileIds(ctx, profileData))
-            {
-                return false;
-            }
-
-            if (!validatePortRange(ctx, profileData.getInteger("port")))
             {
                 return false;
             }

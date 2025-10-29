@@ -38,7 +38,7 @@ public class PollingDevice
 
     public String password;              // credential_profiles.password_encrypted (decrypted)
 
-    public int port;                     // devices.port
+    public int port;                     // credential_profiles.port
 
     // Per-device configuration (from devices table, NOT config file)
     public int timeoutSeconds;           // devices.timeout_seconds
@@ -47,9 +47,6 @@ public class PollingDevice
 
     // Global configuration (from config file, same for all devices)
     public int connectionTimeoutSeconds; // polling.connection.timeout.seconds (NOT in database)
-
-    // Timestamps
-    public Instant monitoringEnabledAt;  // devices.monitoring_enabled_at (anchor for scheduling)
 
     // ===== RUNTIME STATE (in-memory only, lost on restart) =====
 

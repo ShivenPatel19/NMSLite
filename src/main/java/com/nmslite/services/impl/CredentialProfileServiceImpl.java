@@ -1,6 +1,8 @@
 package com.nmslite.services.impl;
 
-import com.nmslite.core.DatabaseInitializer;
+import com.nmslite.database.DatabaseHelper;
+
+import com.nmslite.database.DatabaseInitializer;
 
 import com.nmslite.services.CredentialProfileService;
 
@@ -8,13 +10,9 @@ import com.nmslite.utils.PasswordUtil;
 
 import io.vertx.core.Future;
 
-import io.vertx.core.Promise;
-
 import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.json.JsonObject;
-
-import io.vertx.sqlclient.Pool;
 
 import io.vertx.sqlclient.Tuple;
 
@@ -32,7 +30,8 @@ import java.util.UUID;
  * - Password encryption/decryption for secure storage
 
  * Database Access:
- * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - Uses DatabaseInitializer.getDatabaseHelper() for database operations
+ * - DatabaseHelper provides generic query execution with consistent error handling
  * - No constructor parameters needed
  */
 public class CredentialProfileServiceImpl implements CredentialProfileService
@@ -40,15 +39,15 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
 
     private static final Logger logger = LoggerFactory.getLogger(CredentialProfileServiceImpl.class);
 
-    private final Pool pgPool;
+    private final DatabaseHelper dbHelper;
 
     /**
      * Constructor for CredentialProfileServiceImpl.
-     * Accesses database pool via DatabaseInitializer.getPool().
+     * Accesses database helper via DatabaseInitializer.
      */
     public CredentialProfileServiceImpl()
     {
-        this.pgPool = DatabaseInitializer.getPool();
+        this.dbHelper = DatabaseInitializer.getDatabaseHelper();
     }
 
     /**
@@ -59,19 +58,16 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonArray> credentialList()
     {
-        var promise = Promise.<JsonArray>promise();
-
         try
         {
             var sql = """
-                    SELECT credential_profile_id, profile_name, username, created_at, updated_at
+                    SELECT credential_profile_id, profile_name, username, port, protocol, created_at, updated_at
                     FROM credential_profiles
                     ORDER BY profile_name
                     """;
 
-            pgPool.query(sql)
-                    .execute()
-                    .onSuccess(rows ->
+            return dbHelper.executeQuery(sql)
+                    .map(rows ->
                     {
                         var credentials = new JsonArray();
 
@@ -81,6 +77,8 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                     .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                     .put("profile_name", row.getString("profile_name"))
                                     .put("username", row.getString("username"))
+                                    .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
                                     .put("created_at", row.getLocalDateTime("created_at").toString())
                                     .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                         row.getLocalDateTime("updated_at").toString() : null);
@@ -88,23 +86,15 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                             credentials.add(credential);
                         }
 
-                        promise.complete(credentials);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get credential profiles: {}", cause.getMessage());
-
-                        promise.fail(cause);
+                        return credentials;
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in credentialList service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -116,8 +106,6 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialCreate(JsonObject credentialData)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var profileName = credentialData.getString("profile_name");
@@ -126,6 +114,10 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
 
             var password = credentialData.getString("password");
 
+            var port = credentialData.getInteger("port");
+
+            var protocol = credentialData.getString("protocol");
+
             // Encrypt password for secure storage
             var encryptedPassword = PasswordUtil.encryptPassword(password);
 
@@ -133,44 +125,41 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
             {
                 logger.error("Failed to encrypt password for credential profile");
 
-                promise.fail(new Exception("Failed to encrypt password"));
-
-                return promise.future();
+                return Future.failedFuture(new Exception("Failed to encrypt password"));
             }
 
             var sql = """
-                    INSERT INTO credential_profiles (profile_name, username, password_encrypted)
-                    VALUES ($1, $2, $3)
-                    RETURNING credential_profile_id, profile_name, username, created_at
+                    INSERT INTO credential_profiles (profile_name, username, password_encrypted, port, protocol)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING credential_profile_id, profile_name, username, port, protocol, created_at
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(profileName, username, encryptedPassword))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(profileName, username, encryptedPassword, port, protocol))
+                    .map(rows ->
                     {
                         var row = rows.iterator().next();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("profile_name", row.getString("profile_name"))
                                 .put("username", row.getString("username"))
+                                .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("message", "Credential profile created successfully");
-
-                        promise.complete(result);
                     })
-                    .onFailure(cause ->
+                    .recover(cause ->
                     {
                         logger.error("Failed to create credential profile: {}", cause.getMessage());
 
                         if (cause.getMessage().contains("duplicate key"))
                         {
-                            promise.fail(new Exception("Profile name already exists"));
+                            return Future.failedFuture(new Exception("Profile name already exists"));
                         }
                         else
                         {
-                            promise.fail(cause);
+                            return Future.failedFuture(cause);
                         }
                     });
         }
@@ -178,10 +167,8 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
         {
             logger.error("Error in credentialCreate service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -194,8 +181,6 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialUpdate(String credentialId, JsonObject credentialData)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var profileName = credentialData.getString("profile_name");
@@ -203,6 +188,10 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
             var username = credentialData.getString("username");
 
             var password = credentialData.getString("password");
+
+            var port = credentialData.getInteger("port");
+
+            var protocol = credentialData.getString("protocol");
 
             var sqlBuilder = new StringBuilder("UPDATE credential_profiles SET ");
 
@@ -232,14 +221,26 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                 {
                     logger.error("Failed to encrypt password for credential profile update");
 
-                    promise.fail(new Exception("Failed to encrypt password"));
-
-                    return promise.future();
+                    return Future.failedFuture(new Exception("Failed to encrypt password"));
                 }
 
                 sqlBuilder.append("password_encrypted = $").append(paramIndex++).append(", ");
 
                 params.add(encryptedPassword);
+            }
+
+            if (port != null)
+            {
+                sqlBuilder.append("port = $").append(paramIndex++).append(", ");
+
+                params.add(port);
+            }
+
+            if (protocol != null)
+            {
+                sqlBuilder.append("protocol = $").append(paramIndex++).append(", ");
+
+                params.add(protocol);
             }
 
             // Remove trailing comma and space, add WHERE clause
@@ -251,43 +252,40 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
             }
 
             var sql = sqlStr + " WHERE credential_profile_id = $" + paramIndex +
-                    " RETURNING credential_profile_id, profile_name, username";
+                    " RETURNING credential_profile_id, profile_name, username, port, protocol";
 
             params.add(UUID.fromString(credentialId));
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.from(params.getList()))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.from(params.getList()))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            promise.fail(new Exception("Credential profile not found"));
-
-                            return;
+                            throw new RuntimeException("Credential profile not found");
                         }
 
                         var row = rows.iterator().next();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("profile_name", row.getString("profile_name"))
                                 .put("username", row.getString("username"))
+                                .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
                                 .put("message", "Credential profile updated successfully");
-
-                        promise.complete(result);
                     })
-                    .onFailure(cause ->
+                    .recover(cause ->
                     {
                         logger.error("Failed to update credential profile: {}", cause.getMessage());
 
                         if (cause.getMessage().contains("duplicate key"))
                         {
-                            promise.fail(new Exception("Profile name already exists"));
+                            return Future.failedFuture(new Exception("Profile name already exists"));
                         }
                         else
                         {
-                            promise.fail(cause);
+                            return Future.failedFuture(cause);
                         }
                     });
         }
@@ -295,10 +293,8 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
         {
             logger.error("Error in credentialUpdate service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -310,8 +306,6 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialDelete(String credentialId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var credentialUuid = UUID.fromString(credentialId);
@@ -323,9 +317,8 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                     WHERE credential_profile_id = $1 AND is_deleted = false
                     """;
 
-            pgPool.preparedQuery(checkDevicesSql)
-                    .execute(Tuple.of(credentialUuid))
-                    .onSuccess(deviceRows ->
+            return dbHelper.executePreparedQuery(checkDevicesSql, Tuple.of(credentialUuid))
+                    .compose(deviceRows ->
                     {
                         var deviceCount = deviceRows.iterator().next().getLong("device_count");
 
@@ -337,9 +330,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                 deviceCount
                             );
 
-                            promise.fail(new Exception(errorMsg));
-
-                            return;
+                            return Future.failedFuture(new Exception(errorMsg));
                         }
 
                         // Step 2: Check if credential is used in discovery_profiles table
@@ -349,9 +340,8 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                 WHERE $1 = ANY(credential_profile_ids)
                                 """;
 
-                        pgPool.preparedQuery(checkDiscoverySql)
-                                .execute(Tuple.of(credentialUuid))
-                                .onSuccess(discoveryRows ->
+                        return dbHelper.executePreparedQuery(checkDiscoverySql, Tuple.of(credentialUuid))
+                                .compose(discoveryRows ->
                                 {
                                     var discoveryCount = discoveryRows.iterator().next().getLong("discovery_count");
 
@@ -363,9 +353,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                             discoveryCount
                                         );
 
-                                        promise.fail(new Exception(errorMsg));
-
-                                        return;
+                                        return Future.failedFuture(new Exception(errorMsg));
                                     }
 
                                     // Step 3: No usage found, proceed with deletion
@@ -374,53 +362,28 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                             WHERE credential_profile_id = $1
                                             """;
 
-                                    pgPool.preparedQuery(deleteSql)
-                                            .execute(Tuple.of(credentialUuid))
-                                            .onSuccess(deleteRows ->
+                                    return dbHelper.executePreparedQuery(deleteSql, Tuple.of(credentialUuid))
+                                            .map(deleteRows ->
                                             {
                                                 if (deleteRows.rowCount() == 0)
                                                 {
-                                                    promise.fail(new Exception("Credential profile not found"));
-
-                                                    return;
+                                                    throw new RuntimeException("Credential profile not found");
                                                 }
 
-                                                var result = new JsonObject()
+                                                return new JsonObject()
                                                         .put("success", true)
                                                         .put("credential_profile_id", credentialId)
                                                         .put("message", "Credential profile deleted successfully");
-
-                                                promise.complete(result);
-                                            })
-                                            .onFailure(cause ->
-                                            {
-                                                logger.error("Failed to delete credential profile: {}", cause.getMessage());
-
-                                                promise.fail(cause);
                                             });
-                                })
-                                .onFailure(cause ->
-                                {
-                                    logger.error("Failed to check discovery profile usage: {}", cause.getMessage());
-
-                                    promise.fail(cause);
                                 });
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to check device usage: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in credentialDelete service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -432,25 +395,20 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
     @Override
     public Future<JsonObject> credentialGetById(String credentialId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
-                    SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
+                    SELECT credential_profile_id, profile_name, username, password_encrypted, port, protocol, created_at, updated_at
                     FROM credential_profiles
                     WHERE credential_profile_id = $1
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(credentialId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(credentialId)))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            promise.complete(new JsonObject().put("found", false));
-
-                            return;
+                            return new JsonObject().put("found", false);
                         }
 
                         var row = rows.iterator().next();
@@ -462,38 +420,28 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                         {
                             logger.error("Failed to decrypt password for credential profile: {}", credentialId);
 
-                            promise.fail(new Exception("Failed to decrypt credential password"));
-
-                            return;
+                            throw new RuntimeException("Failed to decrypt credential password");
                         }
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("found", true)
                                 .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
                                 .put("profile_name", row.getString("profile_name"))
                                 .put("username", row.getString("username"))
                                 .put("password", decryptedPassword)  // Only for admin access
+                                .put("port", row.getInteger("port"))
+                                .put("protocol", row.getString("protocol"))
                                 .put("created_at", row.getLocalDateTime("created_at").toString())
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                     row.getLocalDateTime("updated_at").toString() : null);
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get credential profile by ID: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in credentialGetById service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -514,8 +462,6 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                     .put("data", new JsonObject().put("credentials", new JsonArray())));
             }
 
-            var promise = Promise.<JsonObject>promise();
-
             // Convert JsonArray to UUID array for PostgresSQL
             var uuidArray = new UUID[credentialIds.size()];
 
@@ -526,14 +472,13 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
 
             // ANY(list of ids) -> compares each row's UUID against every UUID in the array, returning row if matched.
             var sql = """
-                    SELECT credential_profile_id, profile_name, username, password_encrypted, created_at, updated_at
+                    SELECT credential_profile_id, profile_name, username, password_encrypted, port, protocol, created_at, updated_at
                     FROM credential_profiles
                     WHERE credential_profile_id = ANY($1)
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(uuidArray))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(uuidArray))
+                    .map(rows ->
                     {
                         var credentials = new JsonArray();
 
@@ -547,9 +492,7 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                 logger.error("Failed to decrypt password for credential profile: {}",
                                     row.getUUID("credential_profile_id").toString());
 
-                                promise.fail(new Exception("Failed to decrypt credential password"));
-
-                                return;
+                                throw new RuntimeException("Failed to decrypt credential password");
                             }
 
                             var credential = new JsonObject()
@@ -557,6 +500,8 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                     .put("profile_name", row.getString("profile_name"))
                                     .put("username", row.getString("username"))
                                     .put("password_encrypted", decryptedPassword)  // For GoEngine use
+                                    .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
                                     .put("created_at", row.getLocalDateTime("created_at").toString())
                                     .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                         row.getLocalDateTime("updated_at").toString() : null);
@@ -564,20 +509,10 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                             credentials.add(credential);
                         }
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("data", new JsonObject().put("credentials", credentials));
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get credential profiles by IDs: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
-
-            return promise.future();
         }
         catch (Exception exception)
         {

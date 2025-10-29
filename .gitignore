@@ -25,9 +25,6 @@ Thumbs.db
 logs/
 *.log
 
-# Polling failures
-polling_failed/
-
 # Test results
 test-results/
 *-test.log

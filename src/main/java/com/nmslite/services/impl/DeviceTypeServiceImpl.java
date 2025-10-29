@@ -1,18 +1,16 @@
 package com.nmslite.services.impl;
 
-import com.nmslite.core.DatabaseInitializer;
+import com.nmslite.database.DatabaseHelper;
+
+import com.nmslite.database.DatabaseInitializer;
 
 import com.nmslite.services.DeviceTypeService;
 
 import io.vertx.core.Future;
 
-import io.vertx.core.Promise;
-
 import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.json.JsonObject;
-
-import io.vertx.sqlclient.Pool;
 
 import io.vertx.sqlclient.Tuple;
 
@@ -33,7 +31,8 @@ import java.util.UUID;
  * NOTE: Users cannot create, update, or delete device types for security reasons
 
  * Database Access:
- * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - Uses DatabaseInitializer.getDatabaseHelper() for database operations
+ * - DatabaseHelper provides generic query execution with consistent error handling
  * - No constructor parameters needed
  */
 public class DeviceTypeServiceImpl implements DeviceTypeService
@@ -41,15 +40,15 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
 
     private static final Logger logger = LoggerFactory.getLogger(DeviceTypeServiceImpl.class);
 
-    private final Pool pgPool;
+    private final DatabaseHelper dbHelper;
 
     /**
      * Constructor for DeviceTypeServiceImpl.
-     * Accesses database pool via DatabaseInitializer.getPool().
+     * Accesses database helper via DatabaseInitializer.
      */
     public DeviceTypeServiceImpl()
     {
-        this.pgPool = DatabaseInitializer.getPool();
+        this.dbHelper = DatabaseInitializer.getDatabaseHelper();
     }
 
     /**
@@ -61,8 +60,6 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
     @Override
     public Future<JsonArray> deviceTypeList(boolean includeInactive)
     {
-        var promise = Promise.<JsonArray>promise();
-
         try
         {
             var sql = """
@@ -72,9 +69,8 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
                     ORDER BY device_type_name
                     """;
 
-            pgPool.query(sql)
-                    .execute()
-                    .onSuccess(rows ->
+            return dbHelper.executeQuery(sql)
+                    .map(rows ->
                     {
                         var deviceTypes = new JsonArray();
 
@@ -90,23 +86,15 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
                             deviceTypes.add(deviceType);
                         }
 
-                        promise.complete(deviceTypes);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get device types: {}", cause.getMessage());
-
-                        promise.fail(cause);
+                        return deviceTypes;
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in deviceTypeList service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -118,8 +106,6 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
     @Override
     public Future<JsonObject> deviceTypeGetById(String deviceTypeId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -128,44 +114,31 @@ public class DeviceTypeServiceImpl implements DeviceTypeService
                     WHERE device_type_id = $1
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceTypeId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceTypeId)))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            promise.complete(new JsonObject().put("found", false));
-
-                            return;
+                            return new JsonObject().put("found", false);
                         }
 
                         var row = rows.iterator().next();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("found", true)
                                 .put("device_type_id", row.getUUID("device_type_id").toString())
                                 .put("device_type_name", row.getString("device_type_name"))
                                 .put("default_port", row.getInteger("default_port"))
                                 .put("is_active", row.getBoolean("is_active"))
                                 .put("created_at", row.getLocalDateTime("created_at").toString());
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get device type by ID: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in deviceTypeGetById service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
 }

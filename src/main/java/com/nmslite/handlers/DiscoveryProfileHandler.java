@@ -107,8 +107,8 @@ public class DiscoveryProfileHandler
     }
 
     /**
-     * Create discovery profile in database (no validation, just database storage)
-     * If port is not provided, uses the default port from the device type
+     * Create discovery profile in database
+     * Port and protocol are now stored in credential_profiles, not discovery_profiles
      *
      * @param ctx routing context containing the HTTP request and response
      */
@@ -147,22 +147,7 @@ public class DiscoveryProfileHandler
                             return;
                         }
 
-                        // Step 3: Set default port if not provided
-                        if (!requestBody.containsKey("port") || requestBody.getValue("port") == null)
-                        {
-                            var defaultPort = deviceType.getInteger("default_port");
-
-                            if (defaultPort != null)
-                            {
-                                requestBody.put("port", defaultPort);
-                            }
-                            else
-                            {
-                                logger.debug("No default port found for device type {}, proceeding without port", deviceTypeId);
-                            }
-                        }
-
-                        // Step 4: Create discovery profile in database
+                        // Step 3: Create discovery profile in database
                         createDiscoveryProfileInDatabase(ctx, requestBody, ipAddress);
                     });
                 })

@@ -1,6 +1,8 @@
 package com.nmslite.services.impl;
 
-import com.nmslite.core.DatabaseInitializer;
+import com.nmslite.database.DatabaseHelper;
+
+import com.nmslite.database.DatabaseInitializer;
 
 import com.nmslite.services.UserService;
 
@@ -8,13 +10,9 @@ import com.nmslite.utils.PasswordUtil;
 
 import io.vertx.core.Future;
 
-import io.vertx.core.Promise;
-
 import io.vertx.core.json.JsonArray;
 
 import io.vertx.core.json.JsonObject;
-
-import io.vertx.sqlclient.Pool;
 
 import io.vertx.sqlclient.Tuple;
 
@@ -33,7 +31,8 @@ import java.util.UUID;
  * - User session management
 
  * Database Access:
- * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - Uses DatabaseInitializer.getDatabaseHelper() for database operations
+ * - DatabaseHelper provides generic query execution with consistent error handling
  * - No constructor parameters needed
  */
 public class UserServiceImpl implements UserService
@@ -41,15 +40,15 @@ public class UserServiceImpl implements UserService
 
     private static final Logger logger = LoggerFactory.getLogger(UserServiceImpl.class);
 
-    private final Pool pgPool;
+    private final DatabaseHelper dbHelper;
 
     /**
      * Constructor for UserServiceImpl.
-     * Accesses database pool via DatabaseInitializer.getPool().
+     * Accesses database helper via DatabaseInitializer.
      */
     public UserServiceImpl()
     {
-        this.pgPool = DatabaseInitializer.getPool();
+        this.dbHelper = DatabaseInitializer.getDatabaseHelper();
     }
 
     /**
@@ -61,8 +60,6 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonArray> userList(boolean includeInactive)
     {
-        var promise = Promise.<JsonArray>promise();
-
         try
         {
             var sql = """
@@ -72,9 +69,8 @@ public class UserServiceImpl implements UserService
                 ORDER BY username
                 """;
 
-            pgPool.query(sql)
-                .execute()
-                .onSuccess(rows ->
+            return dbHelper.executeQuery(sql)
+                .map(rows ->
                 {
                     var users = new JsonArray();
 
@@ -88,23 +84,15 @@ public class UserServiceImpl implements UserService
                         users.add(user);
                     }
 
-                    promise.complete(users);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get users: {}", cause.getMessage());
-
-                    promise.fail(cause);
+                    return users;
                 });
         }
         catch (Exception exception)
         {
             logger.error("Error in userList service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -134,44 +122,37 @@ public class UserServiceImpl implements UserService
                 return Future.failedFuture(new Exception("Failed to hash password"));
             }
 
-            var promise = Promise.<JsonObject>promise();
-
             var sql = """
                 INSERT INTO users (username, password_hash, is_active)
                 VALUES ($1, $2, $3)
                 RETURNING user_id, username, is_active
                 """;
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(username, passwordHash, isActive))
-                .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(username, passwordHash, isActive))
+                .map(rows ->
                 {
                     var row = rows.iterator().next();
 
-                    var result = new JsonObject()
+                    return new JsonObject()
                         .put("success", true)
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
                         .put("is_active", row.getBoolean("is_active"))
                         .put("message", "User created successfully");
-
-                    promise.complete(result);
                 })
-                .onFailure(cause ->
+                .recover(cause ->
                 {
                     logger.error("Failed to create user: {}", cause.getMessage());
 
                     if (cause.getMessage().contains("duplicate key"))
                     {
-                        promise.fail(new Exception("Username already exists"));
+                        return Future.failedFuture(new Exception("Username already exists"));
                     }
                     else
                     {
-                        promise.fail(cause);
+                        return Future.failedFuture(cause);
                     }
                 });
-
-            return promise.future();
         }
         catch (Exception exception)
         {
@@ -191,8 +172,6 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userUpdate(String userId, JsonObject userData)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var username = userData.getString("username");
@@ -222,9 +201,7 @@ public class UserServiceImpl implements UserService
                 {
                     logger.error("Failed to hash password");
 
-                    promise.fail(new Exception("Failed to hash password"));
-
-                    return promise.future();
+                    return Future.failedFuture(new Exception("Failed to hash password"));
                 }
 
                 sqlBuilder.append("password_hash = $").append(paramIndex++).append(", ");
@@ -251,39 +228,34 @@ public class UserServiceImpl implements UserService
 
             params.add(UUID.fromString(userId));
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.from(params.getList()))
-                .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.from(params.getList()))
+                .map(rows ->
                 {
                     if (rows.size() == 0)
                     {
-                        promise.fail(new Exception("User not found"));
-
-                        return;
+                        throw new RuntimeException("User not found");
                     }
 
                     var row = rows.iterator().next();
 
-                    var result = new JsonObject()
+                    return new JsonObject()
                         .put("success", true)
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
                         .put("is_active", row.getBoolean("is_active"))
                         .put("message", "User updated successfully");
-
-                    promise.complete(result);
                 })
-                .onFailure(cause ->
+                .recover(cause ->
                 {
                     logger.error("Failed to update user: {}", cause.getMessage());
 
                     if (cause.getMessage().contains("duplicate key"))
                     {
-                        promise.fail(new Exception("Username already exists"));
+                        return Future.failedFuture(new Exception("Username already exists"));
                     }
                     else
                     {
-                        promise.fail(cause);
+                        return Future.failedFuture(cause);
                     }
                 });
         }
@@ -291,10 +263,8 @@ public class UserServiceImpl implements UserService
         {
             logger.error("Error in userUpdate service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -306,8 +276,6 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userDelete(String userId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -316,42 +284,29 @@ public class UserServiceImpl implements UserService
                 RETURNING user_id, username
                 """;
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(userId)))
-                .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(userId)))
+                .map(rows ->
                 {
                     if (rows.size() == 0)
                     {
-                        promise.fail(new Exception("User not found"));
-
-                        return;
+                        throw new RuntimeException("User not found");
                     }
 
                     var row = rows.iterator().next();
 
-                    var result = new JsonObject()
+                    return new JsonObject()
                         .put("success", true)
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
                         .put("message", "User deleted successfully");
-
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to delete user: {}", cause.getMessage());
-
-                    promise.fail(cause);
                 });
         }
         catch (Exception exception)
         {
             logger.error("Error in userDelete service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -364,8 +319,6 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userAuthenticate(String username, String password)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -374,17 +327,14 @@ public class UserServiceImpl implements UserService
                 WHERE username = $1 AND is_active = true
                 """;
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(username))
-                .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(username))
+                .map(rows ->
                 {
                     if (rows.size() == 0)
                     {
-                        promise.complete(new JsonObject()
+                        return new JsonObject()
                             .put("authenticated", false)
-                            .put("message", "Invalid username or password"));
-
-                        return;
+                            .put("message", "Invalid username or password");
                     }
 
                     var row = rows.iterator().next();
@@ -393,37 +343,27 @@ public class UserServiceImpl implements UserService
 
                     if (PasswordUtil.verifyPassword(password, storedPasswordHash))
                     {
-                        var result = new JsonObject()
+                        return new JsonObject()
                             .put("authenticated", true)
                             .put("user_id", row.getUUID("user_id").toString())
                             .put("username", row.getString("username"))
                             .put("is_active", row.getBoolean("is_active"))
                             .put("message", "Authentication successful");
-
-                        promise.complete(result);
                     }
                     else
                     {
-                        promise.complete(new JsonObject()
+                        return new JsonObject()
                             .put("authenticated", false)
-                            .put("message", "Invalid username or password"));
+                            .put("message", "Invalid username or password");
                     }
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to authenticate user: {}", cause.getMessage());
-
-                    promise.fail(cause);
                 });
         }
         catch (Exception exception)
         {
             logger.error("Error in userAuthenticate service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -435,8 +375,6 @@ public class UserServiceImpl implements UserService
     @Override
     public Future<JsonObject> userGetById(String userId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -445,42 +383,29 @@ public class UserServiceImpl implements UserService
                 WHERE user_id = $1
                 """;
 
-            pgPool.preparedQuery(sql)
-                .execute(Tuple.of(UUID.fromString(userId)))
-                .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(userId)))
+                .map(rows ->
                 {
                     if (rows.size() == 0)
                     {
-                        promise.complete(new JsonObject().put("found", false));
-
-                        return;
+                        return new JsonObject().put("found", false);
                     }
 
                     var row = rows.iterator().next();
 
-                    var result = new JsonObject()
+                    return new JsonObject()
                         .put("found", true)
                         .put("user_id", row.getUUID("user_id").toString())
                         .put("username", row.getString("username"))
                         .put("is_active", row.getBoolean("is_active"));
-
-                    promise.complete(result);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to get user by ID: {}", cause.getMessage());
-
-                    promise.fail(cause);
                 });
         }
         catch (Exception exception)
         {
             logger.error("Error in userGetById service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
 }

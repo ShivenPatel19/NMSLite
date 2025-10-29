@@ -1,16 +1,14 @@
 package com.nmslite.services.impl;
 
-import com.nmslite.core.DatabaseInitializer;
+import com.nmslite.database.DatabaseHelper;
+
+import com.nmslite.database.DatabaseInitializer;
 
 import com.nmslite.services.AvailabilityService;
 
 import io.vertx.core.Future;
 
-import io.vertx.core.Promise;
-
 import io.vertx.core.json.JsonObject;
-
-import io.vertx.sqlclient.Pool;
 
 import io.vertx.sqlclient.Tuple;
 
@@ -31,7 +29,8 @@ import java.util.UUID;
  * - Availability cleanup operations
 
  * Database Access:
- * - Uses DatabaseInitializer.getPool() to access the PostgreSQL connection pool
+ * - Uses DatabaseInitializer.getDatabaseHelper() for database operations
+ * - DatabaseHelper provides generic query execution with consistent error handling
  * - No constructor parameters needed
  */
 public class AvailabilityServiceImpl implements AvailabilityService
@@ -39,15 +38,15 @@ public class AvailabilityServiceImpl implements AvailabilityService
 
     private static final Logger logger = LoggerFactory.getLogger(AvailabilityServiceImpl.class);
 
-    private final Pool pgPool;
+    private final DatabaseHelper dbHelper;
 
     /**
      * Constructor for AvailabilityServiceImpl.
-     * Accesses database pool via DatabaseInitializer.getPool().
+     * Accesses database helper via DatabaseInitializer.
      */
     public AvailabilityServiceImpl()
     {
-        this.pgPool = DatabaseInitializer.getPool();
+        this.dbHelper = DatabaseInitializer.getDatabaseHelper();
     }
 
     /**
@@ -59,8 +58,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
     @Override
     public Future<JsonObject> availabilityGetByDevice(String deviceId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -73,15 +70,12 @@ public class AvailabilityServiceImpl implements AvailabilityService
                     WHERE da.device_id = $1 AND d.is_deleted = false
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            promise.complete(new JsonObject().put("found", false));
-
-                            return;
+                            return new JsonObject().put("found", false);
                         }
 
                         var row = rows.iterator().next();
@@ -94,7 +88,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
                             ipAddr = ipAddr.split("/")[0]; // Remove CIDR notation
                         }
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("found", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("device_name", row.getString("device_name"))
@@ -114,24 +108,14 @@ public class AvailabilityServiceImpl implements AvailabilityService
                                 .put("current_status", row.getString("current_status"))
                                 .put("updated_at", row.getLocalDateTime("updated_at") != null ?
                                     row.getLocalDateTime("updated_at").toString() : null);
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to get device availability: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in availabilityGetByDevice service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -144,8 +128,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
     @Override
     public Future<JsonObject> availabilityUpdateDeviceStatus(String deviceId, String status)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             // Normalize status to lowercase
@@ -153,9 +135,7 @@ public class AvailabilityServiceImpl implements AvailabilityService
 
             if (!normalizedStatus.equals("up") && !normalizedStatus.equals("down"))
             {
-                promise.fail(new Exception("Status must be 'up' or 'down'"));
-
-                return promise.future();
+                return Future.failedFuture(new Exception("Status must be 'up' or 'down'"));
             }
 
             // First verify device exists and is active
@@ -165,15 +145,12 @@ public class AvailabilityServiceImpl implements AvailabilityService
                     WHERE device_id = $1 AND is_deleted = false
                     """;
 
-            pgPool.preparedQuery(deviceCheckSql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(deviceRows ->
+            return dbHelper.executePreparedQuery(deviceCheckSql, Tuple.of(UUID.fromString(deviceId)))
+                    .compose(deviceRows ->
                     {
                         if (deviceRows.size() == 0)
                         {
-                            promise.fail(new Exception("Device not found or deleted"));
-
-                            return;
+                            return Future.failedFuture(new Exception("Device not found or deleted"));
                         }
 
                         var deviceRow = deviceRows.iterator().next();
@@ -214,20 +191,17 @@ public class AvailabilityServiceImpl implements AvailabilityService
                                          last_check_time, current_status, updated_at
                                 """;
 
-                        pgPool.preparedQuery(updateSql)
-                                .execute(Tuple.of(successfulIncrement, failedIncrement, now, normalizedStatus, UUID.fromString(deviceId)))
-                                .onSuccess(rows ->
+                        return dbHelper.executePreparedQuery(updateSql, Tuple.of(successfulIncrement, failedIncrement, now, normalizedStatus, UUID.fromString(deviceId)))
+                                .map(rows ->
                                 {
                                     if (rows.size() == 0)
                                     {
-                                        promise.fail(new Exception("Device availability record not found"));
-
-                                        return;
+                                        throw new RuntimeException("Device availability record not found");
                                     }
 
                                     var row = rows.iterator().next();
 
-                                    var result = new JsonObject()
+                                    return new JsonObject()
                                             .put("success", true)
                                             .put("device_id", row.getUUID("device_id").toString())
                                             .put("device_name", deviceName)
@@ -240,31 +214,15 @@ public class AvailabilityServiceImpl implements AvailabilityService
                                             .put("current_status", row.getString("current_status"))
                                             .put("updated_at", row.getLocalDateTime("updated_at").toString())
                                             .put("message", "Device status updated successfully");
-
-                                    promise.complete(result);
-                                })
-                                .onFailure(cause ->
-                                {
-                                    logger.error("Failed to update device status: {}", cause.getMessage());
-
-                                    promise.fail(cause);
                                 });
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to verify device: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in availabilityUpdateDeviceStatus service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -277,8 +235,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
     @Override
     public Future<JsonObject> availabilityResetDevice(String deviceId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -296,48 +252,33 @@ public class AvailabilityServiceImpl implements AvailabilityService
                     RETURNING device_id, availability_percent, current_status
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                    .map(rows ->
                     {
                         if (rows.size() == 0)
                         {
-                            var result = new JsonObject()
+                            return new JsonObject()
                                     .put("success", false)
                                     .put("device_id", deviceId)
                                     .put("message", "No availability record found for device");
-
-                            promise.complete(result);
-
-                            return;
                         }
 
                         var row = rows.iterator().next();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("device_id", row.getUUID("device_id").toString())
                                 .put("availability_percent", row.getBigDecimal("availability_percent"))
                                 .put("current_status", row.getString("current_status"))
                                 .put("message", "Device availability reset to 0% and unknown successfully");
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to reset device availability: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in availabilityResetDevice service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
@@ -349,8 +290,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
     @Override
     public Future<JsonObject> availabilityDeleteByDevice(String deviceId)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
             var sql = """
@@ -358,37 +297,26 @@ public class AvailabilityServiceImpl implements AvailabilityService
                     WHERE device_id = $1
                     """;
 
-            pgPool.preparedQuery(sql)
-                    .execute(Tuple.of(UUID.fromString(deviceId)))
-                    .onSuccess(rows ->
+            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
+                    .map(rows ->
                     {
                         var deletedCount = rows.rowCount();
 
-                        var result = new JsonObject()
+                        return new JsonObject()
                                 .put("success", true)
                                 .put("device_id", deviceId)
                                 .put("deleted", deletedCount > 0)
                                 .put("message", deletedCount > 0 ?
                                     "Device availability status deleted successfully" :
                                     "No availability status found for device");
-
-                        promise.complete(result);
-                    })
-                    .onFailure(cause ->
-                    {
-                        logger.error("Failed to delete device availability: {}", cause.getMessage());
-
-                        promise.fail(cause);
                     });
         }
         catch (Exception exception)
         {
             logger.error("Error in availabilityDeleteByDevice service: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
 }

@@ -53,7 +53,7 @@ public interface DiscoveryProfileService
     /**
      * Create a new discovery profile
      *
-     * @param profileData JsonObject containing discovery profile data (discovery_name, ip_address, is_range, device_type_id, credential_profile_ids, port, protocol)
+     * @param profileData JsonObject containing discovery profile data (discovery_name, ip_address, is_range, device_type_id, credential_profile_ids)
      * @return Future containing JsonObject with creation result
      */
     Future<JsonObject> discoveryCreate(JsonObject profileData);

@@ -18,11 +18,14 @@ import io.vertx.serviceproxy.ServiceProxyBuilder;
 
  * This interface provides:
  * - Device CRUD operations with soft delete
- * - Device monitoring management
- * - Device provisioning and discovery integration
+ * - Device provisioning (is_provisioned flag controls monitoring state)
+ * - Device discovery integration
  * - Device status and availability tracking
  * - Type-safe method calls
  * - Automatic event bus communication
+
+ * NOTE: is_provisioned flag now controls monitoring - when true, monitoring is enabled; when false, monitoring is disabled
+ * NOTE: port and protocol are stored in credential_profiles table, not devices table
  */
 @ProxyGen
 @VertxGen
@@ -52,20 +55,14 @@ public interface DeviceService
      */
     Future<JsonArray> deviceListByProvisioned(boolean isProvisioned);
 
-    /**
-     * List devices where both provisioned and monitoring are enabled
-     * FILTER: is_provisioned = true AND is_monitoring_enabled = true AND is_deleted = false
-     *
-     * @return Future containing JsonArray of devices
-     */
-    Future<JsonArray> deviceListProvisionedAndMonitoringEnabled();
+
 
     /**
      * Update device configuration in a single call.
-     * Allows updating any subset of: device_name, port, polling_interval_seconds,
-     * timeout_seconds, alert_threshold_cpu, alert_threshold_memory, alert_threshold_disk.
+     * Allows updating any subset of: device_name, polling_interval_seconds, timeout_seconds.
 
      * NOTE: ip_address, device_type, host_name are IMMUTABLE and cannot be updated here.
+     * NOTE: port and protocol are stored in credential_profiles, not devices.
      *
      * @param deviceId Device ID
      * @param updateFields JsonObject with any of the allowed fields above
@@ -107,38 +104,31 @@ public interface DeviceService
     Future<JsonObject> deviceFindByIp(String ipAddress, boolean includeDeleted);
 
     /**
-     * Enable monitoring for a device and set monitoring_enabled_at timestamp.
-     * If already enabled, preserves existing timestamp.
+     * Enable provisioning for a device (sets is_provisioned = true).
+     * NOTE: is_provisioned flag controls whether device is being monitored.
      *
      * @param deviceId Device ID
-     * @return Future containing device_id, is_monitoring_enabled, monitoring_enabled_at
+     * @return Future containing device_id and is_provisioned status
      */
-    Future<JsonObject> deviceEnableMonitoring(String deviceId);
+    Future<JsonObject> deviceEnableProvisioning(String deviceId);
 
     /**
-     * Disable monitoring for a device (does not change monitoring_enabled_at).
+     * Disable provisioning for a device (sets is_provisioned = false).
+     * NOTE: is_provisioned flag controls whether device is being monitored.
      *
      * @param deviceId Device ID
-     * @return Future containing device_id, is_monitoring_enabled, monitoring_enabled_at
+     * @return Future containing device_id and is_provisioned status
      */
-    Future<JsonObject> deviceDisableMonitoring(String deviceId);
-
-    /**
-     * Provision devices and enable monitoring (bulk operation).
-     * Sets is_provisioned=true AND is_monitoring_enabled=true for multiple devices.
-     * Only provisions devices that are currently unprovisioned (is_provisioned=false).
-     *
-     * @param deviceIds List of device IDs to provision
-     * @return Future containing JsonArray with results for each device
-     */
-    Future<JsonArray> deviceProvisionAndEnableMonitoring(JsonArray deviceIds);
+    Future<JsonObject> deviceDisableProvisioning(String deviceId);
 
     /**
      * Create device from discovery result (called after successful discovery)
-     * Creates device with: device_name = host_name, is_provisioned = false, is_monitoring_enabled = false
+     * Creates device with: device_name = host_name, is_provisioned = true (auto-provisioned, monitoring enabled)
      * NOTE: ip_address, device_type, host_name are IMMUTABLE after creation
+     * NOTE: port and protocol are stored in credential_profiles, not devices
+     * NOTE: Devices are automatically provisioned upon successful discovery
      *
-     * @param deviceData JsonObject containing device data from discovery (device_name, ip_address, device_type, port, protocol, credential_profile_id, host_name)
+     * @param deviceData JsonObject containing device data from discovery (device_name, ip_address, device_type, credential_profile_id, host_name)
      * @return Future containing JsonObject with creation result
      */
     Future<JsonObject> deviceCreateFromDiscovery(JsonObject deviceData);

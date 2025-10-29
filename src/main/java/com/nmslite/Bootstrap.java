@@ -4,9 +4,9 @@ import ch.qos.logback.classic.Level;
 
 import ch.qos.logback.classic.LoggerContext;
 
-import com.nmslite.core.DatabaseInitializer;
-
 import com.nmslite.core.VerticleDeployer;
+
+import com.nmslite.database.DatabaseInitializer;
 
 import com.typesafe.config.Config;
 
@@ -100,7 +100,7 @@ public class Bootstrap
                 .compose(v -> configureLogging())
                 .compose(v -> initializeDatabase())
                 .compose(v -> deployAllVerticles())
-                .onSuccess(v -> logger.info("NMSLite Application started successfully - HTTP API available at http://localhost:8080"))
+                .onSuccess(v -> logServerStartupMessage())
                 .onFailure(cause ->
                 {
                     logger.error("Failed to start NMSLite Application: {}", cause.getMessage());
@@ -222,9 +222,6 @@ public class Bootstrap
                     .setMaxWorkerExecuteTime(maxWorkerTime)
                     .setWarningExceptionTime(warningExceptionTime)
                     .setWorkerPoolSize(workerPoolSize);
-
-            logger.info("VertxOptions configured: eventLoopThreshold={}s, workerThreshold={}s, workerPoolSize={}",
-                    maxEventLoopTimeSeconds, maxWorkerTimeSeconds, workerPoolSize);
 
             vertx = Vertx.vertx(options);
 
@@ -395,6 +392,29 @@ public class Bootstrap
             logger.error("Error in configureLogging: {}", exception.getMessage());
 
             return Future.failedFuture(exception);
+        }
+    }
+
+    /**
+     * Logs server startup message with HTTPS port.
+     */
+    private static void logServerStartupMessage()
+    {
+        try
+        {
+            var serverConfig = config.getJsonObject("server", new JsonObject());
+
+            var httpsConfig = serverConfig.getJsonObject("https", new JsonObject());
+
+            var httpsPort = httpsConfig.getInteger("port", 8443);
+
+            logger.info("✅ NMSLite Application started successfully");
+
+            logger.info("🔒 HTTPS API available at https://localhost:{}", httpsPort);
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in logServerStartupMessage: {}", exception.getMessage());
         }
     }
 

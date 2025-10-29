@@ -52,7 +52,7 @@ public interface CredentialProfileService
     /**
      * Create a new credential profile
      *
-     * @param credentialData JsonObject containing credential data (profile_name, username, password, protocol)
+     * @param credentialData JsonObject containing credential data (profile_name, username, password, port, protocol)
      * @return Future containing JsonObject with creation result
      */
     Future<JsonObject> credentialCreate(JsonObject credentialData);

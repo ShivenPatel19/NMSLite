@@ -259,13 +259,13 @@ public class DiscoveryVerticle extends AbstractVerticle
      *   "ip_address": "192.168.1.1" or "192.168.1.1-50",
      *   "is_range": true/false,
      *   "device_type_name": "server linux",
-     *   "port": 22,
-     *   "protocol": "ssh",
      *   "credentials": [
      *     {
      *       "credential_profile_id": "uuid",
      *       "username": "admin",
-     *       "password_encrypted": "encrypted_password"
+     *       "password_encrypted": "encrypted_password",
+     *       "port": 22,
+     *       "protocol": "ssh"
      *     }
      *   ]
      * }
@@ -1046,7 +1046,9 @@ public class DiscoveryVerticle extends AbstractVerticle
                 var goEngineCredential = new JsonObject()
                     .put("credential_id", credential.getString("credential_profile_id"))
                     .put("username", credential.getString("username"))
-                    .put("password", credential.getString("password"));
+                    .put("password", credential.getString("password"))
+                    .put("port", credential.getInteger("port"))
+                    .put("protocol", credential.getString("protocol"));
 
                 credentials.add(goEngineCredential);
             }
@@ -1054,10 +1056,9 @@ public class DiscoveryVerticle extends AbstractVerticle
             // Get device type (already in GoEngine format from database)
             var deviceTypeName = profileData.getString("device_type_name");
 
-            // Create discovery_config
+            // Create discovery_config (port/protocol now per-credential)
             var discoveryConfig = new JsonObject()
                 .put("device_type", deviceTypeName)
-                .put("port", profileData.getInteger("port"))
                 .put("timeout_seconds", timeoutSeconds)
                 .put("connection_timeout", connectionTimeoutSeconds);
 
@@ -1218,24 +1219,31 @@ public class DiscoveryVerticle extends AbstractVerticle
             }
 
             // Prepare device data for DeviceService.deviceCreateFromDiscovery
+            // Port and protocol are now stored in credential_profiles, not devices
             var deviceData = new JsonObject()
                 .put("device_name", hostname.equals("-") ? discovery.getString("ip_address") : hostname)
                 .put("ip_address", discovery.getString("ip_address"))
                 .put("device_type", discovery.getString("device_type"))
-                .put("port", discovery.getInteger("port", 22))
-                .put("protocol", discovery.getString("device_type").contains("windows") ? "winrm" : "ssh")
                 .put("credential_profile_id", discovery.getString("credential_id")) // ONLY the successful credential ID
                 .put("host_name", hostname);
 
             deviceService.deviceCreateFromDiscovery(deviceData)
                 .onSuccess(result ->
                 {
+                    // Publish event to notify PollingMetricsVerticle to add device to cache
+                    // Device is auto-provisioned (is_provisioned=true) after discovery
+                    var deviceId = result.getString("device_id");
+
+                    vertx.eventBus().publish("device.provision.enabled", new JsonObject()
+                        .put("device_id", deviceId));
+
+                    logger.debug("Published device.provision.enabled event for discovered device: {}", deviceId);
 
                     // Return device info for response
                     promise.complete(new JsonObject()
                         .put("ip_address", deviceData.getString("ip_address"))
                         .put("hostname", deviceData.getString("host_name"))
-                        .put("device_id", result.getString("device_id"))
+                        .put("device_id", deviceId)
                         .put("device_name", deviceData.getString("device_name"))
                         .put("success", true));
                 })
