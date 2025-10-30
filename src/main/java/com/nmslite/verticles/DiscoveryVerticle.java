@@ -138,7 +138,9 @@ public class DiscoveryVerticle extends AbstractVerticle
             logger.info("Discovery worker pool created: {} workers, {}s timeout",
                     workerPoolSize, workerPoolTimeoutSeconds);
 
-            initializeServiceProxies();
+            this.deviceService = DeviceService.createProxy();
+
+            this.discoveryProfileService = DiscoveryProfileService.createProxy();
 
             setupEventBusConsumers();
 
@@ -149,23 +151,6 @@ public class DiscoveryVerticle extends AbstractVerticle
             logger.error("Error in start: {}", exception.getMessage());
 
             startPromise.fail(exception);
-        }
-    }
-
-    /**
-     * Initialize service proxies for database operations
-     */
-    private void initializeServiceProxies()
-    {
-        try
-        {
-            this.deviceService = DeviceService.createProxy();
-
-            this.discoveryProfileService = DiscoveryProfileService.createProxy();
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in initializeServiceProxies: {}", exception.getMessage());
         }
     }
 
@@ -230,7 +215,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
             // Get discovery profile data
             getDiscoveryProfileWithCredentials(profileId)
-                .compose(this::parseDiscoveryTargetsForTest)
+                .compose(this::parseIPTargets)
                 .compose(this::checkExistingDevicesAndFilter)
                 .compose(this::executeParallelBatchDiscovery)
                 .compose(this::processTestDiscoveryResults)
@@ -331,12 +316,14 @@ public class DiscoveryVerticle extends AbstractVerticle
                             return;
                         }
 
-                        // Create credential object with decrypted password for GoEngine
+                        // Create credential object with decrypted password, port, and protocol for GoEngine
                         var decryptedCredential = new JsonObject()
                             .put("credential_profile_id", credential.getString("credential_profile_id"))
                             .put("profile_name", credential.getString("profile_name"))
                             .put("username", credential.getString("username"))
-                            .put("password", decryptedPassword);
+                            .put("password", decryptedPassword)
+                            .put("port", credential.getInteger("port"))
+                            .put("protocol", credential.getString("protocol"));
 
                         decryptedCredentials.add(decryptedCredential);
                     }
@@ -382,7 +369,7 @@ public class DiscoveryVerticle extends AbstractVerticle
      * - target_ips: ["192.168.1.1", "192.168.1.2", ...] array of individual IPs
      * - total_targets: integer count of IPs to discover
      */
-    private Future<JsonObject> parseDiscoveryTargetsForTest(JsonObject profile)
+    private Future<JsonObject> parseIPTargets(JsonObject profile)
     {
         var promise = Promise.<JsonObject>promise();
 
@@ -682,349 +669,384 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Executes GoEngine discovery with pre-connectivity checks and credential iteration.
-     
+     * SYNCHRONOUS method - designed to run in worker thread (called from processBatch).
+
      * Performs a two-stage discovery process:
      * 1. Connectivity checks using fping and port scanning to identify reachable targets
      * 2. GoEngine discovery execution only on reachable IPs for efficiency
-     
+
      * This method optimizes discovery by filtering unreachable IPs early, reducing
-     * GoEngine execution time and improving overall discovery performance. Uses
-     * NetworkConnectivityUtil for fast connectivity validation.
+     * GoEngine execution time and improving overall discovery performance.
      *
      * @param profileData JsonObject containing discovery profile with credentials and configuration
-     * @param targetIps JsonArray of IP address strings to discover
-     * @return Future<JsonArray> containing discovery results for all IPs (successful and failed)
-     
+     * @param targetIps List of IP address strings to discover
+     * @return JsonArray containing discovery results for all IPs (successful and failed)
+
      * Input profileData requires:
-     * - credentials: array of credential objects with username/password
+     * - credentials: array of credential objects with username/password/port/protocol
      * - device_type_name: string device type for GoEngine
-     * - port: integer port number for connectivity checks
-     * - protocol: string protocol (ssh/winrm)
-     
+
      * Output JsonArray contains:
      * - Successful discoveries: full device information from GoEngine
      * - Failed discoveries: error objects with ip_address, success=false, error message
      * - Unreachable IPs: connectivity failure objects with appropriate error messages
      */
-    private Future<JsonArray> executeGoEngineDiscovery(JsonObject profileData, JsonArray targetIps)
+    private JsonArray executeGoEngineDiscovery(JsonObject profileData, List<String> targetIps)
     {
-        var promise = Promise.<JsonArray>promise();
-
         try
         {
             if (targetIps.isEmpty())
             {
-                promise.complete(new JsonArray());
-
-                return promise.future();
+                return new JsonArray();
             }
 
-            // Step 1: Perform connectivity checks first
-            performConnectivityChecks(targetIps, profileData)
-                .compose(connectivityResults ->
+            // Extract all unique ports from credentials for connectivity checks
+            var credentials = profileData.getJsonArray("credentials");
+
+            var uniquePorts = new java.util.HashSet<Integer>();
+
+            for (var credObj : credentials)
+            {
+                var credential = (JsonObject) credObj;
+
+                var port = credential.getInteger("port");
+
+                if (port != null)
                 {
-                    var reachableIPs = connectivityResults.getJsonArray("reachable");
+                    uniquePorts.add(port);
+                }
+            }
 
-                    var unreachableIPs = connectivityResults.getJsonArray("unreachable");
+            // Step 1: Perform connectivity checks on all unique ports
+            var connectivityResults = performConnectivityChecks(targetIps, new java.util.ArrayList<>(uniquePorts));
 
-                    logger.debug("Connectivity check: {}/{} IPs reachable", reachableIPs.size(), targetIps.size());
+            var reachableIPs = connectivityResults.getJsonArray("reachable");
 
-                    if (reachableIPs.isEmpty())
-                    {
-                        logger.debug("No reachable IPs found, skipping GoEngine discovery");
+            var unreachableIPs = connectivityResults.getJsonArray("unreachable");
 
-                        // Create failed results inline
-                        var failedResults = new JsonArray();
+            logger.debug("Connectivity check: {}/{} IPs reachable", reachableIPs.size(), targetIps.size());
 
-                        for (var i = 0; i < targetIps.size(); i++)
-                        {
-                            var ipAddress = targetIps.getString(i);
+            if (reachableIPs.isEmpty())
+            {
+                logger.debug("No reachable IPs found, skipping GoEngine discovery");
 
-                            var failedResult = new JsonObject()
-                                .put("ip_address", ipAddress)
-                                .put("success", false)
-                                .put("error", "No connectivity")
-                                .put("timestamp", System.currentTimeMillis());
+                // Create failed results for all IPs
+                var failedResults = new JsonArray();
 
-                            failedResults.add(failedResult);
-                        }
+                for (var ip : targetIps)
+                {
+                    var failedResult = new JsonObject()
+                        .put("ip_address", ip)
+                        .put("success", false)
+                        .put("error", "No connectivity")
+                        .put("timestamp", System.currentTimeMillis());
 
-                        return Future.succeededFuture(failedResults);
-                    }
+                    failedResults.add(failedResult);
+                }
 
-                    // Step 2: Proceed with GoEngine discovery for reachable IPs only
-                    return executeGoEngineForReachableIPs(profileData, reachableIPs, unreachableIPs);
-                })
-                .onSuccess(promise::complete)
-                .onFailure(promise::fail);
+                return failedResults;
+            }
+
+            // Step 2: Proceed with GoEngine discovery for reachable IPs only
+            return executeGoEngineForReachableIPs(profileData, reachableIPs, unreachableIPs);
         }
         catch (Exception exception)
         {
             logger.error("Error in executeGoEngineDiscovery: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return new JsonArray();
         }
-
-        return promise.future();
     }
 
     /**
      * Performs fast connectivity checks on all target IPs using BATCH fping and port scanning.
-     
+     * SYNCHRONOUS method - designed to run in worker thread (called from executeGoEngineDiscovery).
+
      * Executes efficient batch connectivity validation to quickly identify which IPs are
-     * reachable before attempting GoEngine discovery. Uses NetworkConnectivityUtil batch methods
+     * reachable before attempting GoEngine discovery. Uses NetworkConnectivity batch methods
      * for optimal performance. This pre-filtering step significantly improves discovery performance
      * by avoiding timeouts on unreachable IPs.
+
+     * Since credentials can have different ports, this method checks ALL unique ports.
+     * An IP is considered reachable if it passes fping AND at least ONE port is open.
      *
-     * @param targetIps JsonArray of IP address strings to check
-     * @param profileData JsonObject containing port number for port connectivity checks
-     * @return Future<JsonObject> containing reachable and unreachable IP arrays
-     
-     * Input requirements:
-     * - targetIps: array of IP address strings
-     * - profileData.port: integer port number to check (e.g., 22 for SSH, 5985 for WinRM)
-     
+     * @param targetIps List of IP address strings to check
+     * @param ports List of unique port numbers to check (e.g., [22, 2222, 5985])
+     * @return JsonObject containing reachable and unreachable IP arrays
+
      * Output JsonObject structure:
      * {
      *   "reachable": ["192.168.1.10", "192.168.1.15"],
      *   "unreachable": ["192.168.1.11", "192.168.1.12"]
      * }
-     
+
      * Connectivity check process (OPTIMIZED):
      * 1. BATCH fping check for all IPs (single fping process)
-     * 2. BATCH port check for IPs that passed fping (parallel checks)
-     * 3. IP is considered reachable only if both checks pass
+     * 2. BATCH port check for IPs that passed fping on ALL unique ports (parallel checks)
+     * 3. IP is considered reachable if it passes fping AND at least ONE port is open
      */
-    private Future<JsonObject> performConnectivityChecks(JsonArray targetIps, JsonObject profileData)
+    private JsonObject performConnectivityChecks(List<String> targetIps, List<Integer> ports)
     {
-        var promise = Promise.<JsonObject>promise();
-
         try
         {
-            // Convert JsonArray to List<String>
-            var ipList = new ArrayList<String>();
+            // Step 1: Batch fping check (single fping process for all IPs) - direct call, no executeBlocking
+            var fpingResults = NetworkConnectivity.batchFpingCheck(targetIps);
 
-            for (var i = 0; i < targetIps.size(); i++)
+            // Filter IPs that passed fping
+            var pingAliveIps = targetIps.stream()
+                .filter(ip -> fpingResults.getOrDefault(ip, false))
+                .collect(Collectors.toList());
+
+            if (pingAliveIps.isEmpty())
             {
-                ipList.add(targetIps.getString(i));
+                // All IPs failed fping, no need for port check
+                var unreachableIPs = new JsonArray();
+
+                targetIps.forEach(unreachableIPs::add);
+
+                return new JsonObject()
+                    .put("reachable", new JsonArray())
+                    .put("unreachable", unreachableIPs)
+                    .put("total_checked", targetIps.size());
             }
 
-            var port = profileData.getInteger("port", 22);
+            // Step 2: Check all unique ports for alive IPs
+            // Track which IPs have at least one port open
+            var ipsWithOpenPorts = new java.util.HashSet<String>();
 
-            // Step 1: Batch fping check (single fping process for all IPs) - wrapped in executeBlocking
-            vertx.executeBlocking(() -> NetworkConnectivity.batchFpingCheck(ipList))
-                .compose(fpingResults ->
+            for (var port : ports)
+            {
+                var portResults = NetworkConnectivity.batchPortCheck(pingAliveIps, port);
+
+                // Add IPs with this port open to the set
+                for (var entry : portResults.entrySet())
                 {
-                    // Filter IPs that passed fping
-                    var pingAliveIps = ipList.stream()
-                        .filter(ip -> fpingResults.getOrDefault(ip, false))
-                        .collect(Collectors.toList());
-
-                    if (pingAliveIps.isEmpty())
+                    if (entry.getValue())
                     {
-                        // All IPs failed fping, no need for port check
-                        var unreachableIPs = new JsonArray();
-
-                        ipList.forEach(unreachableIPs::add);
-
-                        var result = new JsonObject()
-                            .put("reachable", new JsonArray())
-                            .put("unreachable", unreachableIPs)
-                            .put("total_checked", ipList.size());
-
-                        return Future.succeededFuture(result);
+                        ipsWithOpenPorts.add(entry.getKey());
                     }
+                }
+            }
 
-                    // Step 2: Batch port check (parallel checks for alive IPs only) - wrapped in executeBlocking
-                    return vertx.executeBlocking(() -> NetworkConnectivity.batchPortCheck(pingAliveIps, port))
-                        .map(portResults ->
-                        {
-                            var reachableIPs = new JsonArray();
+            var reachableIPs = new JsonArray();
 
-                            var unreachableIPs = new JsonArray();
+            var unreachableIPs = new JsonArray();
 
-                            // Classify IPs based on both fping and port check results
-                            for (var ip : ipList)
-                            {
-                                var pingAlive = fpingResults.getOrDefault(ip, false);
+            // Classify IPs based on fping and port check results
+            for (var ip : targetIps)
+            {
+                var pingAlive = fpingResults.getOrDefault(ip, false);
 
-                                var portOpen = portResults.getOrDefault(ip, false);
+                var hasOpenPort = ipsWithOpenPorts.contains(ip);
 
-                                if (pingAlive && portOpen)
-                                {
-                                    reachableIPs.add(ip);
-                                }
-                                else
-                                {
-                                    unreachableIPs.add(ip);
-                                }
-                            }
+                if (pingAlive && hasOpenPort)
+                {
+                    reachableIPs.add(ip);
+                }
+                else
+                {
+                    unreachableIPs.add(ip);
+                }
+            }
 
-                            logger.debug("Connectivity checks: {}/{} IPs reachable", reachableIPs.size(), ipList.size());
+            logger.debug("Connectivity checks: {}/{} IPs reachable (checked {} unique ports)",
+                reachableIPs.size(), targetIps.size(), ports.size());
 
-                            return new JsonObject()
-                                .put("reachable", reachableIPs)
-                                .put("unreachable", unreachableIPs)
-                                .put("total_checked", ipList.size());
-                        });
-                })
-                .onSuccess(promise::complete)
-                .onFailure(promise::fail);
+            return new JsonObject()
+                .put("reachable", reachableIPs)
+                .put("unreachable", unreachableIPs)
+                .put("total_checked", targetIps.size());
         }
         catch (Exception exception)
         {
             logger.error("Error in performConnectivityChecks: {}", exception.getMessage());
 
-            promise.fail(exception);
-        }
+            // Return all IPs as unreachable on error
+            var unreachableIPs = new JsonArray();
 
-        return promise.future();
+            targetIps.forEach(unreachableIPs::add);
+
+            return new JsonObject()
+                .put("reachable", new JsonArray())
+                .put("unreachable", unreachableIPs)
+                .put("total_checked", targetIps.size());
+        }
     }
 
     /**
-     * Execute GoEngine discovery for reachable IPs and create results including unreachable ones
+     * Execute GoEngine discovery for reachable IPs and create results including unreachable ones.
+     * SYNCHRONOUS method - designed to run in worker thread (called from executeGoEngineDiscovery).
+     *
+     * @param profileData JsonObject containing discovery profile with credentials
+     * @param reachableIPs JsonArray of reachable IP addresses
+     * @param unreachableIPs JsonArray of unreachable IP addresses
+     * @return JsonArray containing all discovery results (successful, failed, and unreachable)
      */
-    private Future<JsonArray> executeGoEngineForReachableIPs(JsonObject profileData, JsonArray reachableIPs, JsonArray unreachableIPs)
+    private JsonArray executeGoEngineForReachableIPs(JsonObject profileData, JsonArray reachableIPs, JsonArray unreachableIPs)
     {
-        var promise = Promise.<JsonArray>promise();
-
         try
         {
-            vertx.executeBlocking(() ->
+            // Create GoEngine discovery request format for reachable IPs only
+            var discoveryRequest = createDiscoveryRequest(profileData, reachableIPs);
+
+            // Prepare GoEngine command - only mode flag, data passed via stdin
+            // Use absolute path for binary, set working directory for config file
+            var goEngineBinary = new File(goEnginePath).getAbsolutePath();
+
+            var pb = new ProcessBuilder(goEngineBinary, "--mode", "discovery");
+
+            pb.directory(new File("./goengine"));
+
+            var process = pb.start();
+
+            var results = new JsonArray();
+
+            var errorOutput = new StringBuilder();
+
+            // Write discovery request to stdin
+            try (var writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream())))
+            {
+                writer.write(discoveryRequest.encode());
+
+                writer.flush();
+            }
+            catch (Exception exception)
+            {
+                logger.error("Failed to write discovery request to GoEngine stdin: {}", exception.getMessage());
+            }
+
+            // Wait for process to complete with timeout
+            var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
+
+            if (!finished)
+            {
+                process.destroyForcibly();
+
+                logger.warn("GoEngine discovery process timed out after {} seconds - process killed", blockingTimeoutGoEngine);
+
+                return createFailedResultsForAllIPs(reachableIPs, unreachableIPs);
+            }
+
+            // Read results from stdout and stderr after process completes
+            try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                 var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
+            {
+                String line;
+
+                while ((line = reader.readLine()) != null)
+                {
+                    try
                     {
-                        // Create GoEngine discovery request format for reachable IPs only
-                        var discoveryRequest = createDiscoveryRequest(profileData, reachableIPs);
+                        var result = new JsonObject(line);
 
-                        // Prepare GoEngine command - only mode flag, data passed via stdin
-                        // Use absolute path for binary, set working directory for config file
-                        var goEngineBinary = new File(goEnginePath).getAbsolutePath();
-
-                        var pb = new ProcessBuilder(goEngineBinary, "--mode", "discovery");
-
-                        pb.directory(new File("./goengine"));
-
-                        var process = pb.start();
-
-                        var results = new JsonArray();
-
-                        var errorOutput = new StringBuilder();
-
-                        // Write discovery request to stdin
-                        try (var writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream())))
+                        if (result.containsKey("ip_address"))
                         {
-                            writer.write(discoveryRequest.encode());
-
-                            writer.flush();
+                            results.add(result);
                         }
-                        catch (Exception exception)
-                        {
-                            logger.error("Failed to write discovery request to GoEngine stdin: {}", exception.getMessage());
-                        }
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.warn("Failed to parse GoEngine result line: {}", line);
+                    }
+                }
 
-                        // Wait for process to complete with timeout
-                        var finished = process.waitFor(blockingTimeoutGoEngine, TimeUnit.SECONDS);
+                // Read any error output
+                String errLine;
 
-                        if (!finished)
-                        {
-                            process.destroyForcibly();
+                while ((errLine = errorReader.readLine()) != null)
+                {
+                    errorOutput.append(errLine).append("\n");
+                }
+            }
 
-                            logger.warn("GoEngine discovery process timed out after {} seconds - process killed", blockingTimeoutGoEngine);
+            var exitCode = process.exitValue();
 
-                            return results;
-                        }
+            if (exitCode != 0)
+            {
+                logger.warn("GoEngine discovery exited with code: {}", exitCode);
 
-                        // Read results from stdout and stderr after process completes
-                        try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                             var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
-                        {
-                            String line;
+                if (!errorOutput.isEmpty())
+                {
+                    logger.warn("GoEngine stderr: {}", errorOutput.toString().trim());
+                }
+            }
 
-                            while ((line = reader.readLine()) != null)
-                            {
-                                try
-                                {
-                                    var result = new JsonObject(line);
+            logger.debug("GoEngine discovery completed with exit code: {}, {} results", exitCode, results.size());
 
-                                    if (result.containsKey("ip_address"))
-                                    {
-                                        results.add(result);
-                                    }
-                                }
-                                catch (Exception exception)
-                                {
-                                    logger.warn("Failed to parse GoEngine result line: {}", line);
-                                }
-                            }
+            // Combine GoEngine results with unreachable IPs
+            var finalResults = new JsonArray();
 
-                            // Read any error output
-                            String errLine;
+            // Add GoEngine results
+            for (var obj : results)
+            {
+                finalResults.add(obj);
+            }
 
-                            while ((errLine = errorReader.readLine()) != null)
-                            {
-                                errorOutput.append(errLine).append("\n");
-                            }
-                        }
+            // Add failed results for unreachable IPs
+            for (var i = 0; i < unreachableIPs.size(); i++)
+            {
+                var unreachableIP = unreachableIPs.getString(i);
 
-                        var exitCode = process.exitValue();
+                var failedResult = new JsonObject()
+                    .put("ip_address", unreachableIP)
+                    .put("success", false)
+                    .put("error", "Device unreachable - connectivity check failed")
+                    .put("timestamp", System.currentTimeMillis());
 
-                        if (exitCode != 0)
-                        {
-                            logger.warn("GoEngine discovery exited with code: {}", exitCode);
+                finalResults.add(failedResult);
+            }
 
-                            if (!errorOutput.isEmpty())
-                            {
-                                logger.warn("GoEngine stderr: {}", errorOutput.toString().trim());
-                            }
-                        }
-
-                        logger.debug("GoEngine discovery completed with exit code: {}, {} results", exitCode, results.size());
-
-                        // Combine GoEngine results with unreachable IPs
-                        var finalResults = new JsonArray();
-
-                        // Add GoEngine results
-                        for (var obj : results)
-                        {
-                            finalResults.add(obj);
-                        }
-
-                        // Add failed results for unreachable IPs
-                        for (var i = 0; i < unreachableIPs.size(); i++)
-                        {
-                            var unreachableIP = unreachableIPs.getString(i);
-
-                            var failedResult = new JsonObject()
-                                .put("ip_address", unreachableIP)
-                                .put("success", false)
-                                .put("error", "Device unreachable - connectivity check failed")
-                                .put("timestamp", System.currentTimeMillis());
-
-                            finalResults.add(failedResult);
-                        }
-
-                        return finalResults;
-
-                        }, false)
-                        .onSuccess(promise::complete)
-                        .onFailure(cause ->
-                        {
-                            logger.error("GoEngine discovery execution failed: {}", cause.getMessage());
-
-                            promise.fail(cause);
-                        });
+            return finalResults;
         }
         catch (Exception exception)
         {
             logger.error("Error in executeGoEngineForReachableIPs: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return createFailedResultsForAllIPs(reachableIPs, unreachableIPs);
+        }
+    }
+
+    /**
+     * Helper method to create failed results for all IPs (reachable + unreachable).
+     *
+     * @param reachableIPs JsonArray of IPs that were reachable but GoEngine failed
+     * @param unreachableIPs JsonArray of IPs that were unreachable
+     * @return JsonArray of failed results for all IPs
+     */
+    private JsonArray createFailedResultsForAllIPs(JsonArray reachableIPs, JsonArray unreachableIPs)
+    {
+        var failedResults = new JsonArray();
+
+        for (var i = 0; i < reachableIPs.size(); i++)
+        {
+            var ip = reachableIPs.getString(i);
+
+            failedResults.add(new JsonObject()
+                .put("ip_address", ip)
+                .put("success", false)
+                .put("error", "GoEngine execution failed")
+                .put("timestamp", System.currentTimeMillis()));
         }
 
-        return promise.future();
+        for (var i = 0; i < unreachableIPs.size(); i++)
+        {
+            var ip = unreachableIPs.getString(i);
+
+            failedResults.add(new JsonObject()
+                .put("ip_address", ip)
+                .put("success", false)
+                .put("error", "Device unreachable - connectivity check failed")
+                .put("timestamp", System.currentTimeMillis()));
+        }
+
+        return failedResults;
     }
 
     /**
      * Create GoEngine discovery request format with credential iteration.
+     * Port and protocol are included in each credential object.
+     * The discovery_config NO LONGER contains port/protocol - GoEngine must use
+     * the port/protocol from each credential when testing.
      *
      * @param profileData JsonObject containing discovery profile configuration
      * @param targetIps JsonArray of IP addresses to discover
@@ -1043,6 +1065,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             }
 
             // Convert credentials to GoEngine format
+            // Each credential contains its own port and protocol
             var credentials = new JsonArray();
 
             var profileCredentials = profileData.getJsonArray("credentials");
@@ -1064,7 +1087,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             // Get device type (already in GoEngine format from database)
             var deviceTypeName = profileData.getString("device_type_name");
 
-            // Create discovery_config (port/protocol now per-credential)
+            // Create discovery_config without port and protocol (now in credentials)
             var discoveryConfig = new JsonObject()
                 .put("device_type", deviceTypeName)
                 .put("timeout_seconds", timeoutSeconds)
@@ -1350,7 +1373,7 @@ public class DiscoveryVerticle extends AbstractVerticle
          * Process a batch of IP addresses using GoEngine discovery (BLOCKING operation).
 
          * This method is executed in a worker thread by ParallelBatchProcessor.
-         * Converts the batch of IP strings to JsonArray and executes GoEngine discovery.
+         * Directly calls synchronous discovery methods - no Future wrapping needed.
          * GoEngine handles credential iteration internally for each IP.
 
          * NOTE: This is a BLOCKING operation - returns JsonArray directly, not Future.
@@ -1364,14 +1387,9 @@ public class DiscoveryVerticle extends AbstractVerticle
         {
             try
             {
-                var ipArray = new JsonArray(batch);
-
                 // Execute GoEngine discovery synchronously (blocking operation)
-                // This will be wrapped in executeBlocking() by ParallelBatchProcessor
-                var future = executeGoEngineDiscovery(profileData, ipArray);
-
-                // Wait for the future to complete (blocking)
-                return future.toCompletionStage().toCompletableFuture().get();
+                // Already in worker thread - no Future wrapping needed
+                return executeGoEngineDiscovery(profileData, batch);
             }
             catch (Exception exception)
             {
