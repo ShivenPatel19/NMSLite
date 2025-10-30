@@ -433,9 +433,9 @@ public class AvailabilityVerticle extends AbstractVerticle
                 {
                     var deviceId = deviceJson.getString("device_id");
 
-                    boolean isUp = results.getOrDefault(deviceId, false);
+                    var isUp = results.getOrDefault(deviceId, false);
 
-                    String newStatus = isUp ? "up" : "down";
+                    var newStatus = isUp ? "up" : "down";
 
                     // Update cache (SharedData LocalMap - accessible by PollingMetricsVerticle)
                     var updatedJson = new JsonObject()
@@ -587,7 +587,7 @@ public class AvailabilityVerticle extends AbstractVerticle
     {
         try
         {
-            String status = isUp ? "up" : "down";
+            var status = isUp ? "up" : "down";
 
             availabilityService.availabilityUpdate(deviceId, status)
                     .onSuccess(result ->

@@ -484,9 +484,9 @@ public class DiscoveryVerticle extends AbstractVerticle
 
                         var isDeleted = deviceResult.getBoolean("is_deleted", false);
 
-                        String status;
+                        var status = "";
 
-                        String message;
+                        var message = "";
 
                         var proceedWithDiscovery = false;
 
@@ -930,7 +930,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                  var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
             {
-                String line;
+                var line = "";
 
                 while ((line = reader.readLine()) != null)
                 {
@@ -950,7 +950,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                 }
 
                 // Read any error output
-                String errLine;
+                var errLine = "";
 
                 while ((errLine = errorReader.readLine()) != null)
                 {

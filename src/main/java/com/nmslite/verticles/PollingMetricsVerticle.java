@@ -815,11 +815,11 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                                     if (result.succeeded())
                                     {
-                                        logger.info("Polling cycle completed successfully in {}ms", duration);
+                                        logger.info("Polling batches submitted in {}ms (processing in background)", duration);
                                     }
                                     else
                                     {
-                                        logger.error("Polling cycle failed in {}ms: {}", duration, result.cause().getMessage());
+                                        logger.error("Polling batch submission failed in {}ms: {}", duration, result.cause().getMessage());
                                     }
                                 });
                     })
@@ -907,7 +907,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 // Check availability status from shared cache (stored as JsonObject)
                 var availabilityJson = availabilityCache.get(pd.deviceId);
 
-                String status = availabilityJson != null ? availabilityJson.getString("status") : "unknown";
+                var status = availabilityJson != null ? availabilityJson.getString("status") : "unknown";
 
                 if ("up".equals(status))
                 {
@@ -1025,7 +1025,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
      */
     private Map<String, Boolean> pollDeviceMetricsBatch(List<DevicePolling> devices)
     {
-        Map<String, Boolean> results = new HashMap<>();
+        var results = new HashMap<String, Boolean>();
 
         var deviceCount = devices.size();
 
@@ -1102,7 +1102,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
             try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                  var errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream())))
             {
-                String line;
+                var line = "";
 
                 while ((line = reader.readLine()) != null)
                 {
@@ -1166,7 +1166,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 }
 
                 // Read any error output
-                String errLine;
+                var errLine = "";
 
                 while ((errLine = errorReader.readLine()) != null)
                 {

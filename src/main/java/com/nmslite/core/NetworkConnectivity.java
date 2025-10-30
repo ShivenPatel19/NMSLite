@@ -125,7 +125,7 @@ public class NetworkConnectivity
 
             try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream())))
             {
-                String line;
+                var line = "";
 
                 while ((line = reader.readLine()) != null)
                 {

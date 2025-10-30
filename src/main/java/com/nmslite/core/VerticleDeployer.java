@@ -28,33 +28,23 @@ import java.util.List;
  * VerticleDeployer - Centralized Verticle Deployment Manager
  *
  * <p>Deploys all application verticles in sequence and tracks deployment IDs for cleanup.
- * Verticles are deployed in the order defined in the constructor.</p>
+ * All methods are static for direct access without instantiation.</p>
  */
 public class VerticleDeployer
 {
 
     private static final Logger logger = LoggerFactory.getLogger(VerticleDeployer.class);
 
-    private final List<String> deployedVerticleIds;
+    private static final List<String> deployedVerticleIds = new ArrayList<>();
 
-    private final List<AbstractVerticle> verticles;
+    private static final List<AbstractVerticle> verticles;
 
-    /**
-     * Creates a new VerticleDeployer instance.
-     *
-     * <p>IMPORTANT: AvailabilityVerticle MUST be deployed BEFORE PollingMetricsVerticle
-     * because it creates the shared "availability-cache" LocalMap that PollingMetricsVerticle reads.</p>
-     */
-    public VerticleDeployer()
+    static
     {
-        this.deployedVerticleIds = new ArrayList<>();
-
-        // Define all verticles to deploy in order
-        // CRITICAL: AvailabilityVerticle MUST come before PollingMetricsVerticle (shared cache dependency)
-        this.verticles = List.of(
+        verticles = List.of(
             new ServerVerticle(),
-            new AvailabilityVerticle(),        // Creates "availability-cache" LocalMap
-            new PollingMetricsVerticle(),      // Reads from "availability-cache" LocalMap
+            new AvailabilityVerticle(),
+            new PollingMetricsVerticle(),
             new DiscoveryVerticle()
         );
     }
@@ -66,7 +56,7 @@ public class VerticleDeployer
      *
      * @return Future containing list of deployment IDs (for cleanup)
      */
-    public Future<Void> deployAll()
+    public static Future<Void> deployAll()
     {
         try
         {
@@ -91,7 +81,7 @@ public class VerticleDeployer
      * @param index Current index in the verticles list
      * @return Future that completes when all remaining verticles are deployed
      */
-    private Future<Void> deployVerticlesSequentially(int index)
+    private static Future<Void> deployVerticlesSequentially(int index)
     {
         try
         {
@@ -123,7 +113,7 @@ public class VerticleDeployer
      * @param verticle The verticle instance to deploy
      * @return Future containing deployment ID
      */
-    private Future<String> deploySingleVerticle(AbstractVerticle verticle)
+    private static Future<String> deploySingleVerticle(AbstractVerticle verticle)
     {
         try
         {
@@ -154,7 +144,7 @@ public class VerticleDeployer
      *
      * @return Future that completes when all verticles are undeployed
      */
-    public Future<Void> undeployAll()
+    public static Future<Void> undeployAll()
     {
         try
         {
@@ -194,7 +184,7 @@ public class VerticleDeployer
      * @param index Current index in the reversedIds list
      * @return Future that completes when all remaining verticles are undeployed
      */
-    private Future<Void> undeployVerticlesSequentially(List<String> reversedIds, int index)
+    private static Future<Void> undeployVerticlesSequentially(List<String> reversedIds, int index)
     {
         try
         {
@@ -226,7 +216,7 @@ public class VerticleDeployer
      * @param deploymentId The deployment ID of the verticle to undeploy
      * @return Future that completes when the verticle is undeployed
      */
-    private Future<Void> undeploySingleVerticle(String deploymentId)
+    private static Future<Void> undeploySingleVerticle(String deploymentId)
     {
         try
         {
@@ -245,6 +235,6 @@ public class VerticleDeployer
             return Future.failedFuture(exception);
         }
     }
-    
+
 }
 

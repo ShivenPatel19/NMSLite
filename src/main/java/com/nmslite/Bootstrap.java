@@ -8,8 +8,6 @@ import com.nmslite.core.VerticleDeployer;
 
 import com.nmslite.database.DatabaseInitializer;
 
-import com.typesafe.config.Config;
-
 import com.typesafe.config.ConfigFactory;
 
 import com.typesafe.config.ConfigRenderOptions;
@@ -42,8 +40,6 @@ public class Bootstrap
     private static JsonObject config;
 
     private static DatabaseInitializer databaseInitializer;
-
-    private static VerticleDeployer verticleDeployer;
 
     /**
      * Gets the shared Vertx instance.
@@ -126,13 +122,13 @@ public class Bootstrap
 
             // Load HOCON file using Typesafe Config
             // ConfigFactory.load("application") looks for application.conf in classpath
-            Config typesafeConfig = ConfigFactory.load("application");
+            var typesafeConfig = ConfigFactory.load("application");
 
             logger.debug("Typesafe Config loaded successfully");
 
             // Convert Typesafe Config to JSON string
             // ConfigRenderOptions.concise() creates compact JSON (no comments, no whitespace)
-            String jsonString = typesafeConfig.root().render(ConfigRenderOptions.concise());
+            var jsonString = typesafeConfig.root().render(ConfigRenderOptions.concise());
 
             logger.debug("Config converted to JSON string: {} chars", jsonString.length());
 
@@ -200,7 +196,7 @@ public class Bootstrap
             var warningExceptionTime = warningExceptionTimeSeconds * 1000000000L;  // seconds → nanoseconds
 
             // Create VertxOptions with custom configuration
-            VertxOptions options = new VertxOptions()
+            var options = new VertxOptions()
                     .setBlockedThreadCheckInterval(checkInterval)
                     .setMaxEventLoopExecuteTime(maxEventLoopTime)
                     .setMaxWorkerExecuteTime(maxWorkerTime)
@@ -409,7 +405,7 @@ public class Bootstrap
     }
 
     /**
-     * Deploys all verticles using VerticleDeployer.
+     * Deploys all verticles using VerticleDeployer static methods.
      * Verticle deployment logic is centralized in VerticleDeployer class for better maintainability.
      * Note: Database services are already initialized before this method is called.
      *
@@ -419,9 +415,7 @@ public class Bootstrap
     {
         try
         {
-            verticleDeployer = new VerticleDeployer();
-
-            return verticleDeployer.deployAll();
+            return VerticleDeployer.deployAll();
         }
         catch (Exception exception)
         {
@@ -450,12 +444,7 @@ public class Bootstrap
 
             // Step 1: Undeploy all verticles FIRST (in REVERSE order)
             // This stops all worker threads, timers, and prevents new DB operations
-            Future<Void> undeployFuture = Future.succeededFuture();
-
-            if (verticleDeployer != null)
-            {
-                undeployFuture = verticleDeployer.undeployAll();
-            }
+            var undeployFuture = VerticleDeployer.undeployAll();
 
             // Step 2: Close database pool AFTER verticles are undeployed
             // This ensures no worker threads try to access closed pool
