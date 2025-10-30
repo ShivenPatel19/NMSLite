@@ -13,23 +13,9 @@ import com.nmslite.Bootstrap;
 
 /**
  * DatabaseMigrationService - Handles automatic database schema migration using Flyway
-
- * This service:
- * - Runs Flyway migrations on application startup
- * - Creates database tables if they don't exist
- * - Applies schema updates automatically
- * - Tracks migration history in flyway_schema_history table
- * - Runs on worker thread to avoid blocking event loop
-
- * Migration files location: src/main/resources/db/migration/
- * Naming convention: V{version}__{description}.sql
- * Example: V1__Initial_Schema.sql
-
- * Benefits:
- * - Zero manual database setup required
- * - Version-controlled schema changes
- * - Idempotent (safe to run multiple times)
- * - Production-ready migration strategy
+ *
+ * <p>Runs Flyway migrations on application startup to create/update database tables.
+ * Migration files: src/main/resources/db/migration/V{version}__{description}.sql</p>
  */
 public class DatabaseMigrationService
 {
@@ -38,16 +24,7 @@ public class DatabaseMigrationService
 
     /**
      * Runs Flyway database migration on worker thread.
-
-     * This method:
-     * 1. Retrieves database configuration from Bootstrap
-     * 2. Builds JDBC connection URL
-     * 3. Configures Flyway with migration settings
-     * 4. Executes migration (creates/updates tables)
-     * 5. Logs migration results
-
-     * Runs on worker thread because Flyway operations are blocking.
-     * 
+     *
      * @return Future that completes when migration is successful
      */
     public static Future<Void> runMigration()
@@ -102,6 +79,7 @@ public class DatabaseMigrationService
                 {
                     logger.error("Database migration failed: {}", exception.getMessage());
 
+                    // Re-throw to propagate to .onFailure() - this is worker thread context, not service layer
                     throw exception;
                 }
             })

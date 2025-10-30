@@ -15,25 +15,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * DatabaseHelper - Generic database query execution utility class
-
- * Handles database query execution with:
- * - Automatic connection pool retrieval from DatabaseInitializer
- * - Consistent error handling with try-catch blocks
- * - Comprehensive logging for debugging and monitoring
- * - Promise/Future management for async operations
-
- * This class removes boilerplate code from service implementations
- * by centralizing common database operation patterns.
-
- * Thread Safety:
- * - This class is thread-safe as it doesn't maintain mutable state
- * - Each method call creates a new Promise for async operation
- * - Connection pool is managed by DatabaseInitializer
-
- * Usage:
- * - Services access this via DatabaseInitializer.getDatabaseHelper()
- * - All methods are instance methods (not static)
+ * DatabaseHelper - Generic database query execution utility
+ *
+ * <p>Provides consistent database query execution with automatic connection pool retrieval,
+ * error handling, and Promise/Future management for async operations.</p>
  */
 public class DatabaseHelper
 {
@@ -41,13 +26,7 @@ public class DatabaseHelper
     private static final Logger logger = LoggerFactory.getLogger(DatabaseHelper.class);
 
     /**
-     * Execute a simple query without parameters
-
-     * This method:
-     * 1. Retrieves the connection pool from DatabaseInitializer
-     * 2. Executes the query using pool.query()
-     * 3. Handles success/failure with Promise
-     * 4. Logs any errors that occur
+     * Execute a simple query without parameters.
      *
      * @param sql SQL query string
      * @return Future containing RowSet with query results
@@ -97,14 +76,7 @@ public class DatabaseHelper
     }
 
     /**
-     * Execute a prepared query with parameters
-
-     * This method:
-     * 1. Retrieves the connection pool from DatabaseInitializer
-     * 2. Executes the prepared query using pool.preparedQuery()
-     * 3. Binds parameters to prevent SQL injection
-     * 4. Handles success/failure with Promise
-     * 5. Logs any errors that occur
+     * Execute a prepared query with parameters.
      *
      * @param sql SQL query string with placeholders ($1, $2, etc.)
      * @param params Tuple of parameters to bind to the query

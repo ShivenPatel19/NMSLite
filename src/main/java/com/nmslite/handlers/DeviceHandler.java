@@ -6,8 +6,6 @@ import com.nmslite.services.DeviceService;
 
 import com.nmslite.services.DeviceTypeService;
 
-import com.nmslite.utils.ExceptionUtil;
-
 import com.nmslite.utils.ValidationUtil;
 
 import com.nmslite.utils.ResponseUtil;
@@ -74,13 +72,13 @@ public class DeviceHandler
                 .onSuccess(result ->
                         ResponseUtil.handleSuccess(ctx, result))
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get unprovisioned devices"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to get unprovisioned devices"));
         }
         catch (Exception exception)
         {
             logger.error("Error in getDiscoveredDevices handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to get unprovisioned devices");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to get unprovisioned devices");
         }
     }
 
@@ -97,13 +95,13 @@ public class DeviceHandler
                 .onSuccess(result ->
                         ResponseUtil.handleSuccess(ctx, result))
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get provisioned devices"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to get provisioned devices"));
         }
         catch (Exception exception)
         {
             logger.error("Error in getProvisionedDevices handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to get provisioned devices");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to get provisioned devices");
         }
     }
 
@@ -126,22 +124,37 @@ public class DeviceHandler
             deviceService.deviceDelete(deviceId)
                 .onSuccess(result ->
                 {
-                    // Publish event to notify PollingMetricsVerticle to remove device from cache
-                    vertx.eventBus().publish("device.deleted", new JsonObject()
-                        .put("device_id", deviceId));
+                    if (result.getBoolean("success", false))
+                    {
+                        // Publish event to notify PollingMetricsVerticle to remove device from cache
+                        vertx.eventBus().publish("device.deleted", new JsonObject()
+                            .put("device_id", deviceId));
 
-                    logger.debug("Published device.deleted event for device: {}", deviceId);
+                        logger.debug("Published device.deleted event for device: {}", deviceId);
 
-                    ResponseUtil.handleSuccess(ctx, result);
+                        ResponseUtil.handleSuccess(ctx, result);
+                    }
+                    else
+                    {
+                        var errorResponse = new JsonObject()
+                            .put("success", false)
+                            .put("error", result.getString("message", "Device not found or already deleted"))
+                            .put("timestamp", System.currentTimeMillis());
+
+                        ctx.response()
+                            .setStatusCode(404)
+                            .putHeader("Content-Type", "application/json")
+                            .end(errorResponse.encode());
+                    }
                 })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to delete device"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to delete device"));
         }
         catch (Exception exception)
         {
             logger.error("Error in softDeleteDevice handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to delete device");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to delete device");
         }
     }
 
@@ -164,22 +177,37 @@ public class DeviceHandler
             deviceService.deviceRestore(deviceId)
                 .onSuccess(result ->
                 {
-                    // Publish event to notify PollingMetricsVerticle to add device back to cache
-                    vertx.eventBus().publish("device.restored", new JsonObject()
-                        .put("device_id", deviceId));
+                    if (result.getBoolean("success", false))
+                    {
+                        // Publish event to notify PollingMetricsVerticle to add device back to cache
+                        vertx.eventBus().publish("device.restored", new JsonObject()
+                            .put("device_id", deviceId));
 
-                    logger.debug("Published device.restored event for device: {}", deviceId);
+                        logger.debug("Published device.restored event for device: {}", deviceId);
 
-                    ResponseUtil.handleSuccess(ctx, result);
+                        ResponseUtil.handleSuccess(ctx, result);
+                    }
+                    else
+                    {
+                        var errorResponse = new JsonObject()
+                            .put("success", false)
+                            .put("error", result.getString("message", "Device not found or not deleted"))
+                            .put("timestamp", System.currentTimeMillis());
+
+                        ctx.response()
+                            .setStatusCode(404)
+                            .putHeader("Content-Type", "application/json")
+                            .end(errorResponse.encode());
+                    }
                 })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to restore device"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to restore device"));
         }
         catch (Exception exception)
         {
             logger.error("Error in restoreDevice handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to restore device");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to restore device");
         }
     }
 
@@ -212,13 +240,13 @@ public class DeviceHandler
                     ResponseUtil.handleSuccess(ctx, result);
                 })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to enable provisioning for device"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to enable provisioning for device"));
         }
         catch (Exception exception)
         {
             logger.error("Error in enableProvisioning handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to enable provisioning for device");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to enable provisioning for device");
         }
     }
 
@@ -250,13 +278,13 @@ public class DeviceHandler
                     ResponseUtil.handleSuccess(ctx, result);
                 })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to disable provisioning for device"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to disable provisioning for device"));
         }
         catch (Exception exception)
         {
             logger.error("Error in disableProvisioning handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to disable provisioning for device");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to disable provisioning for device");
         }
     }
 
@@ -289,26 +317,41 @@ public class DeviceHandler
             deviceService.deviceUpdateConfig(deviceId, body)
                 .onSuccess(result ->
                 {
-                    // Publish event to notify PollingMetricsVerticle to update device in cache
-                    // Only publish if device is provisioned (monitoring enabled)
-                    if (result.getBoolean("is_provisioned", false))
+                    if (result.getBoolean("success", false))
                     {
-                        vertx.eventBus().publish("device.config.updated", new JsonObject()
-                            .put("device_id", deviceId));
+                        // Publish event to notify PollingMetricsVerticle to update device in cache
+                        // Only publish if device is provisioned (monitoring enabled)
+                        if (result.getBoolean("is_provisioned", false))
+                        {
+                            vertx.eventBus().publish("device.config.updated", new JsonObject()
+                                .put("device_id", deviceId));
 
-                        logger.debug("Published device.config.updated event for device: {}", deviceId);
+                            logger.debug("Published device.config.updated event for device: {}", deviceId);
+                        }
+
+                        ResponseUtil.handleSuccess(ctx, result);
                     }
+                    else
+                    {
+                        var errorResponse = new JsonObject()
+                            .put("success", false)
+                            .put("error", result.getString("message", "Device not found or already deleted"))
+                            .put("timestamp", System.currentTimeMillis());
 
-                    ResponseUtil.handleSuccess(ctx, result);
+                        ctx.response()
+                            .setStatusCode(404)
+                            .putHeader("Content-Type", "application/json")
+                            .end(errorResponse.encode());
+                    }
                 })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to update device configuration"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to update device configuration"));
         }
         catch (Exception exception)
         {
             logger.error("Error in updateDeviceConfig handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to update device configuration");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to update device configuration");
         }
     }
 
@@ -326,13 +369,13 @@ public class DeviceHandler
                 .onSuccess(result ->
                         ResponseUtil.handleSuccess(ctx, new JsonObject().put("device_types", result)))
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get device types"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to get device types"));
         }
         catch (Exception exception)
         {
             logger.error("Error in getDeviceTypes handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to get device types");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to get device types");
         }
     }
 

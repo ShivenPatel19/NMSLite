@@ -170,7 +170,6 @@ public class NetworkConnectivity
         {
             var config = Bootstrap.getConfig();
 
-            // HOCON parses dotted keys as nested objects: tools.port.check.timeout.seconds
             var perSocketTimeoutSeconds = config.getJsonObject("tools", new JsonObject())
                     .getJsonObject("port", new JsonObject())
                     .getJsonObject("check", new JsonObject())
@@ -201,9 +200,9 @@ public class NetworkConnectivity
      * Much faster than sequential port checks.
      * Internally calls portCheck() for each IP to avoid code duplication.
 
-     * 2-Level Timeout Hierarchy:
-     * - Level 2: Per-socket timeout (tools.port.check.timeout.seconds)
-     * - Level 1: Batch operation timeout (port.check.batch.blocking.timeout.seconds)
+     * Timeout:
+     * - Per-socket timeout (tools.port.check.timeout.seconds)
+     * - Parallel execution uses Java's ForkJoinPool.commonPool() threads
 
      * WARNING: This method is BLOCKING and must be called from within executeBlocking() in verticles.
      *

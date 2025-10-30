@@ -70,15 +70,6 @@ public interface AvailabilityService
     Future<JsonObject> availabilityUpdate(String deviceId, String status);
 
     /**
-     * Reset availability status for specific device (when device is soft deleted)
-     * Sets availability to 0%, status to 'unknown', and resets all counters to 0
-     *
-     * @param deviceId Device ID whose availability status should be reset
-     * @return Future containing JsonObject with reset result
-     */
-    Future<JsonObject> availabilityResetDevice(String deviceId);
-
-    /**
      * Delete availability status for specific device (when device is permanently deleted)
      *
      * @param deviceId Device ID whose availability status should be removed

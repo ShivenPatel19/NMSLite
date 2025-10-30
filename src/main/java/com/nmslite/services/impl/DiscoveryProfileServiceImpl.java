@@ -221,7 +221,9 @@ public class DiscoveryProfileServiceImpl implements DiscoveryProfileService
                     {
                         if (rows.rowCount() == 0)
                         {
-                            throw new RuntimeException("Discovery profile not found");
+                            return new JsonObject()
+                                    .put("success", false)
+                                    .put("message", "Discovery profile not found");
                         }
 
                         return new JsonObject()

@@ -89,6 +89,68 @@ public class DeviceServiceImpl implements DeviceService
     }
 
     /**
+     * List ALL devices regardless of provisioning status
+     *
+     * @return Future containing JsonArray of all non-deleted devices
+     */
+    @Override
+    public Future<JsonArray> deviceListAll()
+    {
+        try
+        {
+            var sql = """
+                    SELECT d.device_id, d.device_name, d.ip_address::text as ip_address, d.device_type,
+                           d.credential_profile_id, cp.username, cp.password_encrypted, cp.profile_name as credential_profile_name, cp.port, cp.protocol,
+                           d.polling_interval_seconds, d.timeout_seconds, d.host_name,
+                           d.is_provisioned, d.is_deleted, d.deleted_at, d.created_at, d.updated_at
+                    FROM devices d
+                    JOIN credential_profiles cp ON d.credential_profile_id = cp.credential_profile_id
+                    WHERE d.is_deleted = false
+                    ORDER BY d.device_name
+                    """;
+
+            return dbHelper.executeQuery(sql)
+                    .map(rows ->
+                    {
+                        var devices = new JsonArray();
+
+                        for (var row : rows)
+                        {
+                            var device = new JsonObject()
+                                    .put("device_id", row.getUUID("device_id").toString())
+                                    .put("device_name", row.getString("device_name"))
+                                    .put("ip_address", row.getString("ip_address"))
+                                    .put("device_type", row.getString("device_type"))
+                                    .put("port", row.getInteger("port"))
+                                    .put("protocol", row.getString("protocol"))
+                                    .put("credential_profile_id", row.getUUID("credential_profile_id").toString())
+                                    .put("username", row.getString("username"))
+                                    .put("password_encrypted", row.getString("password_encrypted"))
+                                    .put("credential_profile_name", row.getString("credential_profile_name"))
+                                    .put("polling_interval_seconds", row.getInteger("polling_interval_seconds"))
+                                    .put("timeout_seconds", row.getInteger("timeout_seconds"))
+                                    .put("host_name", row.getString("host_name"))
+                                    .put("is_provisioned", row.getBoolean("is_provisioned"))
+                                    .put("is_deleted", row.getBoolean("is_deleted"))
+                                    .put("deleted_at", row.getLocalDateTime("deleted_at") != null ? row.getLocalDateTime("deleted_at").toString() : null)
+                                    .put("created_at", row.getLocalDateTime("created_at").toString())
+                                    .put("updated_at", row.getLocalDateTime("updated_at") != null ? row.getLocalDateTime("updated_at").toString() : null);
+
+                            devices.add(device);
+                        }
+
+                        return devices;
+                    });
+        }
+        catch (Exception exception)
+        {
+            logger.error("Error in deviceListAll service: {}", exception.getMessage());
+
+            return Future.failedFuture(exception);
+        }
+    }
+
+    /**
      * List devices by provision status
      *
      * @param isProvisioned Provision status filter
@@ -246,7 +308,9 @@ public class DeviceServiceImpl implements DeviceService
                     {
                         if (rows.size() == 0)
                         {
-                            throw new RuntimeException("Device not found or already deleted");
+                            return new JsonObject()
+                                    .put("success", false)
+                                    .put("message", "Device not found or already deleted");
                         }
 
                         var row = rows.iterator().next();
@@ -289,7 +353,9 @@ public class DeviceServiceImpl implements DeviceService
                     {
                         if (rows.size() == 0)
                         {
-                            throw new RuntimeException("Device not found or not deleted");
+                            return new JsonObject()
+                                    .put("success", false)
+                                    .put("message", "Device not found or not deleted");
                         }
 
                         var row = rows.iterator().next();
@@ -790,7 +856,9 @@ public class DeviceServiceImpl implements DeviceService
                                 {
                                     if (rows.size() == 0)
                                     {
-                                        throw new RuntimeException("Device not found or already deleted");
+                                        return new JsonObject()
+                                                .put("success", false)
+                                                .put("message", "Device not found or already deleted");
                                     }
 
                                     var row = rows.iterator().next();

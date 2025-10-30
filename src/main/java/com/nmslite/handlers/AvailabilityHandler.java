@@ -2,8 +2,6 @@ package com.nmslite.handlers;
 
 import com.nmslite.services.AvailabilityService;
 
-import com.nmslite.utils.ExceptionUtil;
-
 import com.nmslite.utils.ResponseUtil;
 
 import com.nmslite.utils.ValidationUtil;
@@ -57,13 +55,13 @@ public class AvailabilityHandler
                     .onSuccess(availability ->
                             ResponseUtil.handleSuccess(context, availability))
                     .onFailure(cause ->
-                            ExceptionUtil.handleHttp(context, cause, "Failed to retrieve availability status"));
+                            ResponseUtil.handleFailure(context, cause, "Failed to retrieve availability status"));
         }
         catch (Exception exception)
         {
             logger.error("Error in getDeviceAvailability handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(context, exception, "Failed to retrieve availability status");
+            ResponseUtil.handleFailure(context, exception, "Failed to retrieve availability status");
         }
     }
 

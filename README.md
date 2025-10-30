@@ -174,7 +174,7 @@ NMSLite implements **hierarchical timeout strategy** for reliability:
 **Availability Timeouts (2 Levels):**
 1. **Vert.x Worker Pool**: 600s (10 min) - Worker pool timeout (`availability.worker.pool.timeout.seconds`)
 2. **fping**: 5s per-IP (`tools.fping.timeout.seconds`), 180s batch timeout (`tools.fping.batch.blocking.timeout.seconds`)
-3. **Port Check**: 5s per-socket (`tools.port.check.timeout.seconds`), 10s batch timeout (`tools.port.check.batch.blocking.timeout.seconds`)
+3. **Port Check**: 5s per-socket (`tools.port.check.timeout.seconds`)
 
 **Polling/Metrics Timeouts (3 Levels):**
 1. **Vert.x Worker Pool**: 600s (10 min) - Worker pool timeout (`polling.worker.pool.timeout.seconds`)
@@ -370,7 +370,6 @@ tools {
 
   port.check {
     timeout.seconds = 5                    # Per-socket timeout
-    batch.blocking.timeout.seconds = 10    # Batch operation timeout
   }
 }
 
@@ -688,7 +687,7 @@ Edit `src/main/resources/application.conf` before building to customize settings
 5. **Batch Processing**: `DiscoveryBatchProcessor` processes IPs in configurable batches (default: 100)
 6. **Connectivity Check**:
    - **fping**: Batch ICMP ping with 5s per-IP timeout, 180s batch timeout
-   - **Port Check**: TCP socket connection with 5s per-socket timeout, 10s batch timeout
+   - **Port Check**: TCP socket connection with 5s per-socket timeout (parallel execution via ForkJoinPool)
 7. **GoEngine Discovery**:
    - Sequential credential iteration per IP (try all credentials until success)
    - 60s per-device timeout, 20s per-credential timeout
@@ -977,8 +976,7 @@ NMSLite integrates with **GoEngine** (external Go binary) for SSH/WinRM device c
 1. **Vert.x Worker Pool**: 600s (10 min) - Worker pool timeout - `availability.worker.pool.timeout.seconds`
 2. **fping Batch**: 180s (3 min) - Batch operation - `tools.fping.batch.blocking.timeout.seconds`
 3. **fping Per-IP**: 5s - Per IP address - `tools.fping.timeout.seconds`
-4. **Port Check Batch**: 10s - Batch operation - `tools.port.check.batch.blocking.timeout.seconds`
-5. **Port Check Per-Socket**: 5s - Per socket - `tools.port.check.timeout.seconds`
+4. **Port Check Per-Socket**: 5s - Per socket - `tools.port.check.timeout.seconds`
 
 **Polling/Metrics (4 Levels):**
 1. **Vert.x Worker Pool**: 600s (10 min) - Worker pool timeout - `polling.worker.pool.timeout.seconds`

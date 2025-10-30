@@ -2,8 +2,6 @@ package com.nmslite.handlers;
 
 import com.nmslite.services.MetricsService;
 
-import com.nmslite.utils.ExceptionUtil;
-
 import com.nmslite.utils.ResponseUtil;
 
 import com.nmslite.utils.ValidationUtil;
@@ -57,13 +55,13 @@ public class MetricsHandler
                     .onSuccess(metrics ->
                             ResponseUtil.handleSuccess(context, metrics))
                     .onFailure(cause ->
-                            ExceptionUtil.handleHttp(context, cause, "Failed to retrieve metrics"));
+                            ResponseUtil.handleFailure(context, cause, "Failed to retrieve metrics"));
         }
         catch (Exception exception)
         {
             logger.error("Error in getDeviceMetrics handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(context, exception, "Failed to retrieve metrics");
+            ResponseUtil.handleFailure(context, exception, "Failed to retrieve metrics");
         }
     }
 

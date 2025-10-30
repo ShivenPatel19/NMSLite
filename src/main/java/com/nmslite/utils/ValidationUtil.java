@@ -34,7 +34,7 @@ public class ValidationUtil
     {
         if (port != null && (port < 1 || port > 65535))
         {
-            ExceptionUtil.handleHttp(ctx, new Exception("Invalid port range"), "Port must be between 1 and 65535");
+            ResponseUtil.handleFailure(ctx, new Exception("Invalid port range"), "Port must be between 1 and 65535");
 
             return false;
         }
@@ -55,7 +55,7 @@ public class ValidationUtil
     {
         if (value != null && value.length() > maxLength)
         {
-            ExceptionUtil.handleHttp(ctx, new Exception(fieldName + " too long"), fieldName + " must be " + maxLength + " characters or less");
+            ResponseUtil.handleFailure(ctx, new Exception(fieldName + " too long"), fieldName + " must be " + maxLength + " characters or less");
 
             return false;
         }
@@ -79,7 +79,7 @@ public class ValidationUtil
 
             if (doubleValue < 0.0 || doubleValue > 100.0)
             {
-                ExceptionUtil.handleHttp(ctx, new Exception("Invalid " + fieldName + " percentage"), fieldName + " must be between 0 and 100");
+                ResponseUtil.handleFailure(ctx, new Exception("Invalid " + fieldName + " percentage"), fieldName + " must be between 0 and 100");
 
                 return false;
             }
@@ -102,7 +102,7 @@ public class ValidationUtil
         {
             if (!json.containsKey(field) || json.getValue(field) == null)
             {
-                ExceptionUtil.handleHttp(context, new Exception("Missing required field: " + field));
+                ResponseUtil.handleFailure(context, new Exception("Missing required field: " + field));
 
                 return false;
             }
@@ -123,7 +123,7 @@ public class ValidationUtil
     {
         if (json == null || json.isEmpty())
         {
-            ExceptionUtil.handleHttp(context, new Exception("Request body is required"));
+            ResponseUtil.handleFailure(context, new Exception("Request body is required"));
 
             return false;
         }
@@ -144,7 +144,7 @@ public class ValidationUtil
         {
             var allowedFieldsList = String.join(", ", allowedFields);
 
-            ExceptionUtil.handleHttp(context, new Exception("At least one field must be provided: " + allowedFieldsList));
+            ResponseUtil.handleFailure(context, new Exception("At least one field must be provided: " + allowedFieldsList));
 
             return false;
         }
@@ -157,14 +157,14 @@ public class ValidationUtil
 
                 if (value == null)
                 {
-                    ExceptionUtil.handleHttp(context, new Exception(field + " cannot be null"));
+                    ResponseUtil.handleFailure(context, new Exception(field + " cannot be null"));
 
                     return false;
                 }
 
                 if (value instanceof String && ((String) value).trim().isEmpty())
                 {
-                    ExceptionUtil.handleHttp(context, new Exception(field + " cannot be empty"));
+                    ResponseUtil.handleFailure(context, new Exception(field + " cannot be empty"));
 
                     return false;
                 }
@@ -192,7 +192,7 @@ public class ValidationUtil
 
             if (value != null && (value < min || value > max))
             {
-                ExceptionUtil.handleHttp(context, new Exception(field + " must be between " + min + " and " + max));
+                ResponseUtil.handleFailure(context, new Exception(field + " must be between " + min + " and " + max));
 
                 return false;
             }
@@ -213,7 +213,7 @@ public class ValidationUtil
     {
         if (uuidValue == null || uuidValue.trim().isEmpty())
         {
-            ExceptionUtil.handleHttp(context, new Exception(parameterName + " is required"), parameterName + " path parameter is required");
+            ResponseUtil.handleFailure(context, new Exception(parameterName + " is required"), parameterName + " path parameter is required");
 
             return false;
         }
@@ -226,7 +226,7 @@ public class ValidationUtil
         }
         catch (Exception exception)
         {
-            ExceptionUtil.handleHttp(context, new Exception("Invalid UUID format"), parameterName + " must be a valid UUID");
+            ResponseUtil.handleFailure(context, new Exception("Invalid UUID format"), parameterName + " must be a valid UUID");
 
             return false;
         }
@@ -268,7 +268,7 @@ public class ValidationUtil
     {
         if (timeoutSeconds != null && (timeoutSeconds < 0 || timeoutSeconds > 600))
         {
-            ExceptionUtil.handleHttp(ctx, new Exception("Invalid timeout range"), "Timeout must be between 0 and 600 seconds");
+            ResponseUtil.handleFailure(ctx, new Exception("Invalid timeout range"), "Timeout must be between 0 and 600 seconds");
 
             return false;
         }
@@ -408,14 +408,14 @@ public class ValidationUtil
             {
                 if (username.length() < 8)
                 {
-                    ExceptionUtil.handleHttp(ctx, new Exception("Username too short"), "Username must be at least 8 characters long");
+                    ResponseUtil.handleFailure(ctx, new Exception("Username too short"), "Username must be at least 8 characters long");
 
                     return false;
                 }
 
                 if (username.length() > 100)
                 {
-                    ExceptionUtil.handleHttp(ctx, new Exception("Username too long"), "Username must be 100 characters or less");
+                    ResponseUtil.handleFailure(ctx, new Exception("Username too long"), "Username must be 100 characters or less");
 
                     return false;
                 }
@@ -437,14 +437,14 @@ public class ValidationUtil
             {
                 if (password.length() < 8)
                 {
-                    ExceptionUtil.handleHttp(ctx, new Exception("Password too short"), "Password must be at least 8 characters long");
+                    ResponseUtil.handleFailure(ctx, new Exception("Password too short"), "Password must be at least 8 characters long");
 
                     return false;
                 }
 
                 if (password.length() > 100)
                 {
-                    ExceptionUtil.handleHttp(ctx, new Exception("Password too long"), "Password must be 100 characters or less");
+                    ResponseUtil.handleFailure(ctx, new Exception("Password too long"), "Password must be 100 characters or less");
 
                     return false;
                 }
@@ -624,7 +624,7 @@ public class ValidationUtil
 
             if (!(credentialProfileIdsObj instanceof JsonArray credentialProfileIds))
             {
-                ExceptionUtil.handleHttp(ctx, new Exception("Invalid credential_profile_ids format"),
+                ResponseUtil.handleFailure(ctx, new Exception("Invalid credential_profile_ids format"),
                         "credential_profile_ids must be an array of UUID strings");
 
                 return false;
@@ -632,7 +632,7 @@ public class ValidationUtil
 
             if (credentialProfileIds.isEmpty())
             {
-                ExceptionUtil.handleHttp(ctx, new Exception("Empty credential_profile_ids array"),
+                ResponseUtil.handleFailure(ctx, new Exception("Empty credential_profile_ids array"),
                     "credential_profile_ids array must contain at least one credential profile ID");
 
                 return false;
@@ -640,7 +640,7 @@ public class ValidationUtil
 
             if (credentialProfileIds.size() > 10)
             {
-                ExceptionUtil.handleHttp(ctx, new Exception("Too many credential profiles"),
+                ResponseUtil.handleFailure(ctx, new Exception("Too many credential profiles"),
                     "credential_profile_ids array cannot contain more than 10 credential profiles");
 
                 return false;
@@ -661,7 +661,7 @@ public class ValidationUtil
         {
             if (ipAddress == null || ipAddress.trim().isEmpty())
             {
-                ExceptionUtil.handleHttp(ctx, new Exception("IP address cannot be null or empty"), "IP address is required");
+                ResponseUtil.handleFailure(ctx, new Exception("IP address cannot be null or empty"), "IP address is required");
 
                 return false;
             }
@@ -675,7 +675,7 @@ public class ValidationUtil
                 // Validate single IP address using outer class method
                 if (!ValidationUtil.isValidSingleIP(trimmedIP))
                 {
-                    ExceptionUtil.handleHttp(ctx, new Exception("Invalid IP address format"), "Invalid IP address format: " + trimmedIP);
+                    ResponseUtil.handleFailure(ctx, new Exception("Invalid IP address format"), "Invalid IP address format: " + trimmedIP);
 
                     return false;
                 }
@@ -685,7 +685,7 @@ public class ValidationUtil
                 // Validate IP range using outer class method
                 if (!ValidationUtil.isValidIPRange(trimmedIP))
                 {
-                    ExceptionUtil.handleHttp(ctx, new Exception("Invalid IP range format"),
+                    ResponseUtil.handleFailure(ctx, new Exception("Invalid IP range format"),
                         "Invalid IP range format: " + trimmedIP + ". Expected format: '192.168.1.1-50'");
 
                     return false;

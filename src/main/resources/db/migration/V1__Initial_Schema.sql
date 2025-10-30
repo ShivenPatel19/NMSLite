@@ -236,8 +236,6 @@ CREATE TRIGGER backup_metric_on_delete
     BEFORE DELETE ON metrics
     FOR EACH ROW EXECUTE FUNCTION backup_metric_before_delete();
 
-
-
 ---------------------------------------------------------------------------------------------------------------------------------------------------
 
 -- ==========

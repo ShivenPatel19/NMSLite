@@ -1505,7 +1505,9 @@ public class DiscoveryVerticle extends AbstractVerticle
 
     /**
      * Stop the verticle and perform any required cleanup.
-     * Closes the discovery worker pool to release resources.
+     * Graceful shutdown sequence:
+     * 1. Wait 2 seconds for in-flight fire-and-forget tasks to complete
+     * 2. Close worker pool
      *
      * @param stopPromise completed when shutdown work is finished
      */
@@ -1514,16 +1516,32 @@ public class DiscoveryVerticle extends AbstractVerticle
     {
         try
         {
-            logger.info("Stopping DiscoveryVerticle");
+            logger.info("Stopping DiscoveryVerticle - initiating graceful shutdown");
 
-            if (discoveryWorkerPool != null)
+            // Step 1: Wait 2 seconds for in-flight fire-and-forget tasks to complete
+            vertx.setTimer(2000, timerId ->
             {
-                discoveryWorkerPool.close();
+                try
+                {
+                    // Step 2: Close worker pool
+                    if (discoveryWorkerPool != null)
+                    {
+                        discoveryWorkerPool.close();
 
-                logger.info("Discovery worker pool closed");
-            }
+                        logger.info("Discovery worker pool closed");
+                    }
 
-            stopPromise.complete();
+                    logger.info("DiscoveryVerticle stopped successfully");
+
+                    stopPromise.complete();
+                }
+                catch (Exception exception)
+                {
+                    logger.error("Error during graceful shutdown: {}", exception.getMessage());
+
+                    stopPromise.fail(exception);
+                }
+            });
         }
         catch (Exception exception)
         {

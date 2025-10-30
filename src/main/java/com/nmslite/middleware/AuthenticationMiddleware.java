@@ -1,6 +1,6 @@
 package com.nmslite.middleware;
 
-import com.nmslite.utils.ExceptionUtil;
+import com.nmslite.utils.ResponseUtil;
 
 import com.nmslite.utils.JWTUtil;
 
@@ -103,7 +103,7 @@ public class AuthenticationMiddleware
             {
                 logger.error("Error in requireAuthentication: {}", exception.getMessage());
 
-                ExceptionUtil.handleHttp(ctx, exception, "Authentication failed");
+                ResponseUtil.handleFailure(ctx, exception, "Authentication failed");
             }
         };
     }

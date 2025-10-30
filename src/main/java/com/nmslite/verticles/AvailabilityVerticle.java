@@ -101,19 +101,22 @@ public class AvailabilityVerticle extends AbstractVerticle
             var availabilityConfig = config.getJsonObject("availability", new JsonObject());
 
             cycleIntervalSeconds = availabilityConfig.getJsonObject("cycle", new JsonObject())
-                    .getInteger("interval.seconds", 10);
+                    .getJsonObject("interval", new JsonObject())
+                    .getInteger("seconds", 10);
 
             batchSize = availabilityConfig.getJsonObject("batch", new JsonObject())
                     .getInteger("size", 50);
 
             var workerPoolSize = availabilityConfig.getJsonObject("worker", new JsonObject())
-                    .getInteger("pool.size", 10);
+                    .getJsonObject("pool", new JsonObject())
+                    .getInteger("size", 10);
 
             var workerPoolTimeoutSeconds = availabilityConfig.getJsonObject("worker", new JsonObject())
-                    .getInteger("pool.timeout.seconds", 600);
+                    .getJsonObject("pool", new JsonObject())
+                    .getJsonObject("timeout", new JsonObject())
+                    .getInteger("seconds", 600);
 
-            logger.info("Availability configuration: cycle={}s, batch={}, workers={}",
-                    cycleIntervalSeconds, batchSize, workerPoolSize);
+            logger.info("Availability configuration: cycle={}s, batch={}, workers={}", cycleIntervalSeconds, batchSize, workerPoolSize);
 
             // Initialize service proxies
             deviceService = DeviceService.createProxy();
@@ -127,8 +130,7 @@ public class AvailabilityVerticle extends AbstractVerticle
                     workerPoolTimeoutSeconds,
                     TimeUnit.SECONDS);
 
-            logger.info("Availability worker pool created: {} workers, {}s timeout",
-                    workerPoolSize, workerPoolTimeoutSeconds);
+            logger.info("Availability worker pool created: {} workers, {}s timeout", workerPoolSize, workerPoolTimeoutSeconds);
 
             // Initialize availability cache using SharedData LocalMap (shared across verticles)
             availabilityCache = vertx.sharedData().getLocalMap(AVAILABILITY_CACHE_NAME);
@@ -168,7 +170,7 @@ public class AvailabilityVerticle extends AbstractVerticle
 
     /**
      * Load availability cache from database.
-     * Loads devices and their current availability status.
+     * Loads ALL devices (regardless of provisioning status) and their current availability status.
      *
      * @return Future containing count of devices loaded
      */
@@ -176,8 +178,8 @@ public class AvailabilityVerticle extends AbstractVerticle
     {
         try
         {
-            // Load all provisioned devices
-            return deviceService.deviceListByProvisioned(true)
+            // Load ALL devices (regardless of is_provisioned flag)
+            return deviceService.deviceListAll()
                     .compose(devices ->
                     {
                         // Load availability status for all devices
@@ -252,17 +254,7 @@ public class AvailabilityVerticle extends AbstractVerticle
 
                 onDeviceProvisionEnabled(deviceId);
             });
-
-            // Device unprovisioned (monitoring disabled) - REMOVE from cache
-            vertx.eventBus().consumer("device.provision.disabled", msg ->
-            {
-                var data = (JsonObject) msg.body();
-
-                var deviceId = data.getString("device_id");
-
-                onDeviceProvisionDisabled(deviceId);
-            });
-
+            
             // Device deleted - REMOVE from cache
             vertx.eventBus().consumer("device.deleted", msg ->
             {
@@ -308,10 +300,9 @@ public class AvailabilityVerticle extends AbstractVerticle
     {
         try
         {
-            // Run every N seconds
             availabilityTimerId = vertx.setPeriodic(cycleIntervalSeconds * 1000L, timerId -> executeAvailabilityCycle());
 
-            logger.info("Availability cycle started with {} second interval", cycleIntervalSeconds);
+            logger.debug("Availability cycle started with {} second interval", cycleIntervalSeconds);
         }
         catch (Exception exception)
         {
@@ -328,7 +319,6 @@ public class AvailabilityVerticle extends AbstractVerticle
         {
             var startTime = System.currentTimeMillis();
 
-            // Get all devices from cache (already JsonObject, no conversion needed)
             var allDevices = new ArrayList<>(availabilityCache.values());
 
             if (allDevices.isEmpty())
@@ -352,8 +342,7 @@ public class AvailabilityVerticle extends AbstractVerticle
                         }
                         else
                         {
-                            logger.error("Availability batch submission failed in {}ms: {}",
-                                    duration, result.cause().getMessage());
+                            logger.error("Availability batch submission failed in {}ms: {}", duration, result.cause().getMessage());
                         }
                     });
         }
@@ -392,11 +381,8 @@ public class AvailabilityVerticle extends AbstractVerticle
             // Fire-and-forget: Submit all batches and return immediately
             // Each batch will update cache/DB as it completes (no waiting for all batches)
             return processor.processAllBatchesFireAndForget()
-                    .onSuccess(v ->
-                            logger.debug("Availability batches submitted: {} devices in {} batches",
-                                    allDevices.size(), (allDevices.size() + batchSize - 1) / batchSize))
-                    .onFailure(cause ->
-                            logger.error("Error submitting availability batches: {}", cause.getMessage()));
+                    .onSuccess(v -> logger.debug("Availability batches submitted: {} devices in {} batches", allDevices.size(), (allDevices.size() + batchSize - 1) / batchSize))
+                    .onFailure(cause -> logger.error("Error submitting availability batches: {}", cause.getMessage()));
         }
         catch (Exception exception)
         {
@@ -452,7 +438,6 @@ public class AvailabilityVerticle extends AbstractVerticle
                     String newStatus = isUp ? "up" : "down";
 
                     // Update cache (SharedData LocalMap - accessible by PollingMetricsVerticle)
-                    // Create NEW JsonObject for thread safety (immutable pattern)
                     var updatedJson = new JsonObject()
                             .put("device_id", deviceId)
                             .put("address", deviceJson.getString("address"))
@@ -543,9 +528,7 @@ public class AvailabilityVerticle extends AbstractVerticle
             var results = new HashMap<String, Boolean>();
 
             // Step 1: Batch fping check
-            var ipList = batch.stream()
-                    .map(json -> json.getString("address"))
-                    .toList();
+            var ipList = batch.stream().map(json -> json.getString("address")).toList();
 
             var fpingResults = NetworkConnectivity.batchFpingCheck(ipList);
 
@@ -562,7 +545,12 @@ public class AvailabilityVerticle extends AbstractVerticle
                 return results;
             }
 
-            // Step 3: Batch port check (parallel)
+            // Step 3: Mark devices that failed fping as down
+            batch.stream()
+                    .filter(json -> !fpingResults.getOrDefault(json.getString("address"), false))
+                    .forEach(json -> results.put(json.getString("device_id"), false));
+
+            // Step 4: Batch port check (parallel)
             for (var deviceJson : pingAliveDevices)
             {
                 var address = deviceJson.getString("address");
@@ -573,11 +561,6 @@ public class AvailabilityVerticle extends AbstractVerticle
 
                 results.put(deviceJson.getString("device_id"), portOpen);
             }
-
-            // Step 4: Mark devices that failed fping as down
-            batch.stream()
-                    .filter(json -> !fpingResults.getOrDefault(json.getString("address"), false))
-                    .forEach(json -> results.put(json.getString("device_id"), false));
 
             return results;
         }
@@ -607,7 +590,17 @@ public class AvailabilityVerticle extends AbstractVerticle
             String status = isUp ? "up" : "down";
 
             availabilityService.availabilityUpdate(deviceId, status)
-                    .onSuccess(result -> logger.debug("Updated availability for device {}: {}", deviceId, status))
+                    .onSuccess(result ->
+                    {
+                        if (result.getBoolean("success", false))
+                        {
+                            logger.debug("Updated availability for device {}: {}", deviceId, status);
+                        }
+                        else
+                        {
+                            logger.warn("Failed to update availability for device {}: {}", deviceId, result.getString("message"));
+                        }
+                    })
                     .onFailure(cause -> logger.error("Failed to update availability for device {}: {}", deviceId, cause.getMessage()));
         }
         catch (Exception exception)
@@ -656,26 +649,7 @@ public class AvailabilityVerticle extends AbstractVerticle
         }
     }
 
-    /**
-     * Handle device provision disabled event.
-     *
-     * @param deviceId Device ID
-     */
-    private void onDeviceProvisionDisabled(String deviceId)
-    {
-        try
-        {
-            logger.info("Device unprovisioned: {}", deviceId);
 
-            availabilityCache.remove(deviceId);
-
-            logger.info("Removed device from availability cache: {}", deviceId);
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in onDeviceProvisionDisabled: {}", exception.getMessage());
-        }
-    }
 
     /**
      * Handle device deleted event.
@@ -797,7 +771,12 @@ public class AvailabilityVerticle extends AbstractVerticle
     }
 
     /**
-     * Stop the verticle: cancel timer, close worker pool, and clear shared cache.
+     * Stop the verticle.
+     * Graceful shutdown sequence:
+     * 1. Cancel timer to prevent new cycles
+     * 2. Wait 2 seconds for in-flight fire-and-forget tasks to complete
+     * 3. Close worker pool
+     * 4. Clear cache
      *
      * @param stopPromise promise completed once the verticle is stopped
      */
@@ -806,9 +785,9 @@ public class AvailabilityVerticle extends AbstractVerticle
     {
         try
         {
-            logger.info("Stopping AvailabilityVerticle");
+            logger.info("Stopping AvailabilityVerticle - initiating graceful shutdown");
 
-            // Cancel availability cycle timer
+            // Step 1: Cancel availability cycle timer to prevent new cycles
             if (availabilityTimerId > 0)
             {
                 vertx.cancelTimer(availabilityTimerId);
@@ -816,25 +795,38 @@ public class AvailabilityVerticle extends AbstractVerticle
                 logger.info("Availability cycle timer cancelled");
             }
 
-            // Close worker pool
-            if (availabilityWorkerPool != null)
+            // Step 2: Wait 2 seconds for in-flight fire-and-forget tasks to complete
+            vertx.setTimer(2000, timerId ->
             {
-                availabilityWorkerPool.close();
+                try
+                {
+                    // Step 3: Close worker pool
+                    if (availabilityWorkerPool != null)
+                    {
+                        availabilityWorkerPool.close();
 
-                logger.info("Availability worker pool closed");
-            }
+                        logger.info("Availability worker pool closed");
+                    }
 
-            // Clear shared availability cache (SharedData LocalMap)
-            if (availabilityCache != null)
-            {
-                availabilityCache.clear();
+                    // Step 4: Clear shared availability cache (SharedData LocalMap)
+                    if (availabilityCache != null)
+                    {
+                        availabilityCache.clear();
 
-                logger.info("Availability cache cleared");
-            }
+                        logger.info("Availability cache cleared");
+                    }
 
-            logger.info("AvailabilityVerticle stopped successfully");
+                    logger.info("AvailabilityVerticle stopped successfully");
 
-            stopPromise.complete();
+                    stopPromise.complete();
+                }
+                catch (Exception exception)
+                {
+                    logger.error("Error during graceful shutdown: {}", exception.getMessage());
+
+                    stopPromise.fail(exception);
+                }
+            });
         }
         catch (Exception exception)
         {

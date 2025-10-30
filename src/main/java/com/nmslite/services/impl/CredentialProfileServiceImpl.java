@@ -261,7 +261,9 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                     {
                         if (rows.size() == 0)
                         {
-                            throw new RuntimeException("Credential profile not found");
+                            return new JsonObject()
+                                    .put("success", false)
+                                    .put("message", "Credential profile not found");
                         }
 
                         var row = rows.iterator().next();
@@ -367,7 +369,9 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                             {
                                                 if (deleteRows.rowCount() == 0)
                                                 {
-                                                    throw new RuntimeException("Credential profile not found");
+                                                    return new JsonObject()
+                                                            .put("success", false)
+                                                            .put("message", "Credential profile not found");
                                                 }
 
                                                 return new JsonObject()
@@ -420,7 +424,9 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                         {
                             logger.error("Failed to decrypt password for credential profile: {}", credentialId);
 
-                            throw new RuntimeException("Failed to decrypt credential password");
+                            return new JsonObject()
+                                .put("found", false)
+                                .put("error", "Failed to decrypt credential password");
                         }
 
                         return new JsonObject()
@@ -492,7 +498,8 @@ public class CredentialProfileServiceImpl implements CredentialProfileService
                                 logger.error("Failed to decrypt password for credential profile: {}",
                                     row.getUUID("credential_profile_id").toString());
 
-                                throw new RuntimeException("Failed to decrypt credential password");
+                                // Skip this credential and continue with others
+                                continue;
                             }
 
                             var credential = new JsonObject()

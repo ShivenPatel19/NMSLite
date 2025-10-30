@@ -4,8 +4,6 @@ import com.nmslite.Bootstrap;
 
 import com.nmslite.services.CredentialProfileService;
 
-import com.nmslite.utils.ExceptionUtil;
-
 import com.nmslite.utils.ValidationUtil;
 
 import com.nmslite.utils.ResponseUtil;
@@ -59,13 +57,13 @@ public class CredentialHandler
                 .onSuccess(result ->
                         ResponseUtil.handleSuccess(ctx, new JsonObject().put("credentials", result)))
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get credentials"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to get credentials"));
         }
         catch (Exception exception)
         {
             logger.error("Error in getCredentials handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to get credentials");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to get credentials");
         }
     }
 
@@ -89,13 +87,13 @@ public class CredentialHandler
                 .onSuccess(result ->
                         ResponseUtil.handleSuccess(ctx, result))
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to create credentials"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to create credentials"));
         }
         catch (Exception exception)
         {
             logger.error("Error in createCredentials handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to create credentials");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to create credentials");
         }
     }
 
@@ -127,22 +125,37 @@ public class CredentialHandler
             credentialProfileService.credentialUpdate(credentialId, requestBody)
                 .onSuccess(result ->
                 {
-                    // Publish event to notify verticles about credential profile update
-                    Bootstrap.getVertx().eventBus().publish("credential.profile.updated", new JsonObject()
-                            .put("credential_profile_id", credentialId));
+                    if (result.getBoolean("success", false))
+                    {
+                        // Publish event to notify verticles about credential profile update
+                        Bootstrap.getVertx().eventBus().publish("credential.profile.updated", new JsonObject()
+                                .put("credential_profile_id", credentialId));
 
-                    logger.debug("Published credential.profile.updated event for profile: {}", credentialId);
+                        logger.debug("Published credential.profile.updated event for profile: {}", credentialId);
 
-                    ResponseUtil.handleSuccess(ctx, result);
+                        ResponseUtil.handleSuccess(ctx, result);
+                    }
+                    else
+                    {
+                        var errorResponse = new JsonObject()
+                            .put("success", false)
+                            .put("error", result.getString("message", "Credential profile not found"))
+                            .put("timestamp", System.currentTimeMillis());
+
+                        ctx.response()
+                            .setStatusCode(404)
+                            .putHeader("Content-Type", "application/json")
+                            .end(errorResponse.encode());
+                    }
                 })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to update credentials"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to update credentials"));
         }
         catch (Exception exception)
         {
             logger.error("Error in updateCredentials handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to update credentials");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to update credentials");
         }
     }
 
@@ -164,15 +177,32 @@ public class CredentialHandler
 
             credentialProfileService.credentialDelete(credentialId)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    if (result.getBoolean("success", false))
+                    {
+                        ResponseUtil.handleSuccess(ctx, result);
+                    }
+                    else
+                    {
+                        var errorResponse = new JsonObject()
+                            .put("success", false)
+                            .put("error", result.getString("message", "Credential profile not found"))
+                            .put("timestamp", System.currentTimeMillis());
+
+                        ctx.response()
+                            .setStatusCode(404)
+                            .putHeader("Content-Type", "application/json")
+                            .end(errorResponse.encode());
+                    }
+                })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to delete credentials"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to delete credentials"));
         }
         catch (Exception exception)
         {
             logger.error("Error in deleteCredentials handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to delete credentials");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to delete credentials");
         }
     }
 }

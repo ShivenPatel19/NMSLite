@@ -47,6 +47,14 @@ public interface DeviceService
     }
 
     /**
+     * List ALL devices regardless of provisioning status
+     * FILTER: is_deleted = false only
+     *
+     * @return Future containing JsonArray of all non-deleted devices
+     */
+    Future<JsonArray> deviceListAll();
+
+    /**
      * List devices by provision status only
      * FILTER: is_provisioned = <param>, is_deleted = false
      *
@@ -63,8 +71,6 @@ public interface DeviceService
      * @return Future containing JsonArray of devices
      */
     Future<JsonArray> deviceListByCredentialProfile(String credentialProfileId);
-
-
 
     /**
      * Update device configuration in a single call.

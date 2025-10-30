@@ -4,10 +4,11 @@
  * PollingMetricsVerticle provides continuous device monitoring capabilities.
  *
  * Features:
- * - Periodic polling of active devices
- * - Batch fping for connectivity validation
- * - GoEngine metrics collection for alive devices
- * - Device availability tracking
+ * - Periodic polling of active devices (60-second cycle)
+ * - Availability pre-filtering (from AvailabilityVerticle cache)
+ * - GoEngine metrics collection for "up" devices
+ * - Inline auto-disable (fire-and-forget pattern)
+ * - Thread-safe concurrent processing
  */
 
 package com.nmslite.verticles;
@@ -48,18 +49,27 @@ import java.time.Instant;
 
 import java.util.*;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 import java.util.concurrent.TimeUnit;
 
 import java.util.stream.Collectors;
 
 /**
  * PollingMetricsVerticle - Continuous Device Monitoring
-
+ 
  * Responsibilities:
- * - Periodic polling of active devices
- * - Batch fping for connectivity validation
- * - GoEngine metrics collection for alive devices
- * - Device availability tracking
+ * - Periodic polling of active devices (60-second cycle)
+ * - Availability pre-filtering (from AvailabilityVerticle cache)
+ * - GoEngine metrics collection for "up" devices
+ * - Inline auto-disable (fire-and-forget pattern)
+ * - Thread-safe concurrent processing with ConcurrentHashMap
+ 
+ * Architecture:
+ * - Single-stage processing (auto-disable happens inline)
+ * - Fire-and-forget batch execution (matches AvailabilityVerticle)
+ * - Parallel batch processing with worker pool
+ * - Immediate cache removal for disabled devices
  */
 public class PollingMetricsVerticle extends AbstractVerticle
 {
@@ -97,9 +107,10 @@ public class PollingMetricsVerticle extends AbstractVerticle
     // Note: LocalMap only supports immutable types (String, JsonObject, etc.), not custom POJOs
     private LocalMap<String, JsonObject> availabilityCache;
 
-    // In-memory device cache
+    // In-memory device cache (thread-safe for concurrent access)
     // Key: device_id, Value: DevicePolling (persistent data + runtime state)
-    private HashMap<String, DevicePolling> deviceCache;
+    // ConcurrentHashMap enables safe concurrent access from event bus handlers and polling cycles
+    private ConcurrentHashMap<String, DevicePolling> deviceCache;
 
     /**
      * Start the verticle: load configuration, initialize service proxies, load devices into cache, and start polling.
@@ -113,9 +124,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             logger.info("Starting PollingMetricsVerticle");
 
-            // Note: requireNonNull() only on first call to validate Bootstrap.getConfig() is not null
-            // Bootstrap.getConfig() can return null if config retrieval from shared data fails
-            // Once validated, subsequent calls in same method are safe to use directly
             var toolsConfig = Objects.requireNonNull(Bootstrap.getConfig()).getJsonObject("tools", new JsonObject());
 
             var pollingConfig = Bootstrap.getConfig().getJsonObject("polling", new JsonObject());
@@ -153,7 +161,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
                     .getJsonObject("timeout", new JsonObject())
                     .getInteger("seconds", 300);
 
-            initializeServiceProxies();
+            this.deviceService = DeviceService.createProxy();
+
+            this.metricsService = MetricsService.createProxy();
 
             // Create dedicated worker pool for polling operations
             pollingWorkerPool = vertx.createSharedWorkerExecutor(
@@ -178,7 +188,8 @@ public class PollingMetricsVerticle extends AbstractVerticle
             }
 
             // Initialize CACHE (in-memory device store for fast lookups)
-            deviceCache = new HashMap<>();
+            // ConcurrentHashMap for thread-safe concurrent access
+            deviceCache = new ConcurrentHashMap<>();
 
             // Load devices into cache
             loadDevicesIntoCache()
@@ -207,23 +218,6 @@ public class PollingMetricsVerticle extends AbstractVerticle
             logger.error("Error in start: {}", exception.getMessage());
 
             startPromise.fail(exception);
-        }
-    }
-
-    /**
-     * Initialize service proxies for database operations
-     */
-    private void initializeServiceProxies()
-    {
-        try
-        {
-            this.deviceService = DeviceService.createProxy();
-
-            this.metricsService = MetricsService.createProxy();
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in initializeServiceProxies: {}", exception.getMessage());
         }
     }
 
@@ -762,16 +756,20 @@ public class PollingMetricsVerticle extends AbstractVerticle
     }
 
     /**
-     * Execute 2-phase polling cycle:
+     * Execute polling cycle (single-stage with fire-and-forget pattern).
 
-     * Phase 1: Batch Processing
-     *   - Filter devices due for polling (using aligned scheduling)
-     *   - Process in batches with fping + GoEngine
-     *   - Update device availability status immediately (both success and failure)
-     *   - Track failures across all batches
+     * Flow:
+     * 1. Filter devices due for polling (using aligned scheduling)
+     * 2. Submit all batches for processing (fire-and-forget)
+     * 3. Each batch independently:
+     *    - Checks availability from cache
+     *    - Executes GoEngine for "up" devices
+     *    - Updates device state (failures, schedule)
+     *    - Auto-disables if threshold reached (inline)
+     *    - Stores metrics in database
+     * 4. Return immediately (batches process in background)
 
-     * Phase 2: Auto-Disable
-     *   - Disable monitoring for devices that reached or exceeded max_cycles_skipped (5 consecutive failures)
+     * Auto-disable happens inline during batch processing (no separate phase).
      */
     private void executePollingCycle()
     {
@@ -796,14 +794,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
                         logger.info("New Polling cycle: {} devices due for polling (total cached: {})", dueDevices.size(), totalCachedDevices);
 
-                        // Phase 1: Batch Processing (processes all due devices in batches, updates availability immediately)
-                        // Phase 2: Auto-Disable (disables devices that reached/exceeded max failures)
+                        // Batch Processing: Process all due devices in batches
+                        // Auto-disable happens inline during batch processing
                         executeBatchProcessing(dueDevices)
-                                .compose(v ->
-                                {
-                                    // Phase 2: Auto-Disable
-                                    return executePhaseAutoDisable();
-                                })
                                 .onComplete(result ->
                                 {
                                     var duration = System.currentTimeMillis() - startTime;
@@ -827,86 +820,75 @@ public class PollingMetricsVerticle extends AbstractVerticle
         }
     }
 
-    // ========== 2-PHASE POLLING CYCLE IMPLEMENTATION ==========
-
     /**
-     * Phase 1: Batch Processing
+     * Execute batch processing for all due devices (fire-and-forget pattern).
 
-     * Process devices in batches:
-     * 1. Batch fping connectivity check
-     * 2. For alive devices: GoEngine metrics collection
-     * 3. For dead devices: Record connectivity failure
-     * 4. Update device schedules and failure counters
-     * 5. Update device availability status immediately (both success and failure)
+     * Fire-and-forget pattern is optimal for polling because:
+     * 1. Auto-disable happens inline during batch processing (no aggregation needed)
+     * 2. Each batch is independent (no dependencies between batches)
+     * 3. Metrics stored immediately as each batch completes (real-time updates)
+     * 4. Next cycle doesn't depend on previous cycle completion
+     * 5. Worker pool handles backpressure automatically
 
-     * Uses QueueBatchProcessor for sequential batch processing.
+     * Matches AvailabilityVerticle's execution pattern for consistency.
+
+     * Process flow per batch:
+     * 1. Check availability from cache (populated by AvailabilityVerticle)
+     * 2. Execute GoEngine for "up" devices
+     * 3. Update device state (failures, schedule)
+     * 4. Auto-disable if threshold reached (inline, fire-and-forget)
+     * 5. Store metrics in database
      *
      * @param dueDevices List of devices due for polling
-     * @return Future<Void> - completes when all devices are processed and availability updated
+     * @return Future<Void> - completes immediately after submitting all batches
      */
     private Future<Void> executeBatchProcessing(List<DevicePolling> dueDevices)
     {
-        var promise = Promise.<Void>promise();
-
         try
         {
-            logger.debug("Phase 1: Batch processing {} devices", dueDevices.size());
+            logger.debug("Batch processing {} devices (fire-and-forget)", dueDevices.size());
 
-            // Use ParallelBatchProcessor with completion tracking
-            // Each batch processes its results IMMEDIATELY when it completes (no waiting for other batches)
-            // Completion handler triggers Phase 2 when ALL batches done
+            // Create parallel batch processor
             var processor = new PollingBatchProcessor(dueDevices, batchSize, pollingWorkerPool);
 
-            processor.processAllBatchesWithCompletion(v ->
-            {
-                // ✅ This runs when ALL batches complete
-                // ✅ Each batch already stored metrics immediately upon completion
-                // ✅ Now trigger Phase 2 (auto-disable)
-
-                var failedDevices = processor.getFailedDevices();
-
-                logger.info("Phase 1 completed: {}/{} devices processed successfully, {} failed",
-                        dueDevices.size() - failedDevices.size(), dueDevices.size(), failedDevices.size());
-
-                // Note: Availability updates are now handled by AvailabilityVerticle (10s cycle)
-                // PollingMetricsVerticle only focuses on metrics collection
-
-                promise.complete();
-            })
-            .onFailure(promise::fail);
-
-            // Method returns immediately after submitting all batches
-            logger.debug("All batches submitted, processing in background");
+            // Fire-and-forget: Submit all batches and return immediately
+            // Each batch processes independently in worker pool
+            return processor.processAllBatchesFireAndForget()
+                    .onSuccess(v ->
+                            logger.debug("Batches submitted: {} devices in {} batches",
+                                    dueDevices.size(), (dueDevices.size() + batchSize - 1) / batchSize))
+                    .onFailure(cause ->
+                            logger.error("Error submitting batches: {}", cause.getMessage()));
         }
         catch (Exception exception)
         {
             logger.error("Error in executeBatchProcessing: {}", exception.getMessage());
 
-            promise.fail(exception);
+            return Future.failedFuture(exception);
         }
-
-        return promise.future();
     }
 
     /**
-     * Process a single batch of devices (OPTIMIZED - uses availability cache)
+     * Process a single batch of devices (uses availability cache for pre-filtering).
 
      * Flow:
      * 1. Check device status in availability cache (populated by AvailabilityVerticle)
      * 2. If status = "up" → execute GoEngine
-     * 3. If status = "down" or "unknown" → increment failure count, skip GoEngine
-     * 4. Update device state based on GoEngine results (reset failures + advance schedule on success)
-     * 5. Return all failed devices in one pass
+     * 3. If status = "down" or "unknown" → increment failure count, check auto-disable, skip GoEngine
+     * 4. Update device state based on GoEngine results:
+     *    - Success: reset failures + advance schedule
+     *    - Failure: increment failures + check auto-disable
+
+     * This method runs in a worker thread (called from processBatch).
+     *
+     * @param batch List of devices to process in this batch
      */
-    private Future<List<DevicePolling>> processSingleBatch(List<DevicePolling> batch)
+    private void processSingleBatchBlocking(List<DevicePolling> batch)
     {
         try
         {
-            // Track failed devices locally
-            var failedDevices = new ArrayList<DevicePolling>();
-
             // Separate devices into "up" and "down" based on availability cache
-            var upDevices = new JsonArray();
+            var upDevices = new ArrayList<DevicePolling>();
 
             for (var pd : batch)
             {
@@ -918,122 +900,105 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 if ("up".equals(status))
                 {
                     // Device is up - add to GoEngine execution list
-                    upDevices.add(pd.deviceId);
+                    upDevices.add(pd);
                 }
                 else
                 {
                     // Device is down or unknown - increment failure count, skip GoEngine
                     pd.incrementFailures();
 
-                    failedDevices.add(pd);
+                    // Check if device should be auto-disabled (inline, immediate)
+                    checkAndDisableIfNeeded(pd);
 
-                    logger.debug("Device {} is {} (from availability cache), skipping GoEngine",
-                            pd.deviceId, status);
+                    logger.debug("Device {} is {} (from availability cache), skipping GoEngine", pd.deviceId, status);
                 }
             }
 
             logger.info("Availability check: {}/{} devices up, {}/{} down/unknown",
-                    upDevices.size(), batch.size(), failedDevices.size(), batch.size());
+                    upDevices.size(), batch.size(), batch.size() - upDevices.size(), batch.size());
 
             // Execute GoEngine for devices that are "up"
             if (upDevices.isEmpty())
             {
                 logger.debug("No devices are up in batch, skipping GoEngine");
 
-                return Future.succeededFuture(failedDevices);
+                return;
             }
 
-            return executeGoEngineForReachableDevices(batch, upDevices)
-                    .map(metricsResults ->
-                    {
-                        // Process GoEngine results and update device state
-                        for (var i = 0; i < upDevices.size(); i++)
-                        {
-                            var deviceId = upDevices.getString(i);
+            // Direct blocking call to GoEngine (already in worker thread)
+            var metricsResults = pollDeviceMetricsBatch(upDevices);
 
-                            var pd = batch.stream()
-                                    .filter(d -> d.deviceId.equals(deviceId))
-                                    .findFirst()
-                                    .orElse(null);
+            // Process GoEngine results and update device state
+            for (var pd : upDevices)
+            {
+                var success = metricsResults.getOrDefault(pd.deviceId, false);
 
-                            if (pd != null)
-                            {
-                                var success = metricsResults.getOrDefault(deviceId, false);
+                if (success)
+                {
+                    pd.resetFailures();
 
-                                if (success)
-                                {
-                                    pd.resetFailures();
+                    pd.advanceSchedule();
+                }
+                else
+                {
+                    pd.incrementFailures();
 
-                                    pd.advanceSchedule();
-                                }
-                                else
-                                {
-                                    pd.incrementFailures();
-
-                                    failedDevices.add(pd);
-                                }
-                            }
-                        }
-
-                        // Return all failed devices (availability failures + GoEngine failures)
-                        return failedDevices;
-                    });
+                    // Check if device should be auto-disabled (inline, immediate)
+                    checkAndDisableIfNeeded(pd);
+                }
+            }
         }
         catch (Exception exception)
         {
-            logger.error("Error in processSingleBatch: {}", exception.getMessage());
+            logger.error("Error in processSingleBatchBlocking: {}", exception.getMessage());
 
-            return Future.failedFuture(exception);
+            throw exception;
         }
     }
 
     /**
-     * Execute GoEngine metrics collection for reachable devices (similar to DiscoveryVerticle)
+     * Check if device should be auto-disabled and disable it immediately.
 
-     * Uses executeBlocking to run GoEngine process and stream results.
-     * Only processes devices that passed connectivity checks.
+     * Called after incrementing failures to check if threshold is reached.
+     * Removes from cache immediately (thread-safe with ConcurrentHashMap),
+     * then triggers async DB update (fire-and-forget).
+
+     * Fire-and-forget pattern is used because:
+     * 1. Cache removal is immediate (device won't be polled in next cycle)
+     * 2. DB update is eventual consistency (not critical for real-time operation)
+     * 3. Non-blocking (doesn't delay batch processing)
+     * 4. Parallel updates (multiple devices can be disabled simultaneously)
      *
-     * @param allDevices All devices in the batch
-     * @param reachableDeviceIds JsonArray of device IDs that passed connectivity checks
-     * @return Future<Map<String, Boolean>> - Map of device_id -> success status
+     * @param pd Device to check for auto-disable
      */
-    private Future<Map<String, Boolean>> executeGoEngineForReachableDevices(List<DevicePolling> allDevices, JsonArray reachableDeviceIds)
+    private void checkAndDisableIfNeeded(DevicePolling pd)
     {
-        var promise = Promise.<Map<String, Boolean>>promise();
-
         try
         {
-            // Filter to only reachable devices
-            var reachableDevices = allDevices.stream().filter(pd -> {
-                    for (var i = 0; i < reachableDeviceIds.size(); i++)
-                    {
-                        if (reachableDeviceIds.getString(i).equals(pd.deviceId))
-                        {
-                            return true;
-                        }
-                    }
-                    return false;
-                })
-                .collect(Collectors.toList());
-
-            vertx.executeBlocking(() -> pollDeviceMetricsBatch(reachableDevices), false)
-            .onSuccess(promise::complete)
-            .onFailure(cause ->
+            if (pd.shouldAutoDisable(maxCyclesSkipped))
             {
-                logger.error("GoEngine metrics execution failed: {}", cause.getMessage());
+                logger.warn("Device {} reached {} consecutive failures, auto-disabling", pd.deviceName, maxCyclesSkipped);
 
-                promise.fail(cause);
-            });
+                // Remove from cache FIRST (thread-safe, immediate)
+                // This ensures device won't be polled in next cycle
+                deviceCache.remove(pd.deviceId);
+
+                // THEN update database (async, fire-and-forget)
+                // No need to wait for DB update - cache removal is sufficient
+                deviceService.deviceDisableProvisioning(pd.deviceId)
+                        .onSuccess(v ->
+                                logger.info("Device {} auto-disabled successfully in database", pd.deviceName))
+                        .onFailure(cause ->
+                                logger.error("Failed to auto-disable device {} in database: {}", pd.deviceName, cause.getMessage()));
+            }
         }
         catch (Exception exception)
         {
-            logger.error("Error in executeGoEngineForReachableDevices: {}", exception.getMessage());
-
-            promise.fail(exception);
+            logger.error("Error in checkAndDisableIfNeeded for device {}: {}", pd.deviceName, exception.getMessage());
         }
-
-        return promise.future();
     }
+
+
 
     /**
      * Poll metrics for multiple devices in a batch using GoEngine streaming output
@@ -1083,14 +1048,14 @@ public class PollingMetricsVerticle extends AbstractVerticle
 
             var process = pb.start();
 
-            // Create IP-to-device lookup map for O(1) access when processing GoEngine streaming results
-            // GoEngine returns results with IP address, we need to map back to DevicePolling objects
+            // Create IP-to-device-ID lookup map for O(1) access when processing GoEngine streaming results
+            // GoEngine returns results with IP address, we need to map back to device IDs
             // Without this map, we'd need O(n) linear search for each result line
-            var devicesByIp = new HashMap<String, DevicePolling>();
+            var deviceIdsByIp = new HashMap<String, String>();
 
             for (var pd : devices)
             {
-                devicesByIp.put(pd.address, pd);
+                deviceIdsByIp.put(pd.address, pd.deviceId);
             }
 
             var errorOutput = new StringBuilder();
@@ -1153,10 +1118,10 @@ public class PollingMetricsVerticle extends AbstractVerticle
                             continue;
                         }
 
-                        // Find the device by IP address
-                        var pd = devicesByIp.get(deviceAddress);
+                        // Find the device ID by IP address
+                        var deviceId = deviceIdsByIp.get(deviceAddress);
 
-                        if (pd == null)
+                        if (deviceId == null)
                         {
                             logger.error("No matching device found for address {}", deviceAddress);
 
@@ -1170,15 +1135,15 @@ public class PollingMetricsVerticle extends AbstractVerticle
                         if (success)
                         {
                             // Store metrics (availability will be updated centrally after final result is determined)
-                            storeMetrics(pd.deviceId, result);
+                            storeMetrics(deviceId, result);
 
-                            results.put(pd.deviceId, true);
+                            results.put(deviceId, true);
 
                             successCount++;
                         }
                         else
                         {
-                            results.put(pd.deviceId, false);
+                            results.put(deviceId, false);
                         }
 
                     }
@@ -1221,109 +1186,20 @@ public class PollingMetricsVerticle extends AbstractVerticle
         return results;
     }
 
-    /**
-     * Phase 2: Auto-Disable
-
-     * Disable monitoring for devices that have reached or exceeded max_cycles_skipped (5) consecutive failures.
-     * Devices are automatically disabled to prevent continuous polling of unreachable devices.
-     *
-     * @return Future<Void>
-     */
-    private Future<Void> executePhaseAutoDisable()
-    {
-        var promise = Promise.<Void>promise();
-
-        // Filter devices to auto-disable (moved to worker thread to avoid blocking)
-        vertx.executeBlocking(() ->
-                        deviceCache.values().stream()
-                            .filter(pd -> pd.shouldAutoDisable(maxCyclesSkipped))
-                            .collect(Collectors.toList()))
-        .onSuccess(devicesToDisable ->
-        {
-            if (devicesToDisable.isEmpty())
-            {
-                logger.info("Phase 2: No devices to auto-disable");
-
-                promise.complete();
-
-                return;
-            }
-
-            logger.warn("Phase 2: Auto-disabling {} devices due to {} consecutive failures", devicesToDisable.size(), maxCyclesSkipped);
-
-            // Disable devices sequentially
-            disableDevicesSequentially(devicesToDisable, 0, promise);
-        })
-        .onFailure(cause ->
-        {
-            logger.error("Failed to filter devices for auto-disable: {}", cause.getMessage());
-
-            promise.fail(cause);
-        });
-
-        return promise.future();
-    }
 
     /**
-     * Disable devices sequentially
-
-     * Removes device from cache FIRST (synchronous) to prevent race condition,
-     * then updates database (async). This ensures the device won't be polled
-     * in the next cycle before the database update completes.
-     */
-    private void disableDevicesSequentially(List<DevicePolling> devices, int index, Promise<Void> promise)
-    {
-        try
-        {
-            if (index >= devices.size())
-            {
-                promise.complete();
-
-                return;
-            }
-
-            var pd = devices.get(index);
-
-            logger.warn("Auto-disabling device {} due to {} consecutive failures", pd.deviceName, maxCyclesSkipped);
-
-            // Remove from cache FIRST (synchronous, immediate) to prevent race condition
-            // This ensures the device won't be polled in the next cycle before DB update completes
-            deviceCache.remove(pd.deviceId);
-
-            // THEN update database (async, non-blocking)
-            deviceService.deviceDisableProvisioning(pd.deviceId)
-                .onSuccess(result ->
-                {
-                    logger.info("Device {} provisioning disabled successfully in database", pd.deviceName);
-
-                    // Continue with next device
-                    disableDevicesSequentially(devices, index + 1, promise);
-                })
-                .onFailure(cause ->
-                {
-                    logger.error("Failed to auto-disable device {}: {}", pd.deviceName, cause.getMessage());
-
-                    // Continue with next device even on failure
-                    disableDevicesSequentially(devices, index + 1, promise);
-                });
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in disableDevicesSequentially: {}", exception.getMessage());
-
-            promise.fail(exception);
-        }
-    }
-    
-    /**
-     * Store metrics in database
+     * Store metrics in database (fire-and-forget).
 
      * Transforms GoEngine response format to database schema format:
-     * GoEngine: {"cpu":{"usage_percent":15.2},"memory":{...},"disk":{...}}
-     * Database: {"cpu_usage_percent":15.2,"memory_usage_percent":...}
+     * - GoEngine: {"cpu":{"usage_percent":15.2},"memory":{...},"disk":{...}}
+     * - Database: {"cpu_usage_percent":15.2,"memory_usage_percent":...}
 
-     * Includes cache check to prevent race conditions in overlapping cycles.
-     * If device was removed from cache by a concurrent cycle, skip metrics insertion.
+     * Includes cache check to prevent race conditions:
+     * - If device was removed from cache (e.g., auto-disabled), skip metrics insertion
+     * - Thread-safe with ConcurrentHashMap
+     *
+     * @param deviceId Device ID
+     * @param goEngineResult GoEngine response JSON
      */
     private void storeMetrics(String deviceId, JsonObject goEngineResult)
     {
@@ -1373,19 +1249,17 @@ public class PollingMetricsVerticle extends AbstractVerticle
      * Polling batch processor using ParallelBatchProcessor.
 
      * Extends the generic ParallelBatchProcessor to handle polling-specific batch processing.
-     * Processes devices in parallel batches with fping, port check, and GoEngine metrics collection.
+     * Processes devices in parallel batches with availability check and GoEngine metrics collection.
 
      * Features:
      * - Parallel batch processing of devices
-     * - Connectivity pre-filtering (fping + port check)
-     * - GoEngine metrics collection for alive devices
+     * - Availability pre-filtering (from AvailabilityVerticle cache)
+     * - GoEngine metrics collection for "up" devices
+     * - Inline auto-disable (fire-and-forget)
      * - Fail-tolerant: continues with next batch on failure
-     * - Tracks failed devices for retry phase
      */
     private class PollingBatchProcessor extends ParallelBatchProcessor<DevicePolling>
     {
-        private final List<DevicePolling> failedDevices;
-
         /**
          * Constructor for PollingBatchProcessor.
 
@@ -1398,18 +1272,19 @@ public class PollingMetricsVerticle extends AbstractVerticle
         public PollingBatchProcessor(List<DevicePolling> devices, int batchSize, WorkerExecutor workerExecutor)
         {
             super(devices, batchSize, workerExecutor);
-
-            this.failedDevices = Collections.synchronizedList(new ArrayList<>());
         }
 
         /**
          * Process a batch of devices (BLOCKING operation).
 
          * Executes the complete polling workflow for a batch:
-         * 1. Batch fping connectivity check
-         * 2. Port reachability check for alive devices
-         * 3. GoEngine metrics collection for reachable devices
-         * 4. Update device schedules and failure counters
+         * 1. Check availability from cache (populated by AvailabilityVerticle)
+         * 2. GoEngine metrics collection for "up" devices
+         * 3. Update device state (failures, schedule)
+         * 4. Auto-disable if threshold reached (inline, fire-and-forget)
+         * 5. Store metrics in database
+
+         * This method runs in a worker thread from the worker pool.
          *
          * @param batch List of devices to poll in this batch
          * @return JsonArray of results (empty for polling)
@@ -1419,15 +1294,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
         {
             try
             {
-                // Process batch using async method, then block and wait for result
-                // (safe in worker thread)
-                var batchFailures = processSingleBatch(batch)
-                        .toCompletionStage()
-                        .toCompletableFuture()
-                        .get();
-
-                // Add failed devices to synchronized list
-                failedDevices.addAll(batchFailures);
+                // Direct blocking call (already in worker thread)
+                // Auto-disable happens inline during processing
+                processSingleBatchBlocking(batch);
 
                 return new JsonArray();
             }
@@ -1442,7 +1311,7 @@ public class PollingMetricsVerticle extends AbstractVerticle
         /**
          * Handle batch processing failure.
 
-         * Marks all devices in the failed batch as failed and adds them to the failed devices list.
+         * Marks all devices in the failed batch as failed and checks for auto-disable.
          * The batch processor will continue with the next batch (fail-tolerant behavior).
          *
          * @param batch The batch of devices that failed to process
@@ -1457,23 +1326,19 @@ public class PollingMetricsVerticle extends AbstractVerticle
             {
                 pd.incrementFailures();
 
-                failedDevices.add(pd);
+                // Check if device should be auto-disabled (inline, fire-and-forget)
+                checkAndDisableIfNeeded(pd);
             }
-        }
-
-        /**
-         * Get the list of devices that failed during batch processing.
-         *
-         * @return List of failed devices
-         */
-        public List<DevicePolling> getFailedDevices()
-        {
-            return failedDevices;
         }
     }
 
     /**
-     * Stop the verticle: cancel periodic polling and clear device cache.
+     * Stop the verticle.
+     * Graceful shutdown sequence:
+     * 1. Cancel timer to prevent new cycles
+     * 2. Wait 2 seconds for in-flight fire-and-forget tasks to complete
+     * 3. Close worker pool
+     * 4. Clear cache
      *
      * @param stopPromise promise completed once the verticle is stopped
      */
@@ -1482,8 +1347,9 @@ public class PollingMetricsVerticle extends AbstractVerticle
     {
         try
         {
-            logger.info("Stopping PollingMetricsVerticle");
+            logger.info("Stopping PollingMetricsVerticle - initiating graceful shutdown");
 
+            // Step 1: Cancel polling cycle timer to prevent new cycles
             if (pollingTimerId != 0)
             {
                 vertx.cancelTimer(pollingTimerId);
@@ -1491,25 +1357,38 @@ public class PollingMetricsVerticle extends AbstractVerticle
                 logger.info("Polling cycle timer cancelled");
             }
 
-            // Close worker pool
-            if (pollingWorkerPool != null)
+            // Step 2: Wait 2 seconds for in-flight fire-and-forget tasks to complete
+            vertx.setTimer(2000, timerId ->
             {
-                pollingWorkerPool.close();
+                try
+                {
+                    // Step 3: Close worker pool
+                    if (pollingWorkerPool != null)
+                    {
+                        pollingWorkerPool.close();
 
-                logger.info("Polling worker pool closed");
-            }
+                        logger.info("Polling worker pool closed");
+                    }
 
-            // Clear cache
-            if (deviceCache != null)
-            {
-                deviceCache.clear();
+                    // Step 4: Clear cache
+                    if (deviceCache != null)
+                    {
+                        deviceCache.clear();
 
-                logger.info("Device cache cleared");
-            }
+                        logger.info("Device cache cleared");
+                    }
 
-            logger.info("PollingMetricsVerticle stopped successfully");
+                    logger.info("PollingMetricsVerticle stopped successfully");
 
-            stopPromise.complete();
+                    stopPromise.complete();
+                }
+                catch (Exception exception)
+                {
+                    logger.error("Error during graceful shutdown: {}", exception.getMessage());
+
+                    stopPromise.fail(exception);
+                }
+            });
         }
         catch (Exception exception)
         {

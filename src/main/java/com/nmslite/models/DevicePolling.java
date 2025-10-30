@@ -6,20 +6,9 @@ import java.time.Instant;
 
 /**
  * In-memory cache model for polling scheduler.
-
- * This class combines:
- * 1. Persistent device data (from database)
- * 2. Runtime scheduling state (computed/tracked in-memory)
-
- * Data Sources:
- * - Database: devices table + credential_profiles table (via JOIN)
- * - Computed: nextScheduledAt (aligned scheduling)
- * - Tracked: consecutiveFailures (failure counter)
-
- * Lifecycle:
- * - Loaded on startup from database
- * - Updated reactively via event bus when device config changes
- * - Runtime state lost on restart (acceptable - recomputed on startup)
+ *
+ * <p>Combines persistent device data from database with runtime scheduling state
+ * (nextScheduledAt, consecutiveFailures). Runtime state is recomputed on restart.</p>
  */
 public class DevicePolling
 {
@@ -56,17 +45,6 @@ public class DevicePolling
 
     /**
      * Converts the DevicePolling to GoEngine JSON format for metrics collection.
-
-     * GoEngine  expects:
-     * {
-     *   "address": "10.0.0.1",
-     *   "device_type": "server linux",
-     *   "username": "admin",
-     *   "password": "password",
-     *   "port": 22,
-     *   "timeout_seconds": 60,
-     *   "connection_timeout": 10
-     * }
      *
      * @return JsonObject formatted for GoEngine consumption
      */
@@ -84,9 +62,6 @@ public class DevicePolling
 
     /**
      * Checks if the device is due for polling based on the current time.
-
-     * A device is due when:
-     * - Current time >= nextScheduledAt
      *
      * @param now Current time to compare against
      * @return true if device should be polled now, false otherwise
@@ -98,9 +73,6 @@ public class DevicePolling
 
     /**
      * Advances the device to the next scheduled poll time (aligned).
-
-     * This maintains fixed cadence:
-     * - nextScheduledAt = nextScheduledAt + pollingIntervalSeconds
      */
     public void advanceSchedule()
     {

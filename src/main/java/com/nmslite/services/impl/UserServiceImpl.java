@@ -233,7 +233,9 @@ public class UserServiceImpl implements UserService
                 {
                     if (rows.size() == 0)
                     {
-                        throw new RuntimeException("User not found");
+                        return new JsonObject()
+                            .put("success", false)
+                            .put("message", "User not found");
                     }
 
                     var row = rows.iterator().next();
@@ -289,7 +291,9 @@ public class UserServiceImpl implements UserService
                 {
                     if (rows.size() == 0)
                     {
-                        throw new RuntimeException("User not found");
+                        return new JsonObject()
+                            .put("success", false)
+                            .put("message", "User not found");
                     }
 
                     var row = rows.iterator().next();

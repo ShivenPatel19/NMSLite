@@ -2,8 +2,6 @@ package com.nmslite.handlers;
 
 import com.nmslite.services.UserService;
 
-import com.nmslite.utils.ExceptionUtil;
-
 import com.nmslite.utils.ValidationUtil;
 
 import com.nmslite.utils.ResponseUtil;
@@ -73,7 +71,7 @@ public class UserHandler
                 }
                 else
                 {
-                    ExceptionUtil.handleHttp(ctx, new Exception("Invalid includeInactive parameter"),
+                    ResponseUtil.handleFailure(ctx, new Exception("Invalid includeInactive parameter"),
                         "includeInactive parameter must be 'true' or 'false'");
 
                     return;
@@ -84,13 +82,13 @@ public class UserHandler
                 .onSuccess(result ->
                         ResponseUtil.handleSuccess(ctx, new JsonObject().put("users", result)))
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get users"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to get users"));
         }
         catch (Exception exception)
         {
             logger.error("Error in getUsers handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to get users");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to get users");
         }
     }
 
@@ -119,13 +117,13 @@ public class UserHandler
                 .onSuccess(result ->
                         ResponseUtil.handleSuccess(ctx, result))
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to create user"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to create user"));
         }
         catch (Exception exception)
         {
             logger.error("Error in createUser handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to create user");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to create user");
         }
     }
 
@@ -156,15 +154,32 @@ public class UserHandler
 
             userService.userUpdate(userId, body)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    if (result.getBoolean("success", false))
+                    {
+                        ResponseUtil.handleSuccess(ctx, result);
+                    }
+                    else
+                    {
+                        var errorResponse = new JsonObject()
+                            .put("success", false)
+                            .put("error", result.getString("message", "User not found"))
+                            .put("timestamp", System.currentTimeMillis());
+
+                        ctx.response()
+                            .setStatusCode(404)
+                            .putHeader("Content-Type", "application/json")
+                            .end(errorResponse.encode());
+                    }
+                })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to update user"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to update user"));
         }
         catch (Exception exception)
         {
             logger.error("Error in updateUser handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to update user");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to update user");
         }
     }
 
@@ -186,15 +201,32 @@ public class UserHandler
 
             userService.userDelete(userId)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    if (result.getBoolean("success", false))
+                    {
+                        ResponseUtil.handleSuccess(ctx, result);
+                    }
+                    else
+                    {
+                        var errorResponse = new JsonObject()
+                            .put("success", false)
+                            .put("error", result.getString("message", "User not found"))
+                            .put("timestamp", System.currentTimeMillis());
+
+                        ctx.response()
+                            .setStatusCode(404)
+                            .putHeader("Content-Type", "application/json")
+                            .end(errorResponse.encode());
+                    }
+                })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to delete user"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to delete user"));
         }
         catch (Exception exception)
         {
             logger.error("Error in deleteUser handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to delete user");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to delete user");
         }
     }
 
@@ -238,7 +270,7 @@ public class UserHandler
                         {
                             logger.error("Failed to generate JWT token for user: {}", authenticatedUsername);
 
-                            ExceptionUtil.handleHttp(ctx, new Exception("Failed to generate JWT token"),
+                            ResponseUtil.handleFailure(ctx, new Exception("Failed to generate JWT token"),
                                 "Authentication successful but failed to generate token");
 
                             return;
@@ -255,18 +287,17 @@ public class UserHandler
                     }
                     else
                     {
-                        // Authentication failed - no token generation
                         ResponseUtil.handleSuccess(ctx, authResult);
                     }
                 })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to authenticate user"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to authenticate user"));
         }
         catch (Exception exception)
         {
             logger.error("Error in authenticateUser handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to authenticate user");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to authenticate user");
         }
     }
 }

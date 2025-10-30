@@ -8,8 +8,6 @@ import com.nmslite.services.DiscoveryProfileService;
 
 import com.nmslite.services.DeviceTypeService;
 
-import com.nmslite.utils.ExceptionUtil;
-
 import com.nmslite.utils.ValidationUtil;
 
 import com.nmslite.utils.ResponseUtil;
@@ -96,13 +94,13 @@ public class DiscoveryProfileHandler
                 .onSuccess(result ->
                         ResponseUtil.handleSuccess(ctx, new JsonObject().put("discovery_profiles", result)))
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to get discovery profiles"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to get discovery profiles"));
         }
         catch (Exception exception)
         {
             logger.error("Error in getDiscoveryProfiles handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to get discovery profiles");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to get discovery profiles");
         }
     }
 
@@ -141,7 +139,7 @@ public class DiscoveryProfileHandler
                         {
                             logger.error("Invalid credential profile IDs: {}", validationResult.cause().getMessage());
 
-                            ExceptionUtil.handleHttp(ctx, validationResult.cause(),
+                            ResponseUtil.handleFailure(ctx, validationResult.cause(),
                                 "Invalid device type ID or one or more credential profile IDs");
 
                             return;
@@ -155,7 +153,7 @@ public class DiscoveryProfileHandler
                 {
                     logger.error("Invalid device type ID: {}", deviceTypeId);
 
-                    ExceptionUtil.handleHttp(ctx, new Exception("Invalid device type ID: " + deviceTypeId),
+                    ResponseUtil.handleFailure(ctx, new Exception("Invalid device type ID: " + deviceTypeId),
                         "Invalid device type ID");
                 });
         }
@@ -163,7 +161,7 @@ public class DiscoveryProfileHandler
         {
             logger.error("Error in createDiscoveryProfile handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to create discovery profile");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to create discovery profile");
         }
     }
 
@@ -252,14 +250,14 @@ public class DiscoveryProfileHandler
                 {
                     logger.error("Failed to create discovery profile for {}: {}", ipAddress, cause.getMessage());
 
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to create discovery profile");
+                    ResponseUtil.handleFailure(ctx, cause, "Failed to create discovery profile");
                 });
         }
         catch (Exception exception)
         {
             logger.error("Error in createDiscoveryProfileInDatabase: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to create discovery profile");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to create discovery profile");
         }
     }
 
@@ -282,15 +280,32 @@ public class DiscoveryProfileHandler
 
             discoveryProfileService.discoveryDelete(profileId)
                 .onSuccess(result ->
-                        ResponseUtil.handleSuccess(ctx, result))
+                {
+                    if (result.getBoolean("success", false))
+                    {
+                        ResponseUtil.handleSuccess(ctx, result);
+                    }
+                    else
+                    {
+                        var errorResponse = new JsonObject()
+                            .put("success", false)
+                            .put("error", result.getString("message", "Discovery profile not found"))
+                            .put("timestamp", System.currentTimeMillis());
+
+                        ctx.response()
+                            .setStatusCode(404)
+                            .putHeader("Content-Type", "application/json")
+                            .end(errorResponse.encode());
+                    }
+                })
                 .onFailure(cause ->
-                        ExceptionUtil.handleHttp(ctx, cause, "Failed to delete discovery profile"));
+                        ResponseUtil.handleFailure(ctx, cause, "Failed to delete discovery profile"));
         }
         catch (Exception exception)
         {
             logger.error("Error in deleteDiscoveryProfile handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to delete discovery profile");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to delete discovery profile");
         }
     }
 
@@ -340,14 +355,14 @@ public class DiscoveryProfileHandler
                 {
                     logger.error("Test discovery failed for profile {}: {}", profileId, cause.getMessage());
 
-                    ExceptionUtil.handleHttp(ctx, cause, "Failed to execute test discovery");
+                    ResponseUtil.handleFailure(ctx, cause, "Failed to execute test discovery");
                 });
         }
         catch (Exception exception)
         {
             logger.error("Error in testDiscovery handler: {}", exception.getMessage());
 
-            ExceptionUtil.handleHttp(ctx, exception, "Failed to execute test discovery");
+            ResponseUtil.handleFailure(ctx, exception, "Failed to execute test discovery");
         }
     }
 

@@ -238,7 +238,9 @@ public class AvailabilityServiceImpl implements AvailabilityService
                                 {
                                     if (rows.size() == 0)
                                     {
-                                        throw new RuntimeException("Device availability record not found");
+                                        return new JsonObject()
+                                            .put("success", false)
+                                            .put("message", "Device availability record not found");
                                     }
 
                                     var row = rows.iterator().next();
@@ -262,62 +264,6 @@ public class AvailabilityServiceImpl implements AvailabilityService
         catch (Exception exception)
         {
             logger.error("Error in availabilityUpdateDeviceStatus service: {}", exception.getMessage());
-
-            return Future.failedFuture(exception);
-        }
-    }
-
-    /**
-     * Reset device availability by device ID (when device is soft deleted)
-     * Sets availability to 0%, status to 'unknown', and resets all counters to 0
-     *
-     * @param deviceId Device ID
-     * @return Future containing JsonObject with reset result
-     */
-    @Override
-    public Future<JsonObject> availabilityResetDevice(String deviceId)
-    {
-        try
-        {
-            var sql = """
-                    UPDATE device_availability
-                    SET total_checks = 0,
-                        successful_checks = 0,
-                        failed_checks = 0,
-                        availability_percent = 0.00,
-                        current_status = 'unknown',
-                        last_check_time = NULL,
-                        last_success_time = NULL,
-                        last_failure_time = NULL,
-                        updated_at = NOW()
-                    WHERE device_id = $1
-                    RETURNING device_id, availability_percent, current_status
-                    """;
-
-            return dbHelper.executePreparedQuery(sql, Tuple.of(UUID.fromString(deviceId)))
-                    .map(rows ->
-                    {
-                        if (rows.size() == 0)
-                        {
-                            return new JsonObject()
-                                    .put("success", false)
-                                    .put("device_id", deviceId)
-                                    .put("message", "No availability record found for device");
-                        }
-
-                        var row = rows.iterator().next();
-
-                        return new JsonObject()
-                                .put("success", true)
-                                .put("device_id", row.getUUID("device_id").toString())
-                                .put("availability_percent", row.getBigDecimal("availability_percent"))
-                                .put("current_status", row.getString("current_status"))
-                                .put("message", "Device availability reset to 0% and unknown successfully");
-                    });
-        }
-        catch (Exception exception)
-        {
-            logger.error("Error in availabilityResetDevice service: {}", exception.getMessage());
 
             return Future.failedFuture(exception);
         }

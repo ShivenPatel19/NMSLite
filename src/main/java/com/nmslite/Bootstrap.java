@@ -27,24 +27,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * NMSLite Application - Main Entry Point (Vert.x 5.0.4)
-
- * 3-Verticle Architecture:
- * - ServerVerticle: HTTP API server
- * - PollingMetricsVerticle: Continuous device monitoring
- * - DiscoveryVerticle: Device discovery workflow
-
- * Database Services:
- * - Initialized at startup via DatabaseInitializer (no verticle needed)
- * - All 7 ProxyGen services registered before verticles deploy
-
- * Features:
- * - Database initialization before verticle deployment
- * - Centralized verticle deployment via VerticleDeployer
- * - Graceful deployment failure cleanup
- * - Comprehensive shutdown handling
-
- * Communication: Event Bus driven with async messaging + ProxyGen services
+ * NMSLite Application - Main Entry Point
+ *
+ * <p>Initializes database, deploys 4 verticles (ServerVerticle, AvailabilityVerticle, PollingMetricsVerticle, DiscoveryVerticle),
+ * and registers 7 ProxyGen services for event bus communication.</p>
  */
 public class Bootstrap
 {
@@ -265,22 +251,6 @@ public class Bootstrap
 
     /**
      * Configure logging based on application configuration.
-
-     * Features:
-     * - Enable/disable logging globally
-     * - Set log level (TRACE, DEBUG, INFO, WARN, ERROR)
-     * - Enable/disable file logging
-     * - Enable/disable console logging
-     * - Configure log file path
-
-     * Configuration in application.conf:
-     * logging {
-     *   enabled = true                    # Enable/disable all logging
-     *   level = "INFO"                    # Log level
-     *   file.path = "logs/nmslite.log"   # Log file path
-     *   file.enabled = true               # Enable file logging
-     *   console.enabled = true            # Enable console logging
-     * }
      *
      * @return Future that completes when logging is configured successfully
      */

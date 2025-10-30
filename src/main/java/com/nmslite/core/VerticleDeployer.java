@@ -26,34 +26,9 @@ import java.util.List;
 
 /**
  * VerticleDeployer - Centralized Verticle Deployment Manager
-
- * Responsibilities:
- * - Deploy all application verticles in the correct sequence
- * - Track deployed verticle IDs for cleanup
- * - Provide easy verticle management (add/remove/reorder)
-
- * Architecture:
- * - Separates deployment logic from Bootstrap.java (Single Responsibility Principle)
- * - Uses simple list of verticle instances
- * - Single deployment method handles all verticles
- * - Easy to add/remove/reorder verticles by modifying the list
-
- * Usage:
- * <pre>
- * var deployer = new VerticleDeployer();
- * deployer.deployAll()
- *     .onSuccess(ids -> logger.info("Deployed {} verticles", ids.size()))
- *     .onFailure(cause -> logger.error("Deployment failed", cause));
- * </pre>
-
- * To add a new verticle:
- * 1. Add the verticle instance to the verticles list in constructor
-
- * To remove a verticle:
- * 1. Remove the verticle from the list
-
- * To change deployment order:
- * 1. Reorder the verticles in the list
+ *
+ * <p>Deploys all application verticles in sequence and tracks deployment IDs for cleanup.
+ * Verticles are deployed in the order defined in the constructor.</p>
  */
 public class VerticleDeployer
 {
@@ -66,23 +41,9 @@ public class VerticleDeployer
 
     /**
      * Creates a new VerticleDeployer instance.
-
-     * Verticle deployment order:
-     * 1. ServerVerticle - HTTP API server
-     * 2. AvailabilityVerticle - Device availability monitoring (10s cycle) - MUST deploy before PollingMetricsVerticle
-     * 3. PollingMetricsVerticle - Device metrics collection (60s cycle) - Depends on AvailabilityVerticle's shared cache
-     * 4. DiscoveryVerticle - Device discovery
-
-     * IMPORTANT: AvailabilityVerticle MUST be deployed BEFORE PollingMetricsVerticle because:
-     * - AvailabilityVerticle creates and populates the shared LocalMap "availability-cache"
-     * - PollingMetricsVerticle reads from this cache to check device availability before polling
-     * - If PollingMetricsVerticle deploys first, it will create an empty cache
-
-     * Note: All verticles access configuration via Bootstrap.getConfig() directly.
-
-     * To add a new verticle: Add the verticle instance to the list
-     * To remove a verticle: Remove the verticle from the list
-     * To reorder: Change the order of verticles in the list (respect dependencies!)
+     *
+     * <p>IMPORTANT: AvailabilityVerticle MUST be deployed BEFORE PollingMetricsVerticle
+     * because it creates the shared "availability-cache" LocalMap that PollingMetricsVerticle reads.</p>
      */
     public VerticleDeployer()
     {

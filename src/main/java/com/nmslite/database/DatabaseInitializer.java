@@ -173,7 +173,6 @@ public class DatabaseInitializer {
 
                         pgPool = pool;
 
-                        // Initialize DatabaseHelper after pool is ready
                         databaseHelper = new DatabaseHelper();
 
                         logger.info("DatabaseHelper initialized");
