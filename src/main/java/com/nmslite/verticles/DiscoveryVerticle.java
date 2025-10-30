@@ -50,6 +50,8 @@ import java.util.stream.Collectors;
 
 import java.util.ArrayList;
 
+import java.util.HashSet;
+
 /**
  * DiscoveryVerticle - Device Discovery Workflow
  
@@ -701,7 +703,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             // Extract all unique ports from credentials for connectivity checks
             var credentials = profileData.getJsonArray("credentials");
 
-            var uniquePorts = new java.util.HashSet<Integer>();
+            var uniquePorts = new HashSet<Integer>();
 
             for (var credObj : credentials)
             {
@@ -810,7 +812,7 @@ public class DiscoveryVerticle extends AbstractVerticle
 
             // Step 2: Check all unique ports for alive IPs
             // Track which IPs have at least one port open
-            var ipsWithOpenPorts = new java.util.HashSet<String>();
+            var ipsWithOpenPorts = new HashSet<String>();
 
             for (var port : ports)
             {
@@ -847,8 +849,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                 }
             }
 
-            logger.debug("Connectivity checks: {}/{} IPs reachable (checked {} unique ports)",
-                reachableIPs.size(), targetIps.size(), ports.size());
+            logger.debug("Connectivity checks: {}/{} IPs reachable (checked {} unique ports)", reachableIPs.size(), targetIps.size(), ports.size());
 
             return new JsonObject()
                 .put("reachable", reachableIPs)
@@ -859,9 +860,9 @@ public class DiscoveryVerticle extends AbstractVerticle
         {
             logger.error("Error in performConnectivityChecks: {}", exception.getMessage());
 
-            // Return all IPs as unreachable on error
             var unreachableIPs = new JsonArray();
 
+            // Return all IPs as unreachable on error
             targetIps.forEach(unreachableIPs::add);
 
             return new JsonObject()
@@ -1091,7 +1092,7 @@ public class DiscoveryVerticle extends AbstractVerticle
                 .put("timeout_seconds", timeoutSeconds)
                 .put("connection_timeout", connectionTimeoutSeconds);
 
-            // Create and return the discovery request (NEW FORMAT - no wrapper)
+            // Create and return the discovery request
             return new JsonObject()
                 .put("target_ips", targetIpArray)
                 .put("credentials", credentials)
