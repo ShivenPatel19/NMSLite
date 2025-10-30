@@ -48,6 +48,8 @@ import com.nmslite.core.ParallelBatchProcessor;
 
 import java.util.stream.Collectors;
 
+import java.util.ArrayList;
+
 /**
  * DiscoveryVerticle - Device Discovery Workflow
  
@@ -637,10 +639,6 @@ public class DiscoveryVerticle extends AbstractVerticle
                 return Future.succeededFuture(profileData.put("discovery_results", new JsonArray()));
             }
 
-            var totalTargets = newTargets.size();
-
-            logger.info("Starting parallel batch discovery for {} targets", totalTargets);
-
             // Convert JsonArray to List<String> for ParallelBatchProcessor
             var targetList = new ArrayList<String>();
 
@@ -718,7 +716,7 @@ public class DiscoveryVerticle extends AbstractVerticle
             }
 
             // Step 1: Perform connectivity checks on all unique ports
-            var connectivityResults = performConnectivityChecks(targetIps, new java.util.ArrayList<>(uniquePorts));
+            var connectivityResults = performConnectivityChecks(targetIps, new ArrayList<>(uniquePorts));
 
             var reachableIPs = connectivityResults.getJsonArray("reachable");
 
@@ -1261,14 +1259,14 @@ public class DiscoveryVerticle extends AbstractVerticle
             deviceService.deviceCreateFromDiscovery(deviceData)
                 .onSuccess(result ->
                 {
-                    // Publish event to notify PollingMetricsVerticle to add device to cache
+                    // Publish event to notify both AvailabilityVerticle and PollingMetricsVerticle
                     // Device is auto-provisioned (is_provisioned=true) after discovery
                     var deviceId = result.getString("device_id");
 
-                    vertx.eventBus().publish("device.provision.enabled", new JsonObject()
+                    vertx.eventBus().publish("device.created", new JsonObject()
                         .put("device_id", deviceId));
 
-                    logger.debug("Published device.provision.enabled event for discovered device: {}", deviceId);
+                    logger.debug("Published device.created event for discovered device: {}", deviceId);
 
                     // Return device info for response
                     promise.complete(new JsonObject()

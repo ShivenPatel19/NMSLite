@@ -413,6 +413,18 @@ public class PollingMetricsVerticle extends AbstractVerticle
         try
         {
             // Cache update consumers -> to persist up-to-date device data in cache
+
+            // New device created (from discovery) - ADD to cache
+            vertx.eventBus().consumer("device.created", msg ->
+            {
+                var data = (JsonObject) msg.body();
+
+                var deviceId = data.getString("device_id");
+
+                onDeviceProvisionEnabled(deviceId);
+            });
+
+            // Existing device provisioning enabled - ADD to cache
             vertx.eventBus().consumer("device.provision.enabled", msg ->
             {
                 var data = (JsonObject) msg.body();

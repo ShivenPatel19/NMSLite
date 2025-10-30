@@ -245,16 +245,16 @@ public class AvailabilityVerticle extends AbstractVerticle
     {
         try
         {
-            // Device provisioned (monitoring enabled) - ADD to cache
-            vertx.eventBus().consumer("device.provision.enabled", msg ->
+            // New device created (from discovery) - ADD to cache
+            vertx.eventBus().consumer("device.created", msg ->
             {
                 var data = (JsonObject) msg.body();
 
                 var deviceId = data.getString("device_id");
 
-                onDeviceProvisionEnabled(deviceId);
+                onDeviceCreated(deviceId);
             });
-            
+
             // Device deleted - REMOVE from cache
             vertx.eventBus().consumer("device.deleted", msg ->
             {
@@ -610,15 +610,15 @@ public class AvailabilityVerticle extends AbstractVerticle
     }
 
     /**
-     * Handle device provision enabled event.
+     * Handle device created event (new device from discovery).
      *
      * @param deviceId Device ID
      */
-    private void onDeviceProvisionEnabled(String deviceId)
+    private void onDeviceCreated(String deviceId)
     {
         try
         {
-            logger.info("Device provisioned: {}", deviceId);
+            logger.info("New device created: {}", deviceId);
 
             // Load device data and add to cache
             deviceService.deviceGetById(deviceId)
@@ -645,7 +645,7 @@ public class AvailabilityVerticle extends AbstractVerticle
         }
         catch (Exception exception)
         {
-            logger.error("Error in onDeviceProvisionEnabled: {}", exception.getMessage());
+            logger.error("Error in onDeviceCreated: {}", exception.getMessage());
         }
     }
 

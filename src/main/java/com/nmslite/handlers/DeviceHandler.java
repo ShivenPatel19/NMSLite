@@ -231,7 +231,7 @@ public class DeviceHandler
             deviceService.deviceEnableProvisioning(deviceId)
                 .onSuccess(result ->
                 {
-                    // Publish event to notify PollingMetricsVerticle to add device to cache
+                    // Publish event to notify PollingMetricsVerticle to add existing device to cache
                     vertx.eventBus().publish("device.provision.enabled", new JsonObject()
                         .put("device_id", deviceId));
 
